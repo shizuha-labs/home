@@ -78,19 +78,30 @@ Uses the same Tailwind configuration as other Shizuha services:
 
 ## Code Change Requirements
 
-For every major code change, you MUST:
+**CRITICAL: After any code changes, verification that the code is blunder-free and production-ready is MANDATORY. Test coverage must be optimal, including E2E tests using Playwright/Selenium.**
 
-### 1. E2E Testing (Required)
-- Write or update Playwright tests for home page functionality
+For every code change, you MUST:
+
+### 1. Code Verification (Required)
+- Verify code is blunder-free and production-ready
+- Check for security vulnerabilities
+- Ensure no regressions in existing functionality
+
+### 2. Testing (Required)
+- **Unit tests**: Test React components
+- **E2E tests**: Write or update Playwright tests for home page functionality
 - **NEVER run Playwright on the host machine** - always run inside containers
 - Test landing page, authenticated dashboard, app grid
 - Tests must pass before work is complete
 - Run from root: `docker compose -f docker-compose.test.yml up --abort-on-container-exit`
 
-### 2. Documentation Updates (Required)
+### 3. Documentation Updates (Required)
 - Update this file if routes or components change
 
 ### Checklist
+- [ ] Code verified as blunder-free and production-ready
+- [ ] Unit tests written/updated and passing
 - [ ] E2E tests written/updated and passing
+- [ ] Test coverage is optimal
 - [ ] Documentation updated
 - [ ] All commands run inside containers
