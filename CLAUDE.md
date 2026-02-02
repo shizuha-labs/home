@@ -1,108 +1,71 @@
 # CLAUDE.md - Shizuha Home
 
-This file provides guidance to Claude Code when working with the shizuha-home service.
+## Overview
 
-## Service Overview
+**Shizuha Home** is the landing page and dashboard for the Shizuha platform. It's a **frontend-only service** (no backend).
 
-**Shizuha Home** is the landing page and dashboard service for the Shizuha platform. It serves at the root path `/` and provides:
+| Setting | Value |
+|---------|-------|
+| URL Path | `/` (root) |
+| Frontend Port | 5180 |
+| Type | React SPA (no backend) |
 
-- **Unauthenticated users**: Marketing landing page with product showcase
-- **Authenticated users**: Personalized dashboard with app grid
+## Access
+
+| URL | Description |
+|-----|-------------|
+| `http://localhost:8080/` | Landing page (unauthenticated) |
+| `http://localhost:8080/` | Dashboard with app grid (authenticated) |
+
+## Features
+
+- **Unauthenticated**: Marketing landing page with product showcase
+- **Authenticated**: Personalized dashboard with app grid linking to all services
 
 ## Architecture
 
-This is a **frontend-only service** - no backend/API required.
-
-### Key Files
-
 ```
 shizuha-home/
-├── frontend/
-│   ├── src/
-│   │   ├── App.jsx              # Router with conditional rendering
-│   │   ├── contexts/AuthContext.jsx  # Read-only auth state
-│   │   ├── hooks/useTheme.jsx   # Dark mode support
-│   │   ├── components/          # UI components
-│   │   └── pages/               # LandingPage, HomePage
-│   ├── vite.config.js           # Port 5180
-│   └── package.json
+└── frontend/
+    ├── src/
+    │   ├── App.jsx                 # Router with conditional rendering
+    │   ├── contexts/AuthContext.jsx # Read-only auth state
+    │   ├── pages/
+    │   │   ├── LandingPage.jsx     # Marketing page
+    │   │   └── HomePage.jsx        # Authenticated dashboard
+    │   └── components/             # Shared UI components
+    └── vite.config.js              # Port 5180
 ```
 
-### Auth Pattern
+## Auth Pattern
 
 This service uses **read-only auth** - it only checks localStorage for existing tokens:
 - `shizuha_access_token` - JWT access token
 - `shizuha_user` - Cached user data
 
-Login/logout is handled by shizuha-id at `/id/login` and `/id/logout`.
+Login/logout handled by shizuha-id at `/id/login` and `/id/logout`.
 
-## Development
+## Commands
 
-### Run locally
+All development commands run from the `compose/` directory using the master docker-compose.yaml:
+
 ```bash
-cd shizuha-home/frontend
-npm install
-npm run dev
-```
-Runs on http://localhost:5180
+# Start service
+cd compose && docker compose up -d shizuha-home
 
-### Build Docker image
-```bash
-docker build -t shizuha-home-frontend ./shizuha-home/frontend
-```
+# View logs
+cd compose && docker compose logs -f shizuha-home
 
-### Import to K3s
-```bash
-docker save shizuha-home-frontend:latest | sudo k3s ctr images import -
+# Production (K3s) - DO NOT USE DURING DEVELOPMENT
+helm upgrade --install shizuha-home deploy/k3s/charts/shizuha-home \
+  -f deploy/k3s/charts/shizuha-home/values.yaml \
+  -f deploy/k3s/charts/shizuha-home/values-local.yaml
 ```
 
 ## Tech Stack
 
 - React 18 + Vite 5
-- Tailwind CSS (shared brand theme)
+- Tailwind CSS
 - React Router DOM
-- Lucide React icons
 
-## Routes
-
-| Path | Auth Required | Component |
-|------|---------------|-----------|
-| `/` | No | LandingPage or HomePage (conditional) |
-
-## Styling
-
-Uses the same Tailwind configuration as other Shizuha services:
-- Brand colors (indigo palette)
-- Dark mode via `class` strategy
-- Component classes: `.btn`, `.btn-primary`, `.card`, etc.
-
-## Code Change Requirements
-
-**CRITICAL: After any code changes, verification that the code is blunder-free and production-ready is MANDATORY. Test coverage must be optimal, including E2E tests using Playwright/Selenium.**
-
-For every code change, you MUST:
-
-### 1. Code Verification (Required)
-- Verify code is blunder-free and production-ready
-- Check for security vulnerabilities
-- Ensure no regressions in existing functionality
-
-### 2. Testing (Required)
-- **Unit tests**: Test React components
-- **E2E tests**: Write or update Playwright tests for home page functionality
-- **NEVER run Playwright on the host machine** - always run inside containers
-- Test landing page, authenticated dashboard, app grid
-- Tests must pass before work is complete
-- Run from root: `docker compose -f docker-compose.test.yml up --abort-on-container-exit`
-- Feel free to create admin users/tokens for testing purposes if required
-
-### 3. Documentation Updates (Required)
-- Update this file if routes or components change
-
-### Checklist
-- [ ] Code verified as blunder-free and production-ready
-- [ ] Unit tests written/updated and passing
-- [ ] E2E tests written/updated and passing
-- [ ] Test coverage is optimal
-- [ ] Documentation updated
-- [ ] All commands run inside containers
+Also reference [../CLAUDE.md](../CLAUDE.md) for platform-wide rules.
