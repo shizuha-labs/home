@@ -14,6 +14,8 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
   getAuthToken,
   sourceService,
   sourceUrl,
+  agentId,
+  executionMethod,
   position = 'bottom-right',
   theme = 'light',
   buttonIcon,
@@ -34,6 +36,8 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
       getAuthToken={getAuthToken}
       sourceService={sourceService}
       sourceUrl={sourceUrl}
+      agentId={agentId}
+      executionMethod={executionMethod}
       persistSession={persistSession}
       defaultOpen={defaultOpen}
       onSessionStart={onSessionStart}

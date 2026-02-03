@@ -30,6 +30,13 @@ export interface MCPCall {
   output?: string
 }
 
+export interface ChatAgent {
+  id: string
+  name: string
+  avatarUrl?: string | null
+  roleName?: string
+}
+
 export interface ChatSession {
   id: string
   userId: string
@@ -43,6 +50,8 @@ export interface ChatSession {
   createdAt: string
   lastActivity: string
   expiresAt?: string
+  /** Agent associated with this session */
+  agent?: ChatAgent | null
 }
 
 export interface ChatWidgetProps {
@@ -57,6 +66,12 @@ export interface ChatWidgetProps {
 
   /** Current page URL (optional) */
   sourceUrl?: string
+
+  /** Specific agent ID to use for chat (optional - defaults to personal assistant) */
+  agentId?: string
+
+  /** Execution method to use (optional - defaults to agent's configured method) */
+  executionMethod?: string
 
   /** Position of the chat button */
   position?: 'bottom-right' | 'bottom-left'
@@ -143,6 +158,8 @@ export interface UseChatSessionOptions {
   getAuthToken: () => string | Promise<string>
   sourceService: string
   sourceUrl?: string
+  agentId?: string
+  executionMethod?: string
   persistSession?: boolean
   onSessionStart?: (sessionId: string) => void
   onMessage?: (message: ChatMessage) => void
@@ -154,6 +171,8 @@ export interface UseStreamingMessageOptions {
   getAuthToken: () => string | Promise<string>
   sessionId: string | null
   sourceService: string
+  agentId?: string
+  executionMethod?: string
   onContent?: (delta: string) => void
   onToolStart?: (tool: string, input: Record<string, unknown>) => void
   onToolComplete?: (tool: string, durationMs: number) => void

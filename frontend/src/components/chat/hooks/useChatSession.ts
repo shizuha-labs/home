@@ -13,6 +13,8 @@ export function useChatSession(options: UseChatSessionOptions) {
     getAuthToken,
     sourceService,
     sourceUrl,
+    agentId,
+    executionMethod,
     persistSession = true,
     onSessionStart,
     onMessage,
@@ -104,6 +106,8 @@ export function useChatSession(options: UseChatSessionOptions) {
         body: JSON.stringify({
           source_service: sourceService,
           source_url: sourceUrl,
+          agent_id: agentId,
+          execution_method: executionMethod,
         }),
       })
 
@@ -125,6 +129,12 @@ export function useChatSession(options: UseChatSessionOptions) {
         createdAt: data.created_at,
         lastActivity: data.last_activity,
         expiresAt: data.expires_at,
+        agent: data.agent ? {
+          id: data.agent.id,
+          name: data.agent.name,
+          avatarUrl: data.agent.avatar_url,
+          roleName: data.agent.role_name,
+        } : null,
       }
 
       setSession(newSession)
@@ -138,7 +148,7 @@ export function useChatSession(options: UseChatSessionOptions) {
       onError?.(error)
       throw error
     }
-  }, [apiBaseUrl, getHeaders, sourceService, sourceUrl, onSessionStart, onError])
+  }, [apiBaseUrl, getHeaders, sourceService, sourceUrl, agentId, executionMethod, onSessionStart, onError])
 
   const sendMessage = useCallback(
     async (content: string) => {
@@ -165,6 +175,8 @@ export function useChatSession(options: UseChatSessionOptions) {
             content,
             source_service: sourceService,
             source_url: sourceUrl,
+            agent_id: agentId,
+            execution_method: executionMethod,
           }),
         })
 
@@ -188,6 +200,8 @@ export function useChatSession(options: UseChatSessionOptions) {
             messageCount: 2,
             createdAt: new Date().toISOString(),
             lastActivity: new Date().toISOString(),
+            // Note: Agent info will be populated when session is properly loaded
+            agent: null,
           })
           onSessionStart?.(data.session_id)
         }
@@ -231,6 +245,8 @@ export function useChatSession(options: UseChatSessionOptions) {
       getHeaders,
       sourceService,
       sourceUrl,
+      agentId,
+      executionMethod,
       onSessionStart,
       onMessage,
       onError,

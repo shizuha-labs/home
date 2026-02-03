@@ -2,8 +2,8 @@
  * React Context for Chat Widget state management
  */
 
-import React, { createContext, useContext, useState, useCallback, useEffect, useMemo } from 'react'
-import type { ChatContextValue, ChatMessage, ChatSession, ChatWidgetProps } from '../types'
+import React, { createContext, useContext, useState, useCallback, useMemo } from 'react'
+import type { ChatContextValue, ChatWidgetProps } from '../types'
 import { useChatSession } from '../hooks/useChatSession'
 import { useStreamingMessage } from '../hooks/useStreamingMessage'
 
@@ -23,6 +23,8 @@ interface ChatProviderProps extends Pick<
   | 'getAuthToken'
   | 'sourceService'
   | 'sourceUrl'
+  | 'agentId'
+  | 'executionMethod'
   | 'persistSession'
   | 'defaultOpen'
   | 'onSessionStart'
@@ -38,6 +40,8 @@ export function ChatProvider({
   getAuthToken,
   sourceService,
   sourceUrl,
+  agentId,
+  executionMethod,
   persistSession = true,
   defaultOpen = false,
   onSessionStart,
@@ -59,6 +63,8 @@ export function ChatProvider({
     getAuthToken,
     sourceService,
     sourceUrl,
+    agentId,
+    executionMethod,
     persistSession,
     onSessionStart,
     onMessage,
@@ -67,15 +73,17 @@ export function ChatProvider({
 
   const {
     isStreaming,
-    streamingContent,
-    activeTools,
-    sendStreamingMessage,
+    streamingContent: _streamingContent,
+    activeTools: _activeTools,
+    sendStreamingMessage: _sendStreamingMessage,
     cancelStream,
   } = useStreamingMessage({
     apiBaseUrl,
     getAuthToken,
     sessionId: session?.id || null,
     sourceService,
+    agentId,
+    executionMethod,
     onComplete: (message) => {
       onMessage?.(message)
     },
