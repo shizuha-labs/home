@@ -1,4 +1,4 @@
-import { KeyRound, Layers, Zap } from 'lucide-react'
+import { KeyRound, Layers, Zap, Bot } from 'lucide-react'
 import { cn } from '../utils/cn'
 
 const FEATURES = [
@@ -11,18 +11,26 @@ const FEATURES = [
     bgColor: 'bg-brand-100 dark:bg-brand-900/50',
   },
   {
-    icon: Layers,
-    title: 'Unified Experience',
+    icon: Bot,
+    title: 'AI-Powered Agents',
     description:
-      'Consistent design language and navigation across all apps. Switch between tools without losing context.',
+      'Intelligent agents work across all apps - automate tasks, generate reports, and handle routine work so you can focus on what matters.',
+    color: 'text-pink-600 dark:text-pink-400',
+    bgColor: 'bg-pink-100 dark:bg-pink-900/50',
+  },
+  {
+    icon: Layers,
+    title: 'Tight Integration',
+    description:
+      'Apps that truly work together. Create a task from an email, link docs to projects, track time on tasks - all seamlessly connected.',
     color: 'text-emerald-600 dark:text-emerald-400',
     bgColor: 'bg-emerald-100 dark:bg-emerald-900/50',
   },
   {
     icon: Zap,
-    title: 'Cross-App Integration',
+    title: 'Cross-App Workflows',
     description:
-      'Link tasks to documents, embed notes in wikis, and connect your workflow across the entire platform.',
+      'Build powerful automations that span multiple apps. When a task completes, update the wiki, notify the team, and log the time.',
     color: 'text-amber-600 dark:text-amber-400',
     bgColor: 'bg-amber-100 dark:bg-amber-900/50',
   },
@@ -43,7 +51,7 @@ export default function FeatureSection() {
         </div>
 
         {/* Features grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
           {FEATURES.map((feature, index) => (
             <div
               key={feature.title}

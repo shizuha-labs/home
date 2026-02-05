@@ -38,6 +38,12 @@ export default defineConfig({
 
     // Video recording
     video: 'on-first-retry',
+
+    // Per-action timeout (15 seconds)
+    actionTimeout: 15000,
+
+    // Navigation timeout
+    navigationTimeout: 30000,
   },
 
   // Configure projects for major browsers
@@ -59,6 +65,9 @@ export default defineConfig({
 
   // Global timeout for each test
   timeout: 60000,
+
+  // Global timeout for entire test run (10 minutes max)
+  globalTimeout: 10 * 60 * 1000,
 
   // Expect timeout
   expect: {

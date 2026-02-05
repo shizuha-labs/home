@@ -7,9 +7,17 @@ import {
   Cloud,
   UserCircle,
   Building2,
+  HardDrive,
+  Users,
+  Wallet,
+  Calculator,
+  UserCog,
+  Clock,
+  Bot,
   ArrowRight,
 } from 'lucide-react'
 import { cn } from '../utils/cn'
+import { SHIZUHA_APPS } from '@shizuha/ui'
 
 const ICON_MAP = {
   HeartPulse,
@@ -20,75 +28,17 @@ const ICON_MAP = {
   Cloud,
   UserCircle,
   Building2,
+  HardDrive,
+  Users,
+  Wallet,
+  Calculator,
+  UserCog,
+  Clock,
+  Bot,
 }
 
-// Apps available to authenticated users
-const APPS = [
-  {
-    id: 'pulse',
-    name: 'Pulse',
-    description: 'Tasks & Projects',
-    path: '/pulse/',
-    icon: 'HeartPulse',
-    bgColor: 'bg-indigo-500',
-  },
-  {
-    id: 'notes',
-    name: 'Notes',
-    description: 'Personal Notes',
-    path: '/notes/',
-    icon: 'StickyNote',
-    bgColor: 'bg-sky-500',
-  },
-  {
-    id: 'wiki',
-    name: 'Wiki',
-    description: 'Team Docs',
-    path: '/wiki/',
-    icon: 'BookOpen',
-    bgColor: 'bg-emerald-500',
-  },
-  {
-    id: 'mail',
-    name: 'Mail',
-    description: 'Email',
-    path: '/mail/',
-    icon: 'Mail',
-    bgColor: 'bg-rose-500',
-  },
-  {
-    id: 'inventory',
-    name: 'Inventory',
-    description: 'Asset Tracking',
-    path: '/inventory/',
-    icon: 'Package',
-    bgColor: 'bg-amber-500',
-  },
-  {
-    id: 'scs',
-    name: 'Cloud',
-    description: 'Infrastructure',
-    path: '/scs/',
-    icon: 'Cloud',
-    bgColor: 'bg-purple-500',
-  },
-  {
-    id: 'admin',
-    name: 'Admin',
-    description: 'Organization & HR',
-    path: '/admin/',
-    icon: 'Building2',
-    bgColor: 'bg-teal-500',
-  },
-  {
-    id: 'account',
-    name: 'Account',
-    description: 'Profile & Settings',
-    path: '/id/account',
-    icon: 'UserCircle',
-    bgColor: 'bg-gray-500',
-  },
-]
+// Get all apps from the shared registry
+const APPS = SHIZUHA_APPS
 
 function AppCard({ app }) {
   const IconComponent = ICON_MAP[app.icon]

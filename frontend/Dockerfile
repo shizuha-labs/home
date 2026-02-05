@@ -3,9 +3,12 @@ FROM node:20-alpine
 
 WORKDIR /app
 
+# Create packages directory for shared dependencies
+RUN mkdir -p /packages
+
 # Install dependencies
 COPY package*.json ./
-RUN npm install
+RUN npm install --ignore-scripts || true
 
 # Copy source code
 COPY . .
