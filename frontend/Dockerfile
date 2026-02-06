@@ -14,7 +14,7 @@ RUN npm install --ignore-scripts || true
 COPY . .
 
 # Expose Vite dev server port
-EXPOSE 5180
+EXPOSE 80
 
 # Start development server
 CMD ["npm", "run", "dev"]
