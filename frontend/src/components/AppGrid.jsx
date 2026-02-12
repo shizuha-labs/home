@@ -17,7 +17,7 @@ import {
   ArrowRight,
 } from 'lucide-react'
 import { cn } from '../utils/cn'
-import { SHIZUHA_APPS } from '@shizuha/ui'
+import { SHIZUHA_APPS, useEnabledServices } from '@shizuha/ui'
 
 const ICON_MAP = {
   HeartPulse,
@@ -37,8 +37,8 @@ const ICON_MAP = {
   Bot,
 }
 
-// Get all apps from the shared registry
-const APPS = SHIZUHA_APPS
+// Services that are always visible in the app grid
+const ALWAYS_VISIBLE = new Set(['admin', 'id'])
 
 function AppCard({ app }) {
   const IconComponent = ICON_MAP[app.icon]
@@ -84,9 +84,15 @@ function AppCard({ app }) {
 }
 
 export default function AppGrid() {
+  const enabledServices = useEnabledServices()
+
+  const visibleApps = enabledServices
+    ? SHIZUHA_APPS.filter(app => ALWAYS_VISIBLE.has(app.id) || enabledServices.includes(app.id))
+    : SHIZUHA_APPS
+
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 animate-stagger">
-      {APPS.map((app) => (
+      {visibleApps.map((app) => (
         <AppCard key={app.id} app={app} />
       ))}
     </div>
