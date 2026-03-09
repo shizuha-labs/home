@@ -9,25 +9,43 @@ const PLATFORMS = [
     id: 'macos',
     label: 'macOS',
     prompt: '$',
-    cmd: 'curl -fsSL http://s1.tail.shizuha.com/install.sh | bash',
+    cmd: 'curl -fsSL https://shizuha.com/install.sh | bash',
   },
   {
     id: 'linux',
     label: 'Linux',
     prompt: '$',
-    cmd: 'curl -fsSL http://s1.tail.shizuha.com/install.sh | bash',
+    cmd: 'curl -fsSL https://shizuha.com/install.sh | bash',
   },
   {
     id: 'windows',
     label: 'Windows',
     prompt: '>',
-    cmd: 'irm http://s1.tail.shizuha.com/install.ps1 | iex',
+    cmd: 'irm https://shizuha.com/install.ps1 | iex',
+  },
+  {
+    id: 'android',
+    label: 'Android',
+    prompt: '$',
+    cmd: 'curl -fsSL https://shizuha.com/install.sh | bash',
+    note: {
+      title: 'Requires Termux',
+      steps: [
+        'Install F-Droid from f-droid.org',
+        'Open F-Droid → search "Termux" → install',
+        'Run: termux-change-repo (pick a fast mirror nearby)',
+        'Run: pkg update && pkg install curl nodejs',
+        'Then run the command above',
+      ],
+      warning: 'Do not use the Play Store version — it is outdated. Use F-Droid or GitHub releases.',
+    },
   },
 ]
 
 function detectPlatform() {
   if (typeof navigator === 'undefined') return 'linux'
   const ua = navigator.userAgent.toLowerCase()
+  if (ua.includes('android')) return 'android'
   if (ua.includes('win')) return 'windows'
   if (ua.includes('mac')) return 'macos'
   return 'linux'
@@ -38,8 +56,19 @@ function detectPlatform() {
 function CopyButton({ text }) {
   const [copied, setCopied] = useState(false)
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(text)
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch {
+      // Fallback for non-HTTPS contexts
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.cssText = 'position:fixed;left:-9999px'
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+    }
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
@@ -99,6 +128,20 @@ function InstallCommand() {
         <span className="text-green-400">{platform.prompt}</span>{' '}
         <span className="text-gray-300">{platform.cmd}</span>
       </div>
+      {/* Platform-specific note */}
+      {platform.note && (
+        <div className="px-4 pb-4 text-left border-t border-gray-800">
+          <p className="text-xs font-semibold text-yellow-400 mt-3 mb-2">{platform.note.title}</p>
+          <ol className="text-xs text-gray-400 space-y-1 list-decimal list-inside">
+            {platform.note.steps.map((step, i) => (
+              <li key={i}>{step}</li>
+            ))}
+          </ol>
+          {platform.note.warning && (
+            <p className="text-xs text-red-400/80 mt-2">{platform.note.warning}</p>
+          )}
+        </div>
+      )}
     </div>
   )
 }

@@ -8,8 +8,18 @@ import Footer from '../components/Footer'
 
 function CodeBlock({ code, lang = 'bash', title }) {
   const [copied, setCopied] = useState(false)
-  const copy = () => {
-    navigator.clipboard.writeText(code)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(code)
+    } catch {
+      const ta = document.createElement('textarea')
+      ta.value = code
+      ta.style.cssText = 'position:fixed;left:-9999px'
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+    }
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
@@ -176,22 +186,31 @@ export default function DocsPage() {
             {/* ── Installation ── */}
             <Section id="installation" title="Installation">
               <P>Install the Shizuha runtime with a single command:</P>
+
+              <H3>macOS / Linux</H3>
               <CodeBlock
                 title="Terminal"
-                code="curl -fsSL http://s1.tail.shizuha.com/install.sh | bash"
+                code="curl -fsSL https://shizuha.com/install.sh | bash"
               />
-              <P>This downloads the CLI, MCP servers, and all dependencies to <InlineCode>~/.shizuha</InlineCode> and
-                adds <InlineCode>shizuha</InlineCode> to your PATH via <InlineCode>~/.local/bin</InlineCode>.</P>
 
-              <H3>Requirements</H3>
+              <H3>Windows (PowerShell)</H3>
+              <CodeBlock
+                title="PowerShell"
+                code="irm https://shizuha.com/install.ps1 | iex"
+              />
+
+              <P>This downloads a self-contained binary (Node.js bundled), starts the daemon, and opens the dashboard at <InlineCode>http://localhost:8015</InlineCode>. No dependencies required.</P>
+
+              <H3>Supported platforms</H3>
               <ul className="list-disc pl-6 space-y-1 text-gray-600 dark:text-gray-400 text-sm">
-                <li><strong>Node.js 20+</strong> (required)</li>
+                <li><strong>Linux</strong> — x64, arm64 (systemd, sysvinit, Docker, Termux)</li>
+                <li><strong>macOS</strong> — x64 (Intel), arm64 (Apple Silicon)</li>
+                <li><strong>Windows</strong> — x64, arm64 (native or WSL)</li>
                 <li><strong>Python 3.10+</strong> (optional, for MCP servers)</li>
-                <li><strong>Linux or macOS</strong> (Windows via WSL)</li>
               </ul>
 
               <H3>Verify installation</H3>
-              <CodeBlock code={`shizuha --version\nshizuha auth status`} />
+              <CodeBlock code={`shizuha --version`} />
 
               <H3>Manual installation</H3>
               <P>If you prefer to install manually:</P>
@@ -200,9 +219,7 @@ export default function DocsPage() {
 
             {/* ── Quick Start ── */}
             <Section id="quickstart" title="Quick Start">
-              <P>One command installs, starts the daemon, and opens the dashboard:</P>
-
-              <CodeBlock code="curl -fsSL http://s1.tail.shizuha.com/install.sh | bash" />
+              <P>The install script handles everything — installs, starts the daemon, opens the dashboard. That's it.</P>
               <P>Dashboard is at <InlineCode>http://localhost:8015</InlineCode>. The daemon auto-starts on boot and restarts on crash.</P>
 
               <H3>Authenticate (optional)</H3>
@@ -1063,7 +1080,7 @@ DELETE /v1/providers/codex/accounts/:email        # Remove account`} />
               <Callout type="info">
                 Methodology: Best-of-k across 24 evaluation runs with gpt-5.3-codex (xhigh reasoning, autonomous mode,
                 45-min timeout per instance). Public leaderboard scores are typically pass@1.
-                See <a href="http://s1.tail.shizuha.com/benchmarks" className="link" target="_blank" rel="noopener noreferrer">full benchmark details</a> for transparency notes.
+                See <a href="https://shizuha.com/benchmarks" className="link" target="_blank" rel="noopener noreferrer">full benchmark details</a> for transparency notes.
               </Callout>
             </Section>
 

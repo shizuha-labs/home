@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Shizuha Runtime Installer
-# Usage: curl -fsSL http://s1.tail.shizuha.com/install.sh | bash
+# Usage: curl -fsSL https://shizuha.com/install.sh | bash
 #
 # Downloads a self-contained binary for your platform.
 # No system dependencies required (Node.js is bundled).
@@ -8,7 +8,7 @@ set -euo pipefail
 
 SHIZUHA_DIR="${SHIZUHA_DIR:-$HOME/.shizuha}"
 BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
-SHIZUHA_HOST="${SHIZUHA_HOST:-http://s1.tail.shizuha.com}"
+SHIZUHA_HOST="${SHIZUHA_HOST:-https://shizuha.com}"
 VERSION="${SHIZUHA_VERSION:-0.1.0}"
 
 # ── Colors ───────────────────────────────────────────────────────────────
@@ -38,8 +38,14 @@ printf "${RESET}\n"
 # ── Detect platform ─────────────────────────────────────────────────────
 step "Detecting platform..."
 
-OS="$(/usr/bin/uname -s)"
-ARCH="$(/usr/bin/uname -m)"
+OS="$(uname -s)"
+ARCH="$(uname -m)"
+
+# Detect Termux (Android) — uses system Node instead of bundled binary
+IS_TERMUX=false
+if [ -n "${TERMUX_VERSION:-}" ] || [ -d "/data/data/com.termux" ]; then
+  IS_TERMUX=true
+fi
 
 case "$OS" in
   Linux)  PLATFORM="linux" ;;
@@ -69,7 +75,26 @@ case "$ARCH" in
 esac
 
 TARGET="${PLATFORM}-${ARCH_NAME}"
-ok "Platform: ${TARGET}"
+
+if [ "$IS_TERMUX" = true ]; then
+  ok "Platform: ${TARGET} (Termux)"
+  # Termux can't run standard Linux binaries (different linker).
+  # We need the system Node.js from Termux packages instead.
+  if ! command -v node &>/dev/null; then
+    info "Installing Node.js via pkg (this may take a minute)..."
+    if ! pkg install -y nodejs; then
+      err "Failed to install Node.js. Run manually: pkg install nodejs"
+      exit 1
+    fi
+  fi
+  if ! command -v node &>/dev/null; then
+    err "Node.js not found after install. Run: pkg install nodejs"
+    exit 1
+  fi
+  ok "Node.js $(node --version) ready"
+else
+  ok "Platform: ${TARGET}"
+fi
 
 # ── Check for existing installation ─────────────────────────────────────
 
@@ -86,7 +111,8 @@ fi
 step "Downloading Shizuha Runtime v${VERSION}..."
 
 ARCHIVE_NAME="shizuha-${VERSION}-${TARGET}.tar.gz"
-DOWNLOAD_URL="${SHIZUHA_HOST}/rt/releases/${ARCHIVE_NAME}"
+GITHUB_REPO="shizuha-labs/shizuha-rt"
+DOWNLOAD_URL="https://github.com/${GITHUB_REPO}/releases/download/v${VERSION}/${ARCHIVE_NAME}"
 
 TMPDIR_DL="$(mktemp -d)"
 trap "rm -rf '$TMPDIR_DL'" EXIT
@@ -98,9 +124,7 @@ if ! curl -fSL --progress-bar "$DOWNLOAD_URL" -o "$TMPDIR_DL/$ARCHIVE_NAME"; the
   err "This platform (${TARGET}) may not have a prebuilt binary yet."
   err "Available platforms: linux-x64, linux-arm64, darwin-x64, darwin-arm64"
   err ""
-  err "Build from source:"
-  err "  git clone https://github.com/shizuha-trading/shizuha.git"
-  err "  cd shizuha && npm install && npm run build"
+  err "Check https://github.com/shizuha-labs/shizuha-rt for updates."
   exit 1
 fi
 
@@ -121,8 +145,14 @@ fi
 # ── Self-install ─────────────────────────────────────────────────────────
 # Delegate to the bundled install script (like `claude install`)
 
+PATH_ADDED=false
 if [ -x "$EXTRACTED_DIR/install" ]; then
   SHIZUHA_DIR="$SHIZUHA_DIR" BIN_DIR="$BIN_DIR" "$EXTRACTED_DIR/install"
+  # Bundled installer may have added BIN_DIR to rc file but not this shell
+  if ! echo "$PATH" | tr ':' '\n' | grep -q "^$BIN_DIR$"; then
+    export PATH="$BIN_DIR:$PATH"
+    PATH_ADDED=true
+  fi
 else
   # Fallback: manual copy
   mkdir -p "$SHIZUHA_DIR"
@@ -135,6 +165,7 @@ exec "$SHIZUHA_DIR/bin/shizuha" "\$@"
 WRAPPER
   chmod +x "$BIN_DIR/shizuha"
 
+  PATH_ADDED=false
   if ! echo "$PATH" | tr ':' '\n' | grep -q "^$BIN_DIR$"; then
     SHELL_NAME=$(basename "${SHELL:-bash}")
     case "$SHELL_NAME" in
@@ -148,8 +179,62 @@ WRAPPER
     else
       echo "export PATH=\"$BIN_DIR:\$PATH\"" >> "$RC_FILE"
     fi
+    # Make shizuha available for the rest of THIS script
+    export PATH="$BIN_DIR:$PATH"
+    PATH_ADDED=true
     warn "Added $BIN_DIR to PATH in $RC_FILE"
   fi
+fi
+
+# ── Termux fixup ──────────────────────────────────────────────────────
+# Standard Linux binaries won't run on Termux (different linker/libc).
+# Replace the bundled node wrapper and rebuild native modules.
+if [ "$IS_TERMUX" = true ]; then
+  info "Configuring for Termux (using system Node.js)..."
+
+  # Overwrite the internal wrapper to use system node instead of bundled
+  cat > "$SHIZUHA_DIR/bin/shizuha" << TERMUX_WRAPPER
+#!/usr/bin/env bash
+SHIZUHA_ROOT="\$(cd "\$(dirname "\$0")/.." && pwd)"
+exec node "\$SHIZUHA_ROOT/lib/shizuha.js" "\$@"
+TERMUX_WRAPPER
+  chmod +x "$SHIZUHA_DIR/bin/shizuha"
+
+  # Remove the bundled node binary (won't work on Termux)
+  rm -f "$SHIZUHA_DIR/bin/node"
+
+  # Rebuild native modules (better-sqlite3, tiktoken) for Termux.
+  # The bundled .node files were compiled against glibc but Termux uses Bionic.
+  info "Installing build tools for native modules..."
+  pkg install -y build-essential python3 libsqlite
+
+  # Rebuild native modules for Termux's Bionic libc.
+  # better-sqlite3's binding.gyp expects android_ndk_path on Android —
+  # point it at Termux's $PREFIX which has the headers and libs.
+  info "Rebuilding native modules (this may take a few minutes)..."
+
+  # Node.js's common.gypi references <(android_ndk_path) on Android (OS=="android").
+  # Termux doesn't have an NDK — patch the cached common.gypi to provide a default.
+  COMMON_GYPI="$HOME/.cache/node-gyp/$(node -v | tr -d v)/include/node/common.gypi"
+  if [ -f "$COMMON_GYPI" ] && grep -q "android_ndk_path" "$COMMON_GYPI"; then
+    info "  Patching node-gyp for Termux (android_ndk_path)..."
+    sed -i "s|<(android_ndk_path)|$PREFIX|g" "$COMMON_GYPI"
+  fi
+
+  SQLITE3_DIR="$SHIZUHA_DIR/lib/node_modules/better-sqlite3"
+  if [ -d "$SQLITE3_DIR" ]; then
+    info "  Compiling better-sqlite3..."
+    (cd "$SQLITE3_DIR" && npx node-gyp rebuild --release) || {
+      warn "  better-sqlite3 build failed — SQLite features may not work."
+    }
+  fi
+
+  # tiktoken: try rebuild (may have prebuilt NAPI binary)
+  (cd "$SHIZUHA_DIR/lib" && npm rebuild tiktoken 2>/dev/null) || true
+
+  ok "Native modules ready"
+
+  ok "Termux configuration complete"
 fi
 
 # Cleanup
@@ -203,19 +288,29 @@ printf "\n"
 
 if [ "$DAEMON_STARTED" = true ]; then
   printf "  ${BOLD}${GREEN}Daemon is running.${RESET}\n"
-  printf "\n"
   printf "  ${BOLD}Dashboard:${RESET}  ${CYAN}http://localhost:8015${RESET}\n"
-  printf "  ${BOLD}Stop:${RESET}       ${CYAN}shizuha down${RESET}\n"
-  printf "  ${BOLD}Logs:${RESET}       ${CYAN}tail -f ~/.shizuha/daemon.log${RESET}\n"
-else
-  printf "  ${BOLD}To start manually:${RESET}\n"
-  printf "     ${CYAN}shizuha up${RESET}\n"
+  printf "  ${BOLD}Login:${RESET}      ${CYAN}shizuha${RESET} / ${CYAN}shizuha${RESET}  ${DIM}(change in Settings)${RESET}\n"
+  printf "\n"
 fi
 
-printf "\n"
-printf "  ${DIM}Use directly:${RESET}\n"
+printf "  ${DIM}Commands:${RESET}\n"
 printf "     ${CYAN}shizuha${RESET}                        # Interactive TUI\n"
 printf "     ${CYAN}shizuha exec -p \"hello\"${RESET}        # Single prompt\n"
+printf "     ${CYAN}shizuha up${RESET}                      # Start daemon + dashboard\n"
+printf "     ${CYAN}shizuha down${RESET}                    # Stop daemon\n"
 printf "\n"
-printf "  ${DIM}Docs: http://s1.tail.shizuha.com/docs${RESET}\n"
-printf "\n"
+
+# Show source command LAST — it's the most important action the user needs to take
+if [ "$PATH_ADDED" = true ]; then
+  SHELL_NAME=$(basename "${SHELL:-bash}")
+  case "$SHELL_NAME" in
+    zsh)  RC_FILE="$HOME/.zshrc" ;;
+    bash) RC_FILE="$HOME/.bashrc" ;;
+    fish) RC_FILE="$HOME/.config/fish/config.fish" ;;
+    *)    RC_FILE="$HOME/.profile" ;;
+  esac
+  printf "  ${BOLD}${YELLOW}>>> Run this command to activate shizuha: ${RESET}\n"
+  printf "\n"
+  printf "     ${BOLD}${CYAN}source ${RC_FILE}${RESET}\n"
+  printf "\n"
+fi
