@@ -37,10 +37,10 @@ export default function BenchmarksPage() {
               <Trophy className="w-4 h-4" />
               #1 on SWE-bench Verified
             </div>
-            <h1 className="text-4xl sm:text-5xl font-bold text-gray-900 dark:text-white mb-4">
+            <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold text-gray-900 dark:text-white mb-4">
               Benchmark Results
             </h1>
-            <p className="text-lg text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
+            <p className="text-base sm:text-lg text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
               Shizuha Agent achieves <span className="font-semibold text-gray-900 dark:text-white">87.0%</span> on
               SWE-bench Verified — resolving 435 out of 500 real-world GitHub issues.
             </p>
@@ -71,54 +71,56 @@ export default function BenchmarksPage() {
               <BarChart3 className="w-6 h-6 text-brand-600 dark:text-brand-400" />
               Leaderboard Comparison
             </h2>
-            <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 overflow-hidden">
-              <table className="w-full">
-                <thead>
-                  <tr className="bg-gray-50 dark:bg-gray-800/50">
-                    <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Rank</th>
-                    <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Agent / Model</th>
-                    <th className="text-right px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Score</th>
-                    <th className="text-right px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Bar</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
-                  {LEADERBOARD.map((entry) => (
-                    <tr
-                      key={entry.rank}
-                      className={entry.highlight
-                        ? 'bg-brand-50/50 dark:bg-brand-950/30'
-                        : 'hover:bg-gray-50 dark:hover:bg-gray-800/30'}
-                    >
-                      <td className="px-6 py-4 text-sm font-medium text-gray-500 dark:text-gray-400">
-                        {entry.rank === 1 ? <span className="text-brand-600 dark:text-brand-400 font-bold">#1</span> : `#${entry.rank}`}
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className={`text-sm font-medium ${entry.highlight ? 'text-brand-700 dark:text-brand-300' : 'text-gray-900 dark:text-white'}`}>
-                          {entry.agent}
-                        </span>
-                        {entry.note && (
-                          <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-brand-100 dark:bg-brand-900/50 text-brand-600 dark:text-brand-400">
-                            {entry.note}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <span className={`text-sm font-bold ${entry.highlight ? 'text-brand-700 dark:text-brand-300' : 'text-gray-900 dark:text-white'}`}>
-                          {entry.score.toFixed(1)}%
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 w-48">
-                        <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5">
-                          <div
-                            className={`h-2.5 rounded-full ${entry.highlight ? 'bg-brand-600' : 'bg-gray-400 dark:bg-gray-500'}`}
-                            style={{ width: `${entry.score}%` }}
-                          />
-                        </div>
-                      </td>
+            <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 overflow-hidden -mx-4 sm:mx-0">
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[360px]">
+                  <thead>
+                    <tr className="bg-gray-50 dark:bg-gray-800/50">
+                      <th className="text-left px-3 sm:px-6 py-2.5 sm:py-3 text-[10px] sm:text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Rank</th>
+                      <th className="text-left px-3 sm:px-6 py-2.5 sm:py-3 text-[10px] sm:text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Agent / Model</th>
+                      <th className="text-right px-3 sm:px-6 py-2.5 sm:py-3 text-[10px] sm:text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Score</th>
+                      <th className="text-right px-3 sm:px-6 py-2.5 sm:py-3 text-[10px] sm:text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider hidden sm:table-cell">Bar</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
+                    {LEADERBOARD.map((entry) => (
+                      <tr
+                        key={entry.rank}
+                        className={entry.highlight
+                          ? 'bg-brand-50/50 dark:bg-brand-950/30'
+                          : 'hover:bg-gray-50 dark:hover:bg-gray-800/30'}
+                      >
+                        <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-medium text-gray-500 dark:text-gray-400">
+                          {entry.rank === 1 ? <span className="text-brand-600 dark:text-brand-400 font-bold">#1</span> : `#${entry.rank}`}
+                        </td>
+                        <td className="px-3 sm:px-6 py-3 sm:py-4">
+                          <span className={`text-xs sm:text-sm font-medium ${entry.highlight ? 'text-brand-700 dark:text-brand-300' : 'text-gray-900 dark:text-white'}`}>
+                            {entry.agent}
+                          </span>
+                          {entry.note && (
+                            <span className="ml-1.5 sm:ml-2 text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 rounded-full bg-brand-100 dark:bg-brand-900/50 text-brand-600 dark:text-brand-400">
+                              {entry.note}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 sm:px-6 py-3 sm:py-4 text-right">
+                          <span className={`text-xs sm:text-sm font-bold ${entry.highlight ? 'text-brand-700 dark:text-brand-300' : 'text-gray-900 dark:text-white'}`}>
+                            {entry.score.toFixed(1)}%
+                          </span>
+                        </td>
+                        <td className="px-3 sm:px-6 py-3 sm:py-4 w-32 sm:w-48 hidden sm:table-cell">
+                          <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5">
+                            <div
+                              className={`h-2.5 rounded-full ${entry.highlight ? 'bg-brand-600' : 'bg-gray-400 dark:bg-gray-500'}`}
+                              style={{ width: `${entry.score}%` }}
+                            />
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-3">
               Public leaderboard scores sourced from{' '}
@@ -138,7 +140,7 @@ export default function BenchmarksPage() {
             <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 overflow-hidden">
               <dl className="divide-y divide-gray-200 dark:divide-gray-800">
                 {METHODOLOGY.map((item) => (
-                  <div key={item.label} className="px-6 py-4 sm:grid sm:grid-cols-3 sm:gap-4">
+                  <div key={item.label} className="px-4 sm:px-6 py-3 sm:py-4 sm:grid sm:grid-cols-3 sm:gap-4">
                     <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">{item.label}</dt>
                     <dd className="mt-1 sm:mt-0 sm:col-span-2 text-sm text-gray-900 dark:text-white">{item.value}</dd>
                   </div>

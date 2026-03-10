@@ -97,20 +97,20 @@ function InstallCommand() {
   return (
     <div className="rounded-xl bg-gray-900 dark:bg-black border border-gray-700 dark:border-gray-800 overflow-hidden shadow-2xl">
       {/* Tab bar + traffic lights */}
-      <div className="flex items-center justify-between px-4 py-2.5 bg-gray-800 dark:bg-gray-900 border-b border-gray-700 dark:border-gray-800">
-        <div className="flex items-center gap-3">
-          <div className="flex gap-1.5">
+      <div className="flex items-center justify-between px-3 sm:px-4 py-2.5 bg-gray-800 dark:bg-gray-900 border-b border-gray-700 dark:border-gray-800">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <div className="hidden sm:flex gap-1.5 flex-shrink-0">
             <div className="w-3 h-3 rounded-full bg-red-500/80" />
             <div className="w-3 h-3 rounded-full bg-yellow-500/80" />
             <div className="w-3 h-3 rounded-full bg-green-500/80" />
           </div>
           {/* Platform tabs */}
-          <div className="flex gap-0.5 ml-2">
+          <div className="flex gap-0.5">
             {PLATFORMS.map((p) => (
               <button
                 key={p.id}
                 onClick={() => setActive(p.id)}
-                className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                className={`px-2 sm:px-3 py-1 text-[11px] sm:text-xs font-medium rounded-md transition-colors ${
                   active === p.id
                     ? 'bg-gray-700 dark:bg-gray-800 text-white'
                     : 'text-gray-500 hover:text-gray-300 hover:bg-gray-700/50'
@@ -124,21 +124,21 @@ function InstallCommand() {
         <CopyButton text={platform.cmd} />
       </div>
       {/* Command */}
-      <div className="px-4 py-4 font-mono text-sm sm:text-base text-left">
-        <span className="text-green-400">{platform.prompt}</span>{' '}
-        <span className="text-gray-300">{platform.cmd}</span>
+      <div className="px-3 sm:px-4 py-4 font-mono text-xs sm:text-base text-left overflow-x-auto">
+        <span className="text-green-400 whitespace-nowrap">{platform.prompt}</span>{' '}
+        <span className="text-gray-300 whitespace-nowrap">{platform.cmd}</span>
       </div>
       {/* Platform-specific note */}
       {platform.note && (
-        <div className="px-4 pb-4 text-left border-t border-gray-800">
+        <div className="px-3 sm:px-4 pb-4 text-left border-t border-gray-800">
           <p className="text-xs font-semibold text-yellow-400 mt-3 mb-2">{platform.note.title}</p>
-          <ol className="text-xs text-gray-400 space-y-1 list-decimal list-inside">
+          <ol className="text-[11px] sm:text-xs text-gray-400 space-y-1 list-decimal list-inside">
             {platform.note.steps.map((step, i) => (
-              <li key={i}>{step}</li>
+              <li key={i} className="leading-relaxed">{step}</li>
             ))}
           </ol>
           {platform.note.warning && (
-            <p className="text-xs text-red-400/80 mt-2">{platform.note.warning}</p>
+            <p className="text-[11px] sm:text-xs text-red-400/80 mt-2 leading-relaxed">{platform.note.warning}</p>
           )}
         </div>
       )}

@@ -93,11 +93,11 @@ export default function AgentCapabilities() {
         </div>
 
         {/* Capabilities grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mb-20">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-8 mb-20">
           {CAPABILITIES.map((cap, index) => (
             <div
               key={cap.title}
-              className="p-8 rounded-2xl bg-gray-50 dark:bg-gray-800/50 animate-fade-in-up"
+              className="p-5 sm:p-8 rounded-2xl bg-gray-50 dark:bg-gray-800/50 animate-fade-in-up"
               style={{ animationDelay: `${index * 80}ms` }}
             >
               <div className={cn('w-12 h-12 rounded-xl flex items-center justify-center mb-6', cap.bgColor)}>
@@ -128,7 +128,7 @@ export default function AgentCapabilities() {
                 <div className="flex items-center justify-between px-4 py-2 bg-gray-800 dark:bg-gray-900 border-b border-gray-700/50">
                   <span className="text-xs text-gray-400 font-mono">{example.label}</span>
                 </div>
-                <div className="px-4 py-3 font-mono text-sm text-gray-300 overflow-x-auto">
+                <div className="px-3 sm:px-4 py-3 font-mono text-[11px] sm:text-sm text-gray-300 overflow-x-auto">
                   <span className="text-green-400">$</span> {example.prompt}
                 </div>
               </div>

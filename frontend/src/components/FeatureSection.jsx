@@ -51,12 +51,12 @@ export default function FeatureSection() {
         </div>
 
         {/* Features grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-8">
           {FEATURES.map((feature, index) => (
             <div
               key={feature.title}
               className={cn(
-                'p-8 rounded-2xl bg-gray-50 dark:bg-gray-800/50',
+                'p-5 sm:p-8 rounded-2xl bg-gray-50 dark:bg-gray-800/50',
                 'animate-fade-in-up'
               )}
               style={{ animationDelay: `${index * 100}ms` }}
