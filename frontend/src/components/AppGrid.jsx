@@ -16,6 +16,7 @@ import {
   Bot,
   TrendingUp,
   MessageCircle,
+  ShoppingBag,
   LayoutGrid,
   ArrowRight,
 } from 'lucide-react'
@@ -40,6 +41,7 @@ const ICON_MAP = {
   Bot,
   TrendingUp,
   MessageCircle,
+  ShoppingBag,
 }
 
 // Services that are always visible in the app grid
