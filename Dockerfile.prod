@@ -22,13 +22,16 @@ ARG FRONTEND_PATH=shizuha-home
 
 # Copy shared packages first (for vite.shared.js)
 COPY packages/shizuha-ui /packages/shizuha-ui
+COPY packages/shizuha-chat /packages/shizuha-chat
 
 # Install shared package dependencies (needed for build)
 RUN cd /packages/shizuha-ui && npm install --omit=dev
+RUN cd /packages/shizuha-chat && npm install --omit=dev
 
 # Install dependencies first (better caching)
 # Note: shizuha-home has frontend/ subdirectory
-COPY ${FRONTEND_PATH}/frontend/package*.json ./
+# Use only package.json (not package-lock.json) to avoid lock file path resolution issues
+COPY ${FRONTEND_PATH}/frontend/package.json ./
 RUN npm install
 
 # Copy source from frontend subdirectory
