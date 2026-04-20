@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import { ConnectChatProvider, ChatLayout, MessageList, MessageInput, Avatar, useConnectChat } from '@shizuha/chat'
+import { ConnectChatProvider, ChatLayout, MessageList, MessageInput, Avatar, NewChatModal, useConnectChat } from '@shizuha/chat'
 import { SHIZUHA_APPS, useEnabledServices } from '@shizuha/ui'
 
 const ACCESS_TOKEN_KEY = 'shizuha_access_token'
@@ -87,7 +87,25 @@ function ChatHomeInner() {
   const [inputValue, setInputValue] = useState('')
   const [isSending, setIsSending] = useState(false)
   const [showApps, setShowApps] = useState(false)
+  const [showNewChat, setShowNewChat] = useState(false)
+  const [pendingRequestCount, setPendingRequestCount] = useState(0)
   const textareaRef = useRef(null)
+
+  // Fetch pending connection requests count
+  useEffect(() => {
+    (async () => {
+      try {
+        const token = getAuthToken()
+        const res = await fetch('/connect/api/connections/requests/', {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        if (res.ok) {
+          const data = await res.json()
+          setPendingRequestCount(Array.isArray(data) ? data.length : 0)
+        }
+      } catch { /* ignore */ }
+    })()
+  }, [])
 
   // Sync URL param to active conversation
   useEffect(() => {
@@ -169,6 +187,15 @@ function ChatHomeInner() {
     sendToShizuha(prompt)
   }, [sendToShizuha])
 
+  const handleNewChatUser = useCallback(async (userId, details) => {
+    const conv = await createDirectConversation(userId, details)
+    if (conv) {
+      setActiveConversation(conv.id)
+      navigate(`/c/${conv.id}`)
+      setShowNewChat(false)
+    }
+  }, [createDirectConversation, setActiveConversation, navigate])
+
   const handleNavigateConversation = useCallback((id) => {
     if (id) navigate(`/c/${id}`, { replace: true })
     else navigate('/', { replace: true })
@@ -192,20 +219,37 @@ function ChatHomeInner() {
     })()
 
     return (
+      <>
       <div className="flex h-full">
         {/* Same branded sidebar */}
         <div className="hidden md:flex md:w-72 lg:w-80 flex-shrink-0 flex-col bg-gray-50/80 dark:bg-gray-900/50 border-r border-gray-200/60 dark:border-gray-800/60">
           <div className="flex items-center justify-between px-4 py-3">
             <span className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Conversations</span>
-            <button
-              onClick={() => navigate('/')}
-              className="p-1.5 rounded-lg text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950/30 transition-colors"
-              title="Home"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
-              </svg>
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setShowNewChat(true)}
+                className="relative p-1.5 rounded-lg text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950/30 transition-colors"
+                title="New chat"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                {pendingRequestCount > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[0.875rem] h-3.5 px-1 flex items-center justify-center rounded-full bg-red-500 text-white text-[9px] font-bold">
+                    {pendingRequestCount}
+                  </span>
+                )}
+              </button>
+              <button
+                onClick={() => { navigate('/'); setActiveConversation(null) }}
+                className="p-1.5 rounded-lg text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950/30 transition-colors"
+                title="Home"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
+                </svg>
+              </button>
+            </div>
           </div>
           <div className="flex-1 overflow-y-auto px-2">
             {conversations.map((conv) => {
@@ -295,6 +339,15 @@ function ChatHomeInner() {
           />
         </div>
       </div>
+      <NewChatModal
+        isOpen={showNewChat}
+        onClose={() => setShowNewChat(false)}
+        onSelectUser={handleNewChatUser}
+        apiBase="/connect/api"
+        getAuthToken={getAuthToken}
+        currentUserId={user?.id}
+      />
+      </>
     )
   }
 
@@ -305,13 +358,18 @@ function ChatHomeInner() {
         <div className="flex items-center justify-between px-4 py-3">
           <span className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Conversations</span>
           <button
-            onClick={() => navigate('/c')}
-            className="p-1.5 rounded-lg text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950/30 transition-colors"
-            title="All conversations"
+            onClick={() => setShowNewChat(true)}
+            className="relative p-1.5 rounded-lg text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950/30 transition-colors"
+            title="New chat / Connect requests"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
+            {pendingRequestCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 min-w-[0.875rem] h-3.5 px-1 flex items-center justify-center rounded-full bg-red-500 text-white text-[9px] font-bold">
+                {pendingRequestCount}
+              </span>
+            )}
           </button>
         </div>
         <div className="flex-1 overflow-y-auto px-2">
@@ -439,6 +497,16 @@ function ChatHomeInner() {
           </p>
         </div>
       </div>
+
+      {/* New chat / connect requests modal */}
+      <NewChatModal
+        isOpen={showNewChat}
+        onClose={() => setShowNewChat(false)}
+        onSelectUser={handleNewChatUser}
+        apiBase="/connect/api"
+        getAuthToken={getAuthToken}
+        currentUserId={user?.id}
+      />
 
       {/* Apps drawer */}
       <AppsDrawer isOpen={showApps} onClose={() => setShowApps(false)} />

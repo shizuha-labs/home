@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './contexts/AuthContext'
 import { AppSwitcher, useEnabledServices } from '@shizuha/ui'
+import NotificationBell from './components/NotificationBell'
 import LandingPage from './pages/LandingPage'
 import ChatHome from './pages/ChatHome'
 import DocsPage from './pages/DocsPage'
@@ -39,6 +40,7 @@ function Home() {
           <div className="flex items-center gap-1">
             <a href="/docs" className="px-3 py-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800">Docs</a>
             <a href="/benchmarks" className="px-3 py-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 hidden sm:block">Benchmarks</a>
+            <NotificationBell />
             <a href="/id/account" className="px-3 py-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800">Account</a>
             <a href="/id/logout" className="px-3 py-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800">Sign out</a>
           </div>
