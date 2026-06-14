@@ -51,7 +51,7 @@ export default function Footer() {
 
           {/* Copyright */}
           <p className="text-sm text-gray-500 dark:text-gray-500">
-            {currentYear} Shizuha Trading LLP. All rights reserved.
+            {currentYear} Shizuha Global Pvt. Ltd. All rights reserved.
           </p>
         </div>
       </div>
