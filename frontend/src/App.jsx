@@ -6,6 +6,7 @@ import LandingPage from './pages/LandingPage'
 import ChatHome from './pages/ChatHome'
 import DocsPage from './pages/DocsPage'
 import BenchmarksPage from './pages/BenchmarksPage'
+import HivePage from './pages/HivePage'
 
 function LoadingSpinner() {
   return (
@@ -75,6 +76,7 @@ export default function App() {
       <Route path="/c/:conversationId" element={<AuthGuard><Home /></AuthGuard>} />
       <Route path="/docs" element={<DocsPage />} />
       <Route path="/benchmarks" element={<BenchmarksPage />} />
+      <Route path="/hive" element={<HivePage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
