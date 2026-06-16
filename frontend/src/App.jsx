@@ -7,6 +7,9 @@ import ChatHome from './pages/ChatHome'
 import DocsPage from './pages/DocsPage'
 import BenchmarksPage from './pages/BenchmarksPage'
 import ForgePage from './pages/ForgePage'
+import HivePage from './pages/HivePage'
+import ResearchPage from './pages/ResearchPage'
+import ResearchOrderPage from './pages/ResearchOrderPage'
 
 function LoadingSpinner() {
   return (
@@ -77,6 +80,9 @@ export default function App() {
       <Route path="/docs" element={<DocsPage />} />
       <Route path="/benchmarks" element={<BenchmarksPage />} />
       <Route path="/forge" element={<ForgePage />} />
+      <Route path="/hive" element={<HivePage />} />
+      <Route path="/research" element={<ResearchPage />} />
+      <Route path="/research/order" element={<ResearchOrderPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
