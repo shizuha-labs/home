@@ -6,6 +6,7 @@ import LandingPage from './pages/LandingPage'
 import ChatHome from './pages/ChatHome'
 import DocsPage from './pages/DocsPage'
 import BenchmarksPage from './pages/BenchmarksPage'
+import ForgePage from './pages/ForgePage'
 import HivePage from './pages/HivePage'
 import ResearchPage from './pages/ResearchPage'
 import ResearchOrderPage from './pages/ResearchOrderPage'
@@ -78,6 +79,7 @@ export default function App() {
       <Route path="/c/:conversationId" element={<AuthGuard><Home /></AuthGuard>} />
       <Route path="/docs" element={<DocsPage />} />
       <Route path="/benchmarks" element={<BenchmarksPage />} />
+      <Route path="/forge" element={<ForgePage />} />
       <Route path="/hive" element={<HivePage />} />
       <Route path="/research" element={<ResearchPage />} />
       <Route path="/research/order" element={<ResearchOrderPage />} />
