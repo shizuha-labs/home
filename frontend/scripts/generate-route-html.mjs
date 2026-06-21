@@ -1,0 +1,53 @@
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const distDir = join(__dirname, '..', 'dist')
+const indexPath = join(distDir, 'index.html')
+
+const escapeAttr = (value) =>
+  String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+
+const routes = [
+  {
+    output: 'research/index.html',
+    title: 'AI Search Visibility Audit — Shizuha Research',
+    description:
+      'Draft Research-as-a-Service offer: audit how an organization appears in AI search and answer engines, with evidence-based recommendations and no ranking guarantees.',
+  },
+  {
+    output: 'research/order/index.html',
+    title: 'Request a Research or AI-Search Audit — Shizuha',
+    description:
+      'Submit intent for a Shizuha research report or AI-search visibility audit. No payment is collected on this page and outcomes are not guaranteed.',
+  },
+]
+
+const replaceTag = (html, pattern, replacement) => {
+  if (!pattern.test(html)) {
+    throw new Error(`route metadata generation failed: pattern ${pattern} not found`)
+  }
+  return html.replace(pattern, replacement)
+}
+
+const baseHtml = await readFile(indexPath, 'utf8')
+
+for (const route of routes) {
+  const title = escapeAttr(route.title)
+  const description = escapeAttr(route.description)
+  let html = baseHtml
+
+  html = replaceTag(html, /<title>[^<]*<\/title>/, `<title>${title}</title>`)
+  html = replaceTag(html, /<meta name="description" content="[^"]*"\s*\/>/, `<meta name="description" content="${description}" />`)
+  html = replaceTag(html, /<meta property="og:title" content="[^"]*"\s*\/>/, `<meta property="og:title" content="${title}" />`)
+  html = replaceTag(html, /<meta property="og:description" content="[^"]*"\s*\/>/, `<meta property="og:description" content="${description}" />`)
+
+  const outputPath = join(distDir, route.output)
+  await mkdir(dirname(outputPath), { recursive: true })
+  await writeFile(outputPath, html)
+}
