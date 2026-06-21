@@ -1,6 +1,9 @@
-import { ExternalLink, FileText, ArrowRight } from 'lucide-react'
+import { useEffect } from 'react'
+import { ExternalLink, FileText, ArrowRight, SearchCheck, ShieldCheck, MousePointerClick } from 'lucide-react'
 import Navbar from '../components/Navbar'
 import Footer from '../components/Footer'
+import { setPageMeta } from '../utils/pageMeta'
+import { trackResearchEvent } from '../utils/analytics'
 
 const REPORTS = [
   {
@@ -27,6 +30,16 @@ const REPORTS = [
 ]
 
 export default function ResearchPage() {
+  useEffect(() => {
+    setPageMeta({
+      title: 'AI Search Visibility Audit — Shizuha Research',
+      description: 'Draft Research-as-a-Service offer: audit how an organization appears in AI search and answer engines, with evidence-based recommendations and no ranking guarantees.',
+    })
+    trackResearchEvent('research_offer_view', { offer: 'ai_search_visibility_audit', route: '/research' })
+  }, [])
+
+  const trackClick = (name, payload = {}) => trackResearchEvent(name, { offer: 'ai_search_visibility_audit', ...payload })
+
   return (
     <div className="min-h-screen flex flex-col bg-white dark:bg-gray-950">
       <Navbar />
@@ -48,12 +61,65 @@ export default function ResearchPage() {
             </p>
 
             <a
-              href="/research/order"
+              href="/research/order?offer=ai-search-audit"
+              onClick={() => trackClick('research_order_start', { source: 'hero_cta' })}
               className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-semibold transition-colors shadow-md shadow-violet-500/20"
             >
-              Order a Custom Report — $49
+              Request an AI-search audit
               <ArrowRight className="w-4 h-4" />
             </a>
+          </div>
+        </section>
+
+
+        {/* AI-search/GEO audit offer */}
+        <section className="px-4 sm:px-6 lg:px-8 pb-14">
+          <div className="max-w-4xl mx-auto rounded-3xl border border-violet-200 dark:border-violet-800 bg-violet-50/70 dark:bg-violet-950/30 p-6 sm:p-8">
+            <div className="flex flex-col lg:flex-row gap-8">
+              <div className="flex-1">
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white dark:bg-gray-900 text-violet-700 dark:text-violet-300 text-sm font-medium mb-4 border border-violet-200 dark:border-violet-800">
+                  <SearchCheck className="w-4 h-4" />
+                  Draft offer · AI-search / GEO audit
+                </div>
+                <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white mb-3">
+                  Find out how AI answer engines describe your company.
+                </h2>
+                <p className="text-gray-600 dark:text-gray-300 leading-relaxed mb-5">
+                  We review visible public pages, answer-engine snippets, citation candidates, and gaps that may stop AI systems from understanding your positioning. The output is an evidence-first audit and prioritized content fixes — not a promise of rankings, citations, or inclusion.
+                </p>
+                <div className="grid sm:grid-cols-3 gap-3 text-sm text-gray-600 dark:text-gray-300">
+                  <div className="rounded-xl bg-white dark:bg-gray-900 p-4 border border-violet-100 dark:border-violet-900">
+                    <MousePointerClick className="w-5 h-5 text-violet-500 mb-2" />
+                    Intent capture only — no payment now
+                  </div>
+                  <div className="rounded-xl bg-white dark:bg-gray-900 p-4 border border-violet-100 dark:border-violet-900">
+                    <FileText className="w-5 h-5 text-violet-500 mb-2" />
+                    Sample audit scope + gap list
+                  </div>
+                  <div className="rounded-xl bg-white dark:bg-gray-900 p-4 border border-violet-100 dark:border-violet-900">
+                    <ShieldCheck className="w-5 h-5 text-violet-500 mb-2" />
+                    No guaranteed SEO/GEO outcomes
+                  </div>
+                </div>
+              </div>
+              <div className="lg:w-64 flex flex-col justify-center">
+                <a
+                  href="/research/order?offer=ai-search-audit"
+                  onClick={() => trackClick('research_order_start', { source: 'audit_card' })}
+                  className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-semibold transition-colors shadow-md shadow-violet-500/20"
+                >
+                  Start audit request
+                  <ArrowRight className="w-4 h-4" />
+                </a>
+                <button
+                  type="button"
+                  onClick={() => trackClick('research_sample_click', { source: 'audit_card' })}
+                  className="mt-3 text-sm text-violet-700 dark:text-violet-300 hover:underline"
+                >
+                  Track sample audit interest
+                </button>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -102,6 +168,7 @@ export default function ResearchPage() {
             </p>
             <a
               href="/research/order"
+              onClick={() => trackClick('research_order_start', { source: 'bottom_cta', offer: 'custom_report' })}
               className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-white text-violet-700 font-semibold hover:bg-violet-50 transition-colors shadow-md"
             >
               Order a Custom Report

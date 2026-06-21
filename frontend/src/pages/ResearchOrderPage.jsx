@@ -1,26 +1,51 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { CheckCircle, Clock, FileSearch, Shield } from 'lucide-react'
 import Navbar from '../components/Navbar'
 import Footer from '../components/Footer'
+import { setPageMeta } from '../utils/pageMeta'
+import { trackResearchEvent } from '../utils/analytics'
 
 const GUARANTEES = [
-  { icon: Clock, text: 'Order confirmed within 2 hours' },
-  { icon: FileSearch, text: 'Report delivered in 24 hours' },
-  { icon: Shield, text: 'Adversarially verified — no vendor fluff' },
+  { icon: Clock, text: 'Intent reviewed within 2 hours' },
+  { icon: FileSearch, text: 'Audit/report scope confirmed before invoicing' },
+  { icon: Shield, text: 'Evidence-first — no ranking or citation guarantees' },
+]
+
+const OFFER_TYPES = [
+  { value: 'ai-search-audit', label: 'AI-search visibility audit (draft offer)' },
+  { value: 'custom-research-report', label: 'Custom research report' },
+  { value: 'other', label: 'Other research request' },
 ]
 
 export default function ResearchOrderPage() {
-  const [form, setForm] = useState({ name: '', email: '', topic: '' })
+  const initialOffer = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('offer') === 'ai-search-audit'
+    ? 'ai-search-audit'
+    : 'custom-research-report'
+  const [form, setForm] = useState({ name: '', email: '', offerType: initialOffer, topic: '' })
   const [status, setStatus] = useState('idle') // idle | submitting | success | error
   const [errorMsg, setErrorMsg] = useState('')
 
+  useEffect(() => {
+    setPageMeta({
+      title: 'Request a Research or AI-Search Audit — Shizuha',
+      description: 'Submit intent for a Shizuha research report or AI-search visibility audit. No payment is collected on this page and outcomes are not guaranteed.',
+    })
+    trackResearchEvent('research_order_view', { offer: form.offerType, route: '/research/order' })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const handleChange = (e) => {
-    setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }))
+    const { name, value } = e.target
+    setForm((prev) => ({ ...prev, [name]: value }))
+    if (name === 'offerType') {
+      trackResearchEvent('research_offer_select', { offer: value })
+    }
   }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!form.name || !form.email || !form.topic) return
+    trackResearchEvent('research_order_submit', { offer: form.offerType })
 
     setStatus('submitting')
     setErrorMsg('')
@@ -32,7 +57,7 @@ export default function ResearchOrderPage() {
         body: JSON.stringify({
           name: form.name.trim(),
           email: form.email.trim().toLowerCase(),
-          topic: form.topic.trim(),
+          topic: `Request type: ${OFFER_TYPES.find((offer) => offer.value === form.offerType)?.label || form.offerType}\n\n${form.topic.trim()}`,
         }),
       })
 
@@ -92,10 +117,10 @@ export default function ResearchOrderPage() {
                     <span>per report</span>
                   </div>
                   <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-4">
-                    Order a Custom Research Report
+                    Request Research or an AI-Search Audit
                   </h1>
                   <p className="text-gray-500 dark:text-gray-400 text-lg">
-                    Tell us your research question. Our multi-agent harness — 100+ agents, adversarial claim verification — delivers a deep-research report on your topic in 24 hours.
+                    Tell us what you want to learn. Choose the draft AI-search visibility audit to capture intent, or request a custom research report. No payment is collected here and we do not guarantee rankings, citations, AI answer inclusion, or SEO/GEO outcomes.
                   </p>
 
                   <div className="flex flex-col sm:flex-row gap-4 mt-6">
@@ -109,6 +134,23 @@ export default function ResearchOrderPage() {
                 </div>
 
                 <form onSubmit={handleSubmit} className="space-y-5">
+                  <div>
+                    <label htmlFor="offerType" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Request type
+                    </label>
+                    <select
+                      id="offerType"
+                      name="offerType"
+                      value={form.offerType}
+                      onChange={handleChange}
+                      className="w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent transition"
+                    >
+                      {OFFER_TYPES.map((offer) => (
+                        <option key={offer.value} value={offer.value}>{offer.label}</option>
+                      ))}
+                    </select>
+                  </div>
+
                   <div>
                     <label htmlFor="name" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                       Your name
@@ -143,7 +185,7 @@ export default function ResearchOrderPage() {
 
                   <div>
                     <label htmlFor="topic" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      Research question or topic
+                      Research question, company, or audit target
                     </label>
                     <textarea
                       id="topic"
@@ -152,7 +194,7 @@ export default function ResearchOrderPage() {
                       rows={5}
                       value={form.topic}
                       onChange={handleChange}
-                      placeholder="e.g. What are the leading open-source vector database options in 2026 — comparing Qdrant, Weaviate, and Milvus on production throughput, managed vs. self-hosted trade-offs, and pricing at scale?"
+                      placeholder="e.g. Audit how Acme Robotics appears in ChatGPT/Perplexity/Gemini answers for industrial robotics procurement, or compare vector databases for a production RAG system."
                       className="w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent transition resize-none"
                     />
                     <p className="mt-1 text-xs text-gray-400">
@@ -169,11 +211,11 @@ export default function ResearchOrderPage() {
                     disabled={status === 'submitting'}
                     className="w-full py-3.5 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold text-lg transition-colors shadow-md shadow-violet-500/20"
                   >
-                    {status === 'submitting' ? 'Submitting…' : 'Order Report — $49'}
+                    {status === 'submitting' ? 'Submitting…' : 'Submit intent — no payment now'}
                   </button>
 
                   <p className="text-xs text-center text-gray-400 dark:text-gray-500">
-                    No payment now. We'll send an invoice after confirming your order.
+                    No payment now. We'll confirm scope first; AI-search visibility and SEO/GEO outcomes are not guaranteed.
                   </p>
                 </form>
               </>
