@@ -216,8 +216,18 @@ export default function Hero() {
         </div>
 
         {/* What does this do? */}
-        <div className="max-w-2xl mx-auto mb-8 animate-fade-in-up" style={{ animationDelay: '180ms' }}>
+        <div className="max-w-2xl mx-auto mb-3 animate-fade-in-up" style={{ animationDelay: '180ms' }}>
           <QuickStartSteps />
+        </div>
+
+        {/* Next steps → full agent-access guide (install + API key + first run) */}
+        <div className="max-w-2xl mx-auto mb-8 text-center text-sm animate-fade-in-up" style={{ animationDelay: '190ms' }}>
+          <a
+            href="/wiki/spaces/HELP/pages/install-use-the-shizuha-agent"
+            className="text-brand-600 dark:text-brand-400 hover:underline font-medium"
+          >
+            New here? Get your API key &amp; run your first agent →
+          </a>
         </div>
 
         {/* CTAs */}
