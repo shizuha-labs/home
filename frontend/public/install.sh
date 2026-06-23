@@ -454,7 +454,7 @@ fi
 
 printf "  ${DIM}Commands:${RESET}\n"
 printf "     ${CYAN}shizuha${RESET}                        # Interactive TUI\n"
-printf "     ${CYAN}shizuha exec -p \"hello\" --model cortex/GLM-5.1${RESET}  # Single prompt\n"
+printf "     ${CYAN}shizuha exec -p \"hello\" --model cortex/Qwen3.6-27B${RESET}  # Single prompt\n"
 printf "     ${CYAN}shizuha up${RESET}                      # Start daemon + dashboard\n"
 printf "     ${CYAN}shizuha down${RESET}                    # Stop daemon\n"
 printf "\n"
