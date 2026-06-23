@@ -32,6 +32,27 @@ $Arch = if ([System.Environment]::Is64BitOperatingSystem) {
 $Target = "win-$Arch"
 Write-Host "  Platform: $Target" -ForegroundColor Green
 
+# ── Windows → use WSL ─────────────────────────────────────────────────
+# The Shizuha agent needs a Unix shell for its built-in tools (bash, grep,
+# file ops), so the supported Windows path is WSL (a real Linux environment).
+# Native .exe packaging would give a degraded agent, so we don't ship one.
+Write-Host ""
+Write-Host "  Windows is supported through WSL (Windows Subsystem for Linux)." -ForegroundColor Yellow
+Write-Host "  This gives you a real Linux environment where the agent runs fully." -ForegroundColor White
+Write-Host ""
+Write-Host "  1) Install WSL (once), from an Admin PowerShell:" -ForegroundColor White
+Write-Host "       wsl --install" -ForegroundColor Cyan
+Write-Host "     ...then reboot and open 'Ubuntu' from the Start menu." -ForegroundColor DarkGray
+Write-Host ""
+Write-Host "  2) Inside Ubuntu (WSL), install Shizuha:" -ForegroundColor White
+Write-Host "       curl -fsSL https://shizuha.com/install.sh | bash" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "  Already have WSL? Just run step 2 inside your Ubuntu shell." -ForegroundColor DarkGray
+Write-Host "  Guide: https://shizuha.com/wiki/spaces/HELP/pages/install-use-the-shizuha-agent" -ForegroundColor DarkGray
+Write-Host ""
+exit 0
+# ──────────────────────────────────────────────────────────────────────
+
 # ── Check for existing installation ───────────────────────────────────
 
 if (Test-Path "$ShizuhaDir\VERSION") {
