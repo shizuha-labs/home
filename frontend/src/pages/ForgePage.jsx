@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Navbar from '../components/Navbar'
 import Footer from '../components/Footer'
 
@@ -9,6 +9,37 @@ const CODE_SNIPPET = `curl -X POST https://shizuha.com/api/forge/generate \\
   -H "X-API-Key: $FORGE_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{"prompt": "a red fox in snow, golden hour, photorealistic"}'`
+
+function campaignSource() {
+  if (typeof window === 'undefined') return ''
+  const params = new URLSearchParams(window.location.search)
+  return params.get('utm_source') || params.get('source') || ''
+}
+
+function trackForge(eventType, extra = {}) {
+  if (typeof navigator === 'undefined') return
+  const payload = JSON.stringify({
+    event_type: eventType,
+    surface: 'forge',
+    path: `${window.location.pathname}${window.location.search}`,
+    source: campaignSource(),
+    ...extra,
+  })
+  try {
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon('/api/forge/event', new Blob([payload], { type: 'application/json' }))
+      return
+    }
+    fetch('/api/forge/event', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: payload,
+      keepalive: true,
+    })
+  } catch {
+    // Best-effort first-party telemetry only; never block the funnel.
+  }
+}
 
 function CodeBlock({ children }) {
   return (
@@ -41,15 +72,23 @@ function SignupForm() {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [state, setState] = useState({ status: 'idle' }) // idle | loading | done | error
+  const formStarted = useRef(false)
+
+  function markFormStart() {
+    if (formStarted.current) return
+    formStarted.current = true
+    trackForge('form_start', { path: '/forge#signup' })
+  }
 
   async function onSubmit(e) {
     e.preventDefault()
+    trackForge('order_intent', { path: '/forge#signup' })
     setState({ status: 'loading' })
     try {
       const r = await fetch('/api/forge/signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, email }),
+        body: JSON.stringify({ name, email, source: campaignSource() }),
       })
       const data = await r.json().catch(() => ({}))
       if (!r.ok) throw new Error(data.detail || 'Signup failed. Please try again.')
@@ -76,11 +115,11 @@ function SignupForm() {
     <form onSubmit={onSubmit} className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 text-left space-y-3">
       <h3 className="font-semibold text-gray-900 dark:text-gray-100">Get your API key</h3>
       <input
-        type="text" placeholder="Name (optional)" value={name} onChange={(e) => setName(e.target.value)}
+        type="text" placeholder="Name (optional)" value={name} onChange={(e) => { markFormStart(); setName(e.target.value) }}
         className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 text-sm text-gray-900 dark:text-gray-100"
       />
       <input
-        type="email" required placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)}
+        type="email" required placeholder="you@example.com" value={email} onChange={(e) => { markFormStart(); setEmail(e.target.value) }}
         className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 text-sm text-gray-900 dark:text-gray-100"
       />
       <button
@@ -97,6 +136,10 @@ function SignupForm() {
 }
 
 export default function ForgePage() {
+  useEffect(() => {
+    trackForge('page_view')
+  }, [])
+
   return (
     <div className="min-h-screen flex flex-col">
       <Navbar />
