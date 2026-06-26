@@ -15,6 +15,12 @@ const escapeAttr = (value) =>
 
 const routes = [
   {
+    output: 'dojo/index.html',
+    title: 'DOJO Waitlist — AI Interview Prep by Shizuha',
+    description:
+      'Join the waitlist for DOJO, AI-powered mock interviews for coding, system design, and behavioral practice with structured feedback.',
+  },
+  {
     output: 'research/index.html',
     title: 'AI Search Visibility Audit — Shizuha Research',
     description:
