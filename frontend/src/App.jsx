@@ -7,6 +7,7 @@ import ChatHome from './pages/ChatHome'
 import DocsPage from './pages/DocsPage'
 import BenchmarksPage from './pages/BenchmarksPage'
 import ForgePage from './pages/ForgePage'
+import ApiPage from './pages/ApiPage'
 import HivePage from './pages/HivePage'
 import ResearchPage from './pages/ResearchPage'
 import ResearchOrderPage from './pages/ResearchOrderPage'
@@ -84,6 +85,7 @@ export default function App() {
       <Route path="/docs" element={<DocsPage />} />
       <Route path="/benchmarks" element={<BenchmarksPage />} />
       <Route path="/forge" element={<ForgePage />} />
+      <Route path="/api" element={<ApiPage />} />
       <Route path="/hive" element={<HivePage />} />
       <Route path="/dojo" element={<DojoPage />} />
       <Route path="/research" element={<ResearchPage />} />
