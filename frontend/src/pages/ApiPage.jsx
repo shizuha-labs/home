@@ -7,14 +7,14 @@ import Footer from '../components/Footer'
 // tooling, not just cheap inference. "Get API key" posts to the Cortex public-API signup
 // endpoint (POST /api/cortex/signup, from shizuha-labs/forge#18) and shows + copies the key.
 
-// NOTE: confirm the model id against the gateway's `GET /v1/models` at deploy —
-// forge#18's tests use `qwen3-8b` as the expected id (resolved when DevOps deploys
-// + the ClusterIP is known). Update here if the canonical public id differs.
+// VEN-46: the public model id MUST be a live Cortex model (GET /api/cortex/v1/models).
+// `qwen3-8b` was never deployed, so a copied snippet 400'd ("Model qwen3-8b is not
+// available"). Use a current live id; re-verify against /v1/models if it changes.
 const CODE_SNIPPET = `curl https://shizuha.com/api/cortex/v1/chat/completions \\
   -H "Authorization: Bearer $SHIZUHA_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
-    "model": "qwen3-8b",
+    "model": "Qwen3.6-27B-BF16",
     "messages": [{"role": "user", "content": "Hello from Shizuha"}]
   }'`
 
