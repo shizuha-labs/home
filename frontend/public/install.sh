@@ -43,6 +43,31 @@ curl_shizuha() {
     "$@"
 }
 
+prepare_existing_install() {
+  if [ -x "$SHIZUHA_DIR/bin/shizuha" ]; then
+    info "Stopping existing Shizuha daemon..."
+    "$SHIZUHA_DIR/bin/shizuha" down >/dev/null 2>&1 || true
+    sleep 1
+  fi
+
+  if [ ! -d "$SHIZUHA_DIR" ]; then
+    return 0
+  fi
+
+  # Running Linux binaries cannot be overwritten in place. Move old runtime
+  # trees aside so extraction creates fresh files even if a stale process still
+  # holds the old bundled node inode.
+  local backup_dir
+  backup_dir="$SHIZUHA_DIR/.install-backup-$(date +%s)"
+  mkdir -p "$backup_dir"
+  local entry
+  for entry in bin lib dist; do
+    if [ -e "$SHIZUHA_DIR/$entry" ]; then
+      mv "$SHIZUHA_DIR/$entry" "$backup_dir/$entry" 2>/dev/null || rm -rf "$SHIZUHA_DIR/$entry" 2>/dev/null || true
+    fi
+  done
+}
+
 # ── Banner ───────────────────────────────────────────────────────────────
 printf "\n"
 printf "${BOLD}${CYAN}"
@@ -315,13 +340,9 @@ install_from_binary() {
     exit 1
   fi
 
-  # Delegate to bundled installer if available
-  if [ -x "$EXTRACTED_DIR/install" ]; then
-    SHIZUHA_DIR="$SHIZUHA_DIR" BIN_DIR="$BIN_DIR" "$EXTRACTED_DIR/install"
-  else
-    mkdir -p "$SHIZUHA_DIR"
-    cp -r "$EXTRACTED_DIR"/* "$SHIZUHA_DIR/"
-  fi
+  prepare_existing_install
+  mkdir -p "$SHIZUHA_DIR"
+  ( cd "$EXTRACTED_DIR" && tar cf - . ) | ( cd "$SHIZUHA_DIR" && tar xf - )
 
   # Store version
   echo "$VERSION" > "$SHIZUHA_DIR/VERSION"
