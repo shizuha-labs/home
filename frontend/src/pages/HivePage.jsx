@@ -70,13 +70,13 @@ export default function HivePage() {
     setErrorMsg('')
 
     try {
-      const res = await fetch('/scs/api/waitlist/', {
+      const res = await fetch('/api/forge/signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: form.name.trim(),
           email: form.email.trim().toLowerCase(),
-          use_case: form.use_case || 'other',
+          source: `hive-waitlist:${form.use_case || 'other'}`,
         }),
       })
 

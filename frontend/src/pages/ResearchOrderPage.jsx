@@ -51,22 +51,21 @@ export default function ResearchOrderPage() {
     setErrorMsg('')
 
     try {
-      const res = await fetch('/scs/api/research/order/', {
+      const res = await fetch('/api/forge/signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: form.name.trim(),
           email: form.email.trim().toLowerCase(),
-          topic: `Request type: ${OFFER_TYPES.find((offer) => offer.value === form.offerType)?.label || form.offerType}\n\n${form.topic.trim()}`,
+          source: `research-order:${form.offerType}:${form.topic.trim().slice(0, 240)}`,
         }),
       })
 
-      if (res.status === 201) {
+      if (res.status === 201 || res.status === 200) {
         setStatus('success')
       } else {
         const data = await res.json().catch(() => ({}))
         const msg =
-          data?.topic?.[0] ||
           data?.email?.[0] ||
           data?.detail ||
           'Something went wrong. Please try again.'

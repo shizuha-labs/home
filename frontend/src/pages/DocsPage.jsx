@@ -674,10 +674,10 @@ transport = "sse"
 url = "http://localhost:3001/sse"`} />
 
               <H3>Built-in Shizuha MCP servers</H3>
-              <P>The platform includes 15+ MCP servers that connect agents to all Shizuha services:</P>
+              <P>The platform includes MCP servers that connect agents to core Shizuha services:</P>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 my-4">
                 {['Pulse (tasks)', 'Wiki (docs)', 'Drive (files)', 'Notes', 'Mail', 'Connect (social)',
-                  'Admin', 'HR', 'Time', 'Finance', 'Books', 'Inventory', 'Cloud (SCS)', 'Identity (ID)', 'Notify'
+                  'Admin', 'HR', 'Time', 'Finance', 'Books', 'Inventory', 'Identity (ID)', 'Notify'
                 ].map((s) => (
                   <div key={s} className="px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 text-xs text-gray-600 dark:text-gray-400">
                     {s}

@@ -68,7 +68,6 @@ Centralized product definitions used in both ProductGrid and AppGrid:
 | Wiki | BookOpen | Emerald | /wiki/ |
 | Mail | Mail | Rose | /mail/ |
 | Inventory | Package | Amber | /inventory/ |
-| Cloud (SCS) | Cloud | Purple | /scs/ |
 
 ## Nginx Routing
 
