@@ -230,13 +230,17 @@ install_from_binary() {
       EXPECTED_SHA256=""
       warn "Could not fetch latest.json — using fallback v${VERSION}"
     else
-      # Parse version from JSON with grep+sed (no jq dependency).
-      VERSION=$(grep '"version"' "$MANIFEST_FILE" | head -1 | sed 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
       # Parse per-platform URL and sha256.
       # Extract the block for this target, then grab url/sha256 from it.
       PLATFORM_BLOCK=$(awk "/$TARGET/{found=1} found{print; if (/}/) {found=0}}" "$MANIFEST_FILE" 2>/dev/null || true)
-      DOWNLOAD_URL=$(echo "$PLATFORM_BLOCK" | grep '"url"' | sed 's/.*"url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
-      EXPECTED_SHA256=$(echo "$PLATFORM_BLOCK" | grep '"sha256"' | sed 's/.*"sha256"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+      DOWNLOAD_URL=$(echo "$PLATFORM_BLOCK" | grep '"url"' | sed 's/.*"url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || true)
+      EXPECTED_SHA256=$(echo "$PLATFORM_BLOCK" | grep '"sha256"' | sed 's/.*"sha256"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || true)
+      # Parse version from JSON when present. Some generated manifests only
+      # carry per-platform URLs, so derive the version from the artifact name.
+      VERSION=$(grep '"version"' "$MANIFEST_FILE" | head -1 | sed 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || true)
+      if [ -z "$VERSION" ] && [ -n "$DOWNLOAD_URL" ]; then
+        VERSION=$(basename "$DOWNLOAD_URL" | sed -n "s/^shizuha-\\(.*\\)-${TARGET}\\.tar\\.gz$/\\1/p" || true)
+      fi
       if [ -z "$VERSION" ] || [ -z "$DOWNLOAD_URL" ]; then
         warn "Could not parse latest.json for platform ${TARGET} — using fallback v${FALLBACK_VERSION}"
         VERSION="$FALLBACK_VERSION"
