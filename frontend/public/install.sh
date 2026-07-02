@@ -198,8 +198,18 @@ install_from_source() {
   step "Installing to $SHIZUHA_DIR..."
   mkdir -p "$SHIZUHA_DIR/lib"
 
-  # Copy dist
-  cp -r "$SOURCE_DIR/dist/"* "$SHIZUHA_DIR/lib/"
+  # Copy dist. Developer installs may have an existing symlink from
+  # ~/.shizuha/lib/shizuha.js back to this source tree's dist/shizuha.js; skip
+  # same-inode entries so source reinstalls stay idempotent.
+  local dist_entry dist_dest
+  for dist_entry in "$SOURCE_DIR/dist/"*; do
+    dist_dest="$SHIZUHA_DIR/lib/$(basename "$dist_entry")"
+    if [ -e "$dist_dest" ] && [ "$(readlink -f "$dist_entry")" = "$(readlink -f "$dist_dest")" ]; then
+      continue
+    fi
+    rm -rf "$dist_dest"
+    cp -r "$dist_entry" "$SHIZUHA_DIR/lib/"
+  done
 
   # Copy node_modules (production only)
   if [ -d "$SOURCE_DIR/node_modules" ]; then
