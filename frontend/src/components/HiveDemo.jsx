@@ -15,13 +15,13 @@ export default function HiveDemo() {
             See one HIVE agent task run end-to-end
           </h2>
           <p className="text-lg text-gray-600 dark:text-gray-400 leading-relaxed mb-6">
-            Watch HIVE take a plain-English research request, browse sources, structure the answer, and turn it into a reusable artifact.
+            Watch a real HIVE engineering task: Sara picks up ORIG-15, updates Origin/Forgejo PR status sync in Pulse, runs the regression test, opens PR #252, and links the result back to the task.
           </p>
           <ul className="space-y-3 text-gray-600 dark:text-gray-400 mb-8">
             {[
-              'Start from a real business prompt, not a scripted form.',
-              'Follow live agent status from research through synthesis.',
-              'End with a concise recommendation and a next-action checklist.',
+              'Start from a real Pulse task: ORIG-15 PR status sync.',
+              'Follow the agent through code inspection, implementation, and verification.',
+              'End with a linked GitHub PR and Pulse handoff for review.',
             ].map((item) => (
               <li key={item} className="flex gap-3">
                 <span className="mt-2 h-2 w-2 rounded-full bg-brand-500 flex-shrink-0" />
@@ -46,7 +46,7 @@ export default function HiveDemo() {
             <a href={HIVE_DEMO_VIDEO}>Download the HIVE demo video</a>
           </video>
           <p className="px-2 pt-3 text-xs text-gray-400">
-            Demo flow: research prompt → agent execution → structured summary → follow-up.
+            Demo flow: Pulse task → code change → regression test → PR #252 → Pulse handoff.
           </p>
         </div>
       </div>

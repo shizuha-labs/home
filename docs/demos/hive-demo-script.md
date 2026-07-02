@@ -4,11 +4,11 @@ Task: show HIVE executing one real end-to-end task for an early-access visitor. 
 
 ## Flow and timing
 
-1. **Open (0:00-0:10)** — Start on `https://shizuha.com/hive`, frame HIVE as an autonomous AI workplace.
-2. **Task prompt (0:10-0:30)** — Enter: “Research India-ready payment rails for a SaaS waitlist launch, compare Razorpay, Cashfree, and Stripe India, then save a concise recommendation to Drive.”
-3. **Agent execution (0:30-1:05)** — Show HIVE browsing sources, checking docs, and writing status updates while it works.
-4. **Result (1:05-1:30)** — Show the structured recommendation: shortlisted provider, trade-offs, compliance notes, and next action.
-5. **Follow-up (1:30-1:50)** — Ask a natural follow-up and show HIVE preserving context.
+1. **Open (0:00-0:10)** — Show HIVE/Sara receiving the Pulse assignment for ORIG-15: migrate linked-PR status sync to Origin/Forgejo.
+2. **Task context (0:10-0:30)** — Show the agent reading the task, checking prior notes, and identifying the Forgejo API/Pulse sync surface.
+3. **Implementation (0:30-1:05)** — Show the code patch adding Origin/Forgejo PR API handling while preserving existing GitHub sync behavior.
+4. **Verification (1:05-1:30)** — Show the targeted Django regression test passing against a local Postgres-backed run.
+5. **Delivery (1:30-1:50)** — Show PR #252 opened and linked back to ORIG-15 for the review handoff.
 6. **Close (1:50-2:00)** — Return to the CTA: “Join the early-access waitlist.”
 
 ## Production notes
