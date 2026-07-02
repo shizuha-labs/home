@@ -1,0 +1,161 @@
+# Shizuha Origin CI/CD — MULTI-ARCH build + deploy shizuha-home-FRONTEND.
+# shizuha-home is frontend-only (no backend image) and root-mounted at /, so the
+# default VITE base path is correct and no VITE_BASE_PATH build-arg is needed.
+#
+# BUILD CONTEXT IS THE MONOREPO, NOT THIS REPO: Dockerfile.prod copies
+# packages/shizuha-ui and packages/shizuha-chat from the shizuha-stack monorepo
+# root (they are tracked there, not published standalone), so the clone step
+# assembles monorepo + this repo checked out at the triggering SHA. This mirrors
+# deploy/k3s/scripts/build-multiarch.sh (FRONTEND_PATH=shizuha-home, root
+# Dockerfile.prod) — the manual path used for the 2026-07-02 cache-control fix
+# because home previously had NO Origin CI at all.
+name: deploy-shizuha-home-frontend
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main, master]
+concurrency:
+  group: deploy-shizuha-home-frontend-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install kubectl + cluster access
+        run: |
+          set -euo pipefail
+          curl -fsSLO "https://dl.k8s.io/release/v1.30.0/bin/linux/amd64/kubectl"
+          install -m 0755 kubectl /usr/local/bin/kubectl
+          mkdir -p "$HOME/.kube"
+          printf '%s' "${{ secrets.KUBE_CONFIG_B64 }}" | base64 -d > "$HOME/.kube/config"
+          chmod 600 "$HOME/.kube/config"
+      - name: Multi-arch build + deploy + verify (frontend)
+        run: |
+          set -euo pipefail
+          SHORT="$(echo "${{ github.sha }}" | cut -c1-7)"
+          FTAG="home-frontend-${SHORT}"
+          REG="registry.registry.svc.cluster.local:5000"
+          echo "Multi-arch build shizuha-home-frontend:${FTAG} (amd64 + arm64)"
+
+          render_build_job() {  # $1=arch
+            local ARCH="$1"
+            cat <<YAML
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: ci-build-home-frontend-${SHORT}-${ARCH}
+            namespace: build
+            labels: { app: ci-build, service: home-frontend }
+          spec:
+            backoffLimit: 0
+            ttlSecondsAfterFinished: 900
+            template:
+              spec:
+                restartPolicy: Never
+                nodeSelector: { kubernetes.io/arch: ${ARCH} }
+                tolerations:
+                  - { key: node.shizuha/workstation, operator: Exists, effect: NoSchedule }
+                  - { key: shizuha.com/inference-paused, operator: Exists, effect: NoSchedule }
+                affinity:
+                  nodeAffinity:
+                    requiredDuringSchedulingIgnoredDuringExecution:
+                      nodeSelectorTerms:
+                      - matchExpressions:
+                        - { key: node-role.kubernetes.io/control-plane, operator: DoesNotExist }
+                initContainers:
+                  - name: git-clone
+                    image: alpine/git:2.43.0
+                    command: ["/bin/sh","-c"]
+                    args:
+                      - |
+                        set -e
+                        # Monorepo root for packages/ (shallow; submodule pointers only)
+                        git clone --depth=1 https://x-token-auth:\${GIT_PASSWORD}@github.com/shizuha-labs/shizuha-stack.git /workspace/src
+                        # Replace the shizuha-home submodule pointer with THIS repo at the pushed SHA
+                        rm -rf /workspace/src/shizuha-home
+                        git clone --depth=50 https://x-token-auth:\${GIT_PASSWORD}@github.com/shizuha-labs/home.git /workspace/src/shizuha-home
+                        cd /workspace/src/shizuha-home && (git checkout ${{ github.sha }} 2>/dev/null || echo "sha not in shallow clone; building default HEAD")
+                    env:
+                      - name: GIT_PASSWORD
+                        valueFrom: { secretKeyRef: { name: github-token, key: password } }
+                    volumeMounts: [{ mountPath: /workspace, name: workspace }]
+                containers:
+                  - name: kaniko
+                    image: gcr.io/kaniko-project/executor:v1.23.2
+                    args:
+                      - --context=dir:///workspace/src
+                      - --dockerfile=/workspace/src/shizuha-home/Dockerfile.prod
+                      - --destination=${REG}/shizuha-home-frontend:${FTAG}-${ARCH}
+                      - --insecure
+                      - --skip-tls-verify
+                      - --insecure-pull
+                      - --registry-mirror=mirror-dockerhub.registry.svc.cluster.local:5000
+                      - --build-arg=NPM_CONFIG_REGISTRY=http://npm-cache.registry.svc.cluster.local:4873/
+                      - --build-arg=FRONTEND_PATH=shizuha-home
+                      - --cache=false
+                    volumeMounts: [{ mountPath: /workspace, name: workspace }]
+                volumes: [{ emptyDir: {}, name: workspace }]
+          YAML
+          }
+
+          render_build_job amd64 | kubectl apply -f -
+          render_build_job arm64 | kubectl apply -f -
+
+          wait_job() {
+            local ARCH="$1"
+            local JOB="ci-build-home-frontend-${SHORT}-${ARCH}"
+            kubectl wait -n build --for=condition=complete "job/${JOB}" --timeout=1800s &
+            local WP=$!
+            while kill -0 "$WP" 2>/dev/null; do
+              if kubectl get "job/${JOB}" -n build -o jsonpath='{.status.failed}' | grep -q '[1-9]'; then
+                echo "::error::kaniko frontend ${ARCH} build failed"
+                kubectl logs -n build "job/${JOB}" --all-containers --tail=80 || true
+                exit 1
+              fi
+              sleep 5
+            done
+            wait "$WP"
+          }
+          wait_job amd64
+          wait_job arm64
+
+          cat <<YAML | kubectl apply -f -
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: ci-manifest-home-frontend-${SHORT}
+            namespace: build
+            labels: { app: ci-manifest, service: home-frontend }
+          spec:
+            backoffLimit: 0
+            ttlSecondsAfterFinished: 900
+            template:
+              spec:
+                restartPolicy: Never
+                containers:
+                  - name: crane
+                    image: gcr.io/go-containerregistry/crane:latest
+                    args:
+                      - index
+                      - append
+                      - --insecure
+                      - -t
+                      - ${REG}/shizuha-home-frontend:${FTAG}
+                      - -m
+                      - ${REG}/shizuha-home-frontend:${FTAG}-amd64
+                      - -m
+                      - ${REG}/shizuha-home-frontend:${FTAG}-arm64
+          YAML
+          kubectl wait -n build --for=condition=complete "job/ci-manifest-home-frontend-${SHORT}" --timeout=300s || {
+            echo "::error::frontend manifest combine failed"
+            kubectl logs -n build "job/ci-manifest-home-frontend-${SHORT}" --tail=80 || true
+            exit 1
+          }
+
+          kubectl set image -n shizuha deploy/shizuha-home-frontend frontend="localhost:30500/shizuha-home-frontend:${FTAG}"
+          kubectl rollout status -n shizuha deploy/shizuha-home-frontend --timeout=300s
+
+          LIVE="$(kubectl get deploy -n shizuha shizuha-home-frontend -o jsonpath='{.spec.template.spec.containers[0].image}')"
+          echo "Live frontend image: ${LIVE}"
+          echo "${LIVE}" | grep -q "${FTAG}" || { echo "::error::frontend image mismatch"; exit 1; }
+          kubectl get pods -n shizuha -l app.kubernetes.io/name=shizuha-home-frontend
