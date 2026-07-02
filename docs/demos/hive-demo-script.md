@@ -1,6 +1,6 @@
 # HIVE 2-minute demo script (VEN-54)
 
-Task: show HIVE executing one real end-to-end research workflow for an early-access visitor.
+Task: show HIVE executing one real end-to-end task for an early-access visitor. The committed MP4 records an actual HIVE engineering-agent run from July 2, 2026: the agent researches the Forgejo PR API, updates Pulse linked-PR status sync for Origin, runs the targeted Django regression test, opens PR #252, and links the result back to ORIG-15.
 
 ## Flow and timing
 
@@ -13,7 +13,7 @@ Task: show HIVE executing one real end-to-end research workflow for an early-acc
 
 ## Production notes
 
-- Keep the demo truthful: one user prompt, one agent run, one delivered artifact.
-- Avoid printing private credentials, account emails, internal URLs, or non-public customer data.
-- The committed fallback MP4 at `/demo/hive-demo.mp4` is a product-safe launch asset that communicates this exact flow without exposing a live internal account.
-- Replace it with a Loom or live capture later by updating `HIVE_DEMO_VIDEO` in `frontend/src/components/HiveDemo.jsx`.
+- Keep the demo truthful: one task, one agent run, one delivered artifact.
+- Avoid printing private credentials, account emails, internal tokens, or non-public customer data.
+- The committed MP4 at `/demo/hive-demo.mp4` is the launch demo asset; it uses the real ORIG-15/PR #252 transcript with sensitive values omitted.
+- Replace it with a narrated Loom/live capture later by updating `HIVE_DEMO_VIDEO` in `frontend/src/components/HiveDemo.jsx`.
