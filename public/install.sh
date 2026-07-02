@@ -32,6 +32,17 @@ warn()  { printf "  ${YELLOW}%s${RESET}\n" "$*"; }
 err()   { printf "  ${RED}%s${RESET}\n" "$*" >&2; }
 step()  { printf "\n${BOLD}%s${RESET}\n" "$*"; }
 
+curl_shizuha() {
+  # Keep network failures from looking like an installer hang. Extra flags can
+  # be passed as SHIZUHA_CURL_OPTS, e.g. SHIZUHA_CURL_OPTS="-4" for WSL IPv4.
+  curl ${SHIZUHA_CURL_OPTS:-} \
+    --connect-timeout "${SHIZUHA_CURL_CONNECT_TIMEOUT:-20}" \
+    --retry "${SHIZUHA_CURL_RETRIES:-2}" \
+    --retry-delay "${SHIZUHA_CURL_RETRY_DELAY:-2}" \
+    --max-time "${SHIZUHA_CURL_MAX_TIME:-600}" \
+    "$@"
+}
+
 # ── Banner ───────────────────────────────────────────────────────────────
 printf "\n"
 printf "${BOLD}${CYAN}"
@@ -113,7 +124,7 @@ ensure_node() {
   step "Installing Node.js 22..."
   if [ "$PLATFORM" = "linux" ]; then
     if command -v curl &>/dev/null; then
-      curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - 2>/dev/null
+      curl_shizuha -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - 2>/dev/null
       sudo apt-get install -y nodejs 2>/dev/null || {
         err "Failed to install Node.js. Install manually: https://nodejs.org"
         exit 1
@@ -224,7 +235,7 @@ install_from_binary() {
     step "Checking latest version..."
     MANIFEST_URL="${BUILDS_URL}/latest.json"
     MANIFEST_FILE="$TMPDIR_DL/latest.json"
-    if ! curl -fsSL "$MANIFEST_URL" -o "$MANIFEST_FILE" 2>/dev/null; then
+    if ! curl_shizuha -fsSL "$MANIFEST_URL" -o "$MANIFEST_FILE" 2>/dev/null; then
       VERSION="$FALLBACK_VERSION"
       DOWNLOAD_URL="${BUILDS_URL}/shizuha-${VERSION}-${TARGET}.tar.gz"
       EXPECTED_SHA256=""
@@ -257,7 +268,7 @@ install_from_binary() {
   ARCHIVE_NAME="shizuha-${VERSION}-${TARGET}.tar.gz"
 
   info "Fetching ${ARCHIVE_NAME}..."
-  if ! curl -fSL --progress-bar "$DOWNLOAD_URL" -o "$TMPDIR_DL/$ARCHIVE_NAME"; then
+  if ! curl_shizuha -fSL --progress-bar "$DOWNLOAD_URL" -o "$TMPDIR_DL/$ARCHIVE_NAME"; then
     err "Download failed: $DOWNLOAD_URL"
     err ""
     err "This platform (${TARGET}) may not have a prebuilt binary yet."
