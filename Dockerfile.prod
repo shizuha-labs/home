@@ -18,7 +18,7 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 # Build arg for frontend path (relative to monorepo root)
-ARG FRONTEND_PATH=shizuha-home
+ARG FRONTEND_PATH=home
 
 # Copy shared packages first (for vite.shared.js)
 COPY packages/shizuha-ui /packages/shizuha-ui
@@ -51,7 +51,7 @@ RUN npm run build
 FROM nginx:alpine
 
 # Build arg needed again in stage 2
-ARG FRONTEND_PATH=shizuha-home
+ARG FRONTEND_PATH=home
 
 # Copy custom nginx config (nginx.prod.conf is at shizuha-home root, not frontend/)
 COPY ${FRONTEND_PATH}/nginx.prod.conf /etc/nginx/conf.d/default.conf

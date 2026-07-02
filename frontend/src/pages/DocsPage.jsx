@@ -214,7 +214,7 @@ export default function DocsPage() {
 
               <H3>Manual installation</H3>
               <P>If you prefer to install manually:</P>
-              <CodeBlock code={`git clone https://github.com/shizuha-trading/shizuha.git\ncd shizuha\nnpm install\nnpm run build\nnpm link`} />
+              <CodeBlock code={`git clone https://github.com/shizuha-trading/shizuha.git\ncd cli\nnpm install\nnpm run build\nnpm link`} />
             </Section>
 
             {/* ── Quick Start ── */}

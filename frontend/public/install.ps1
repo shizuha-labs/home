@@ -67,7 +67,7 @@ try {
     Write-Host ""
     Write-Host "  Build from source:" -ForegroundColor Red
     Write-Host "    git clone https://github.com/shizuha-trading/shizuha.git" -ForegroundColor Red
-    Write-Host "    cd shizuha; npm install; npm run build" -ForegroundColor Red
+    Write-Host "    cd cli; npm install; npm run build" -ForegroundColor Red
     Remove-Item -Recurse -Force $TempDir -ErrorAction SilentlyContinue
     exit 1
 }

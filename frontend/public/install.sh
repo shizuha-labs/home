@@ -3,7 +3,7 @@
 #
 # Two installation modes (auto-detected):
 #
-#   1. FROM SOURCE — if this script is in a directory with shizuha/src/,
+#   1. FROM SOURCE — if this script is in a directory with cli/src/,
 #      it builds from source and installs locally. For developers.
 #
 #   2. FROM GITHUB — downloads a prebuilt binary for your platform.
@@ -42,13 +42,15 @@ printf "  ╚══════════════════════�
 printf "${RESET}\n"
 
 # ── Detect installation mode ─────────────────────────────────────────────
-# Check if we're in a source tree (this script lives next to shizuha/src/)
+# Check if we're in a source tree (this script lives next to src/ or cli/src/)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 SOURCE_DIR=""
 
 # Check relative to script location
 if [ -f "$SCRIPT_DIR/src/index.ts" ] && [ -f "$SCRIPT_DIR/package.json" ]; then
   SOURCE_DIR="$SCRIPT_DIR"
+elif [ -f "$SCRIPT_DIR/cli/src/index.ts" ] && [ -f "$SCRIPT_DIR/cli/package.json" ]; then
+  SOURCE_DIR="$SCRIPT_DIR/cli"
 elif [ -f "$SCRIPT_DIR/shizuha/src/index.ts" ] && [ -f "$SCRIPT_DIR/shizuha/package.json" ]; then
   SOURCE_DIR="$SCRIPT_DIR/shizuha"
 fi
