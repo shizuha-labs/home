@@ -6,6 +6,7 @@ import FeatureSection from '../components/FeatureSection'
 import Footer from '../components/Footer'
 import WelcomeBanner from '../components/WelcomeBanner'
 import AppGrid from '../components/AppGrid'
+import HiveDemo from '../components/HiveDemo'
 import { useAuth } from '../contexts/AuthContext'
 
 export default function LandingPage() {
@@ -24,6 +25,7 @@ export default function LandingPage() {
             </div>
           </section>
         )}
+        <HiveDemo />
         <AgentCapabilities />
         <ProductGrid isAuthenticated={isAuthenticated} />
         <FeatureSection />

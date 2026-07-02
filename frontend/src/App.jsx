@@ -71,6 +71,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/" element={<Home />} />
+      <Route path="/hive" element={<LandingPage />} />
       <Route path="/c" element={<AuthGuard><Home /></AuthGuard>} />
       <Route path="/c/:conversationId" element={<AuthGuard><Home /></AuthGuard>} />
       <Route path="/docs" element={<DocsPage />} />
