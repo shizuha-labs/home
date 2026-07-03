@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { CheckCircle, Clock, FileSearch, Shield } from 'lucide-react'
-import Navbar from '../components/Navbar'
+import GlobalNavBar from '../components/shared/GlobalNavBar'
 import Footer from '../components/Footer'
 import { setPageMeta } from '../utils/pageMeta'
 import { trackResearchEvent } from '../utils/analytics'
@@ -80,7 +80,7 @@ export default function ResearchOrderPage() {
 
   return (
     <div className="min-h-screen flex flex-col bg-white dark:bg-gray-950">
-      <Navbar />
+      <GlobalNavBar />
 
       <main className="flex-1 pt-16">
         <section className="px-4 sm:px-6 lg:px-8 py-20">

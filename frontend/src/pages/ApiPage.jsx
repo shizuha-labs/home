@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import Navbar from '../components/Navbar'
+import GlobalNavBar from '../components/shared/GlobalNavBar'
 import Footer from '../components/Footer'
 
 // VEN-39 (VEN-37): Shizuha Developer API public landing + pricing page (shizuha.com/api).
@@ -185,7 +185,7 @@ export default function ApiPage() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <Navbar />
+      <GlobalNavBar />
       <main className="flex-1">
         <section className="px-4 sm:px-6 lg:px-8 py-16 sm:py-24">
           <div className="max-w-3xl mx-auto text-center">

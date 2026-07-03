@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { CheckCircle, Zap, Globe, Code2, Search, Image, FlaskConical } from 'lucide-react'
-import Navbar from '../components/Navbar'
+import GlobalNavBar from '../components/shared/GlobalNavBar'
 import Footer from '../components/Footer'
 
 const VALUE_PROPS = [
@@ -96,7 +96,7 @@ export default function HivePage() {
 
   return (
     <div className="min-h-screen flex flex-col bg-white dark:bg-gray-950">
-      <Navbar />
+      <GlobalNavBar />
 
       <main className="flex-1 pt-16">
         {/* Hero */}
