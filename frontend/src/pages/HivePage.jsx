@@ -6,18 +6,18 @@ import Footer from '../components/Footer'
 const VALUE_PROPS = [
   {
     icon: Zap,
-    title: 'Multi-skill agent fleet',
-    description: 'Browser automation, web search, code execution, image generation, and deep research — in one fleet.',
+    title: 'Autonomous agent fleet',
+    description: 'Specialized agents — engineering, product, design, operations — working 24/7 as your autonomous workforce. Each agent has skills, a team, and a queue.',
   },
   {
     icon: Globe,
-    title: 'API + dashboard access',
-    description: 'Integrate via REST API or control your agents from the Shizuha dashboard. Runs 24/7, no babysitting required.',
+    title: 'Part of your org, not a sidecar',
+    description: 'Agents are first-class members of your teams with capabilities, workflows, and review gates. Manage them alongside your human team from one platform.',
   },
   {
     icon: Code2,
-    title: 'Built for builders',
-    description: 'Automate complex multi-step workflows. Agents hand off tasks between skills and report back structured results.',
+    title: 'Built for autonomous companies',
+    description: 'Define teams, assign capabilities, set workflows. Your agents execute, review, and ship — you direct strategy and review outcomes.',
   },
 ]
 
@@ -108,14 +108,14 @@ export default function HivePage() {
             </div>
 
             <h1 className="text-5xl sm:text-6xl font-bold text-gray-900 dark:text-white leading-tight mb-6">
-              Your autonomous AI agent fleet{' '}
+              Your autonomous organization's{' '}
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-500 to-blue-600">
-                — from $29/mo
+                agent fleet
               </span>
             </h1>
 
             <p className="text-xl text-gray-500 dark:text-gray-400 max-w-2xl mx-auto mb-12">
-              HIVE gives you a fleet of specialized agents — browser, search, code, image, and research — accessible via API and dashboard, running around the clock.
+              Hive is the agent-fleet management surface of the Shizuha platform. Define teams, assign capabilities, and watch your autonomous workforce execute, review, and ship — 24/7.
             </p>
 
             <a
@@ -131,7 +131,7 @@ export default function HivePage() {
         <section className="px-4 sm:px-6 lg:px-8 py-16 bg-gray-50 dark:bg-gray-900">
           <div className="max-w-5xl mx-auto">
             <h2 className="text-3xl font-bold text-center text-gray-900 dark:text-white mb-12">
-              One fleet. Every skill.
+              Your autonomous workforce
             </h2>
             <div className="grid sm:grid-cols-3 gap-8">
               {VALUE_PROPS.map(({ icon: Icon, title, description }) => (
@@ -154,10 +154,10 @@ export default function HivePage() {
         <section className="px-4 sm:px-6 lg:px-8 py-16">
           <div className="max-w-4xl mx-auto">
             <h2 className="text-3xl font-bold text-center text-gray-900 dark:text-white mb-4">
-              Simple, transparent pricing
+              Agent fleet pricing
             </h2>
             <p className="text-center text-gray-500 dark:text-gray-400 mb-12">
-              Pricing tiers are indicative — early access members lock in founding rates.
+              Pricing for your autonomous organization's agent fleet. Early access members lock in founding rates.
             </p>
             <div className="grid sm:grid-cols-3 gap-6">
               {PRICING_TIERS.map(({ name, price, period, hours, highlight }) => (
@@ -194,17 +194,17 @@ export default function HivePage() {
                 <CheckCircle className="w-16 h-16 text-cyan-500 mx-auto mb-4" />
                 <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">You're on the list!</h2>
                 <p className="text-gray-500 dark:text-gray-400">
-                  We'll reach out as soon as HIVE early access opens. Check your inbox for a confirmation.
+                  We'll reach out as soon as Hive early access opens. Your autonomous organization is one step closer.
                 </p>
               </div>
             ) : (
               <>
                 <div className="text-center mb-10">
                   <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-3">
-                    Join the waitlist
+                    Get early access
                   </h2>
                   <p className="text-gray-500 dark:text-gray-400">
-                    Early access members lock in founding rates and get first access to new agent skills.
+                    Early access members get first access to the agent-fleet management surface and lock in founding rates for their autonomous organization.
                   </p>
                 </div>
 
@@ -243,7 +243,7 @@ export default function HivePage() {
 
                   <div>
                     <label htmlFor="use_case" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      How will you use HIVE?
+                      What describes your organization?
                     </label>
                     <select
                       id="use_case"
