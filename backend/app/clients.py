@@ -30,6 +30,17 @@ def _scope_params(org_id: Optional[int] = None) -> dict[str, str]:
     return {"organization": str(org_id)} if org_id is not None else {}
 
 
+def _org_header(org_id: Optional[int] = None) -> dict[str, str]:
+    return {"X-Organization-ID": str(org_id)} if org_id is not None else {}
+
+
+def _compact_amount(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 async def fetch_tasks_by_status(client: httpx.AsyncClient, bearer: str,
                                 email: Optional[str],
                                 org_id: Optional[int] = None) -> Widget:
@@ -118,3 +129,98 @@ async def fetch_alerts(client: httpx.AsyncClient, bearer: str,
     if not alerts:
         return Widget.empty_()
     return Widget.ok_(data=alerts)
+
+
+async def fetch_financial_snapshot(client: httpx.AsyncClient, bearer: str,
+                                   org_id: Optional[int] = None) -> Widget:
+    """Compact Books dashboard rollup, gated by Books' own org/finance authz.
+
+    Books requires an explicit X-Organization-ID for the dashboard. When Home is
+    aggregating across all orgs (org_id omitted), do not guess a finance org —
+    ask the user to select one by returning `empty`.
+    """
+    if org_id is None:
+        return Widget.empty_()
+    try:
+        resp = await client.get(
+            f"{settings.BOOKS_API_URL}/dashboard/",
+            headers={**_auth_headers(bearer), **_org_header(org_id)},
+            timeout=settings.SOURCE_TIMEOUT_SECONDS,
+        )
+    except (httpx.TimeoutException, httpx.TransportError) as exc:
+        logger.warning("financial_snapshot source failed: %s", type(exc).__name__)
+        return Widget.degraded_(data=None)
+    if resp.status_code == 403:
+        return Widget.unauthorized_()
+    if resp.status_code == 404:
+        return Widget.empty_()
+    if resp.status_code >= 400:
+        logger.warning("financial_snapshot source HTTP %s", resp.status_code)
+        return Widget.degraded_(data=None)
+    try:
+        payload = resp.json()
+    except ValueError:
+        return Widget.degraded_(data=None)
+    summary = payload.get("summary") if isinstance(payload, dict) else {}
+    period = payload.get("period_summary") if isinstance(payload, dict) else {}
+    company = payload.get("company") if isinstance(payload, dict) else {}
+    data = {
+        "company": (company or {}).get("name"),
+        "currency": (payload.get("currency") if isinstance(payload, dict) else None) or "INR",
+        "cash": _compact_amount((summary or {}).get("total_cash")),
+        "receivables": _compact_amount((summary or {}).get("receivables", {}).get("amount") if isinstance((summary or {}).get("receivables"), dict) else None),
+        "payables": _compact_amount((summary or {}).get("payables", {}).get("amount") if isinstance((summary or {}).get("payables"), dict) else None),
+        "period_net": _compact_amount((period or {}).get("net")),
+        "period_income": _compact_amount((period or {}).get("income")),
+        "period_expenses": _compact_amount((period or {}).get("expenses")),
+    }
+    return Widget.ok_(data=data)
+
+
+async def fetch_recent_conversations(client: httpx.AsyncClient, bearer: str,
+                                     org_id: Optional[int] = None) -> Widget:
+    """Recent Connect conversations visible to the caller.
+
+    Connect's conversations endpoint scopes to the authenticated participant via
+    the forwarded bearer. It has no org filter today, so when Home is scoped to a
+    selected org we still rely on Connect's participant/org gates and expose only
+    compact conversation metadata, never message bodies beyond the existing last
+    preview field.
+    """
+    try:
+        resp = await client.get(
+            f"{settings.CONNECT_API_URL}/conversations/",
+            headers=_auth_headers(bearer),
+            params={"limit": "5", "page_size": "5"},
+            timeout=settings.SOURCE_TIMEOUT_SECONDS,
+        )
+    except (httpx.TimeoutException, httpx.TransportError) as exc:
+        logger.warning("recent_conversations source failed: %s", type(exc).__name__)
+        return Widget.degraded_(data=[])
+    if resp.status_code == 403:
+        return Widget.unauthorized_()
+    if resp.status_code >= 400:
+        logger.warning("recent_conversations source HTTP %s", resp.status_code)
+        return Widget.degraded_(data=[])
+    try:
+        payload = resp.json()
+    except ValueError:
+        return Widget.degraded_(data=[])
+    conversations = payload.get("results", payload) if isinstance(payload, dict) else payload
+    out = []
+    for conv in (conversations or [])[:5]:
+        if not isinstance(conv, dict):
+            continue
+        names = conv.get("participant_names") or []
+        title = conv.get("name") or (", ".join(names[:3]) if names else "Conversation")
+        out.append({
+            "id": conv.get("id"),
+            "title": title,
+            "type": conv.get("conversation_type"),
+            "unread": conv.get("unread_count", 0),
+            "last_at": conv.get("last_message_at"),
+            "last_preview": conv.get("last_message_preview") or ((conv.get("last_message") or {}).get("content") if isinstance(conv.get("last_message"), dict) else None),
+        })
+    if not out:
+        return Widget.empty_()
+    return Widget.ok_(data=out)

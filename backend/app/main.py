@@ -19,7 +19,11 @@ import httpx
 from fastapi import Depends, FastAPI, Query
 
 from .auth import Caller, resolve_scope_org, verify_caller
-from .clients import fetch_agent_activity, fetch_alerts, fetch_tasks_by_status
+from .cache import cache_key, widget_cache
+from .clients import (
+    fetch_agent_activity, fetch_alerts, fetch_financial_snapshot,
+    fetch_recent_conversations, fetch_tasks_by_status,
+)
 from .schema import HomeSummaryV1, OrgRef, SUMMARY_VERSION
 
 app = FastAPI(title="Shizuha Home BFF", version=str(SUMMARY_VERSION))
@@ -42,11 +46,26 @@ async def home_summary(
 
     # Fan out to downstreams concurrently, forwarding the caller's Bearer. Each
     # client is fail-soft, so a slow/down source degrades only its widget.
+    # Cacheable widgets serve recently-good stale data during brownouts.
     async with httpx.AsyncClient() as client:
-        tasks_widget, agent_widget, alerts_widget = await asyncio.gather(
-            fetch_tasks_by_status(client, caller.bearer, caller.email, scope_org),
+        tasks_widget, agent_widget, alerts_widget, financial_widget, conversations_widget = await asyncio.gather(
+            widget_cache.get_or_fetch(
+                cache_key("tasks_by_status", caller.user_id, scope_org),
+                lambda: fetch_tasks_by_status(client, caller.bearer, caller.email, scope_org),
+            ),
             fetch_agent_activity(client, caller.bearer, scope_org),
-            fetch_alerts(client, caller.bearer, scope_org),
+            widget_cache.get_or_fetch(
+                cache_key("alerts", caller.user_id, scope_org),
+                lambda: fetch_alerts(client, caller.bearer, scope_org),
+            ),
+            widget_cache.get_or_fetch(
+                cache_key("financial_snapshot", caller.user_id, scope_org),
+                lambda: fetch_financial_snapshot(client, caller.bearer, scope_org),
+            ),
+            widget_cache.get_or_fetch(
+                cache_key("recent_conversations", caller.user_id, scope_org),
+                lambda: fetch_recent_conversations(client, caller.bearer, scope_org),
+            ),
         )
 
     return HomeSummaryV1(
@@ -57,5 +76,7 @@ async def home_summary(
             "agent_activity": agent_widget,
             "tasks_by_status": tasks_widget,
             "alerts": alerts_widget,
+            "financial_snapshot": financial_widget,
+            "recent_conversations": conversations_widget,
         },
     )

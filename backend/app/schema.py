@@ -34,6 +34,10 @@ class Widget(BaseModel):
         return cls(status=WidgetStatus.degraded, data=data, as_of=as_of)
 
     @classmethod
+    def stale_(cls, data=None, as_of=None):
+        return cls(status=WidgetStatus.stale, data=data, as_of=as_of)
+
+    @classmethod
     def unauthorized_(cls):
         return cls(status=WidgetStatus.unauthorized, data=None)
 

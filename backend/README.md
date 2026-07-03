@@ -7,15 +7,18 @@ the home nginx: `/api/home/*` → BFF, else → SPA). **No ORM/DB** — Django r
 the platform default for anything with models/tenant data; this is sanctioned
 only as a stateless async BFF.
 
-## Endpoint (slices 1–2)
+## Endpoint (slices 1–3)
 
 `GET /api/home/summary?org_id=<optional>` → `HomeSummaryV1` (versioned envelope).
 
 - **orgs** — from the verified JWT's `organization_memberships` claim (no downstream call).
 - **widgets.tasks_by_status** — counts of the caller's tasks by status (pulse; caller's Bearer forwarded).
-- **widgets.agent_activity** — compact `{active, error}` roster/health rollup (pulse `agent_overview`; caller's Bearer forwarded).
+- **widgets.agent_activity** — disabled/degraded until Pulse exposes an org-scoped roster endpoint.
 - **widgets.alerts** — compact active alert summaries `[{sev, summary}]` (pulse alerts; caller's Bearer forwarded).
+- **widgets.financial_snapshot** — compact Books dashboard totals (`cash`, receivables/payables, period P&L), **Books-authz gated** with `X-Organization-ID`; returns `unauthorized` on Books 403 and `empty` until a selected org is supplied.
+- **widgets.recent_conversations** — compact Connect conversation metadata visible to the caller via forwarded Bearer.
 - Always **200 (partial)**; each widget carries `status ∈ ok|degraded|stale|unauthorized|empty` so the SPA renders shell+skeletons and hydrates independently. A slow/down source degrades ONE widget (per-source timeout), never the page.
+- Cache/serve-stale: successful widget payloads are cached briefly in-process (`HOME_BFF_CACHE_TTL`, default 15s) and served as `stale` during downstream brownouts up to `HOME_BFF_STALE_TTL` (default 300s).
 
 ## Tenant isolation (the load-bearing control)
 
@@ -28,8 +31,12 @@ only as a stateless async BFF.
 | var | default | note |
 |-----|---------|------|
 | `JWT_SECRET_KEY` | (required) | shared HS256 key with shizuha-id; fail-closed if unset |
-| `PULSE_API_URL` | `http://shizuha-pulse:8002` | pulse base for the tasks widget |
+| `PULSE_API_URL` | `http://shizuha-pulse:8002` | pulse base for tasks/alerts |
+| `BOOKS_API_URL` | `http://shizuha-books:8000/api` | books base for financial snapshot |
+| `CONNECT_API_URL` | `http://shizuha-connect:8000/api` | connect base for recent conversations |
 | `HOME_BFF_SOURCE_TIMEOUT` | `0.8` | per-source fan-out timeout (s) |
+| `HOME_BFF_CACHE_TTL` | `15` | fresh widget cache TTL (s) |
+| `HOME_BFF_STALE_TTL` | `300` | serve-stale window after source failure (s) |
 
 ## Test
 
@@ -45,6 +52,6 @@ httpx MockTransport).
 
 ## Roadmap (remaining slices — see HIVE-375)
 
-3. `financial_snapshot` (books, **authz-gated**) + `recent_conversations` (connect) + cortex.
-4. Redis short-TTL cache + serve-stale + p95 budget verification + degradation e2e.
-Deploy wiring (nginx `/api/home/*` route + sibling container + CI test gate) lands with the rollout.
+4. Cortex widget + PLAT-1322 probe registration once deployed.
+5. Redis-backed cache if cross-replica stale sharing becomes necessary (current cache is safe best-effort per process).
+Deploy wiring: nginx `/api/home/*` now proxies to the sibling backend service; chart/backend image rollout remains the deployment slice.
