@@ -28,22 +28,22 @@ export default function Navbar() {
           {/* Desktop Navigation */}
           <div className="hidden md:flex items-center gap-6">
             <a
+              href="#how-it-works"
+              className="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white transition-colors"
+            >
+              How it works
+            </a>
+            <a
               href="#capabilities"
               className="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white transition-colors"
             >
-              Agents
+              Capabilities
             </a>
             <a
-              href="#products"
+              href="#proof"
               className="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white transition-colors"
             >
-              Services
-            </a>
-            <a
-              href="#features"
-              className="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white transition-colors"
-            >
-              Features
+              Proof
             </a>
             <a
               href="/docs"
@@ -52,16 +52,10 @@ export default function Navbar() {
               Docs
             </a>
             <a
-              href="/benchmarks"
-              className="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white transition-colors"
-            >
-              Benchmarks
-            </a>
-            <a
               href="/autonomous-org"
               className="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white transition-colors"
             >
-              Autonomous Org
+              Create org
             </a>
           </div>
 
@@ -134,25 +128,25 @@ export default function Navbar() {
         <div className="md:hidden bg-white dark:bg-gray-950 border-t border-gray-200 dark:border-gray-800 animate-fade-in">
           <div className="px-4 py-4 space-y-3">
             <a
+              href="#how-it-works"
+              className="block px-3 py-2 rounded-lg text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
+              onClick={() => setIsMobileMenuOpen(false)}
+            >
+              How it works
+            </a>
+            <a
               href="#capabilities"
               className="block px-3 py-2 rounded-lg text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
               onClick={() => setIsMobileMenuOpen(false)}
             >
-              Agents
+              Capabilities
             </a>
             <a
-              href="#products"
+              href="#proof"
               className="block px-3 py-2 rounded-lg text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
               onClick={() => setIsMobileMenuOpen(false)}
             >
-              Services
-            </a>
-            <a
-              href="#features"
-              className="block px-3 py-2 rounded-lg text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
-              onClick={() => setIsMobileMenuOpen(false)}
-            >
-              Features
+              Proof
             </a>
             <a
               href="/docs"
@@ -162,18 +156,11 @@ export default function Navbar() {
               Docs
             </a>
             <a
-              href="/benchmarks"
-              className="block px-3 py-2 rounded-lg text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
-              onClick={() => setIsMobileMenuOpen(false)}
-            >
-              Benchmarks
-            </a>
-            <a
               href="/autonomous-org"
               className="block px-3 py-2 rounded-lg text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
               onClick={() => setIsMobileMenuOpen(false)}
             >
-              Autonomous Org
+              Create org
             </a>
             <hr className="border-gray-200 dark:border-gray-800" />
             {isAuthenticated ? (
