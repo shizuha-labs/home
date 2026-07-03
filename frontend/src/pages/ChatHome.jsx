@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { ConnectChatProvider, ChatLayout, MessageList, MessageInput, Avatar, NewChatModal, useConnectChat } from '@shizuha/chat'
 import { SHIZUHA_APPS, useEnabledServices } from '@shizuha/ui'
+import CommandCenterDashboard from '../components/dashboard/CommandCenterDashboard'
 
 const ACCESS_TOKEN_KEY = 'shizuha_access_token'
 function getAuthToken() {
@@ -489,6 +490,14 @@ function ChatHomeInner() {
                 <span className="font-medium">{chip.label}</span>
               </button>
             ))}
+          </div>
+
+          {/* HIVE-376: command-center dashboard — a concise, live, access-scoped
+              view of the user's orgs / agents / work / money / alerts, hydrating
+              independently from the HIVE-375 aggregation API. Chat stays the heart
+              above; this is the "everything at a glance" surface below it. */}
+          <div className="mt-10">
+            <CommandCenterDashboard />
           </div>
 
           {/* Trust line — same as Hero */}
