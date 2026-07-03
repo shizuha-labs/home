@@ -12,6 +12,7 @@ import HivePage from './pages/HivePage'
 import ResearchPage from './pages/ResearchPage'
 import ResearchOrderPage from './pages/ResearchOrderPage'
 import DojoPage from './pages/DojoPage'
+import AutonomousOrgPage from './pages/AutonomousOrgPage'
 
 function LoadingSpinner() {
   return (
@@ -89,6 +90,7 @@ export default function App() {
       <Route path="/api" element={<ApiPage />} />
       <Route path="/hive" element={<HivePage />} />
       <Route path="/dojo" element={<DojoPage />} />
+      <Route path="/autonomous-org" element={<AutonomousOrgPage />} />
       <Route path="/research" element={<ResearchPage />} />
       <Route path="/research/order" element={<ResearchOrderPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />

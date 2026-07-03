@@ -15,6 +15,12 @@ const escapeAttr = (value) =>
 
 const routes = [
   {
+    output: 'autonomous-org/index.html',
+    title: 'Shizuha Autonomous Org — managed AI workforce for startups',
+    description:
+      'Shizuha provisions and operates a managed AI organization for your team: agents, workflows, knowledge, messaging, files, review gates, and human escalation.',
+  },
+  {
     output: 'dojo/index.html',
     title: 'DOJO Waitlist — AI Interview Prep by Shizuha',
     description:
