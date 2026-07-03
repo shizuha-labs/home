@@ -196,6 +196,9 @@ export default function HivePage() {
                 <p className="text-gray-500 dark:text-gray-400">
                   We'll reach out as soon as Hive early access opens. Your autonomous organization is one step closer.
                 </p>
+                <p className="mt-3 text-sm text-cyan-600 dark:text-cyan-400 font-medium">
+                  Early access opens Q3 2026 — you'll hear from us by September 2026.
+                </p>
               </div>
             ) : (
               <>
