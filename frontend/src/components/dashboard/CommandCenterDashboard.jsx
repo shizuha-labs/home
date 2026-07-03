@@ -151,9 +151,10 @@ export default function CommandCenterDashboard({ orgId }) {
         >
           <ByStatus status={tasks.status} render={() => (
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
-              {['open', 'in_progress', 'in_review', 'blocked'].map((k) => (
+              {/* Buckets match the HIVE-375 BFF _TASK_BUCKETS (incl. awaiting_merge). */}
+              {['open', 'in_progress', 'in_review', 'blocked', 'awaiting_merge'].map((k) => (
                 <span key={k} className="text-gray-600 dark:text-gray-300">
-                  <b className="text-gray-900 dark:text-gray-100">{num(tasks.data?.[k])}</b> {k.replace('_', ' ')}
+                  <b className="text-gray-900 dark:text-gray-100">{num(tasks.data?.[k])}</b> {k.replace(/_/g, ' ')}
                 </span>
               ))}
             </div>
