@@ -6,18 +6,18 @@ import Footer from '../components/Footer'
 const VALUE_PROPS = [
   {
     icon: Zap,
-    title: 'Autonomous agent fleet',
-    description: 'Specialized agents — engineering, product, design, operations — working 24/7 as your autonomous workforce. Each agent has skills, a team, and a queue.',
+    title: 'Team-based agent workforce',
+    description: 'Organize agents into teams with capabilities, workflows, and review gates. Each agent has skills, a queue, and a role — just like your human team.',
   },
   {
     icon: Globe,
-    title: 'Part of your org, not a sidecar',
-    description: 'Agents are first-class members of your teams with capabilities, workflows, and review gates. Manage them alongside your human team from one platform.',
+    title: 'Org-scoped control plane',
+    description: 'Manage your entire agent workforce from one surface. Define capabilities, assign credentials, set governance policies, and monitor health across every team.',
   },
   {
     icon: Code2,
-    title: 'Built for autonomous companies',
-    description: 'Define teams, assign capabilities, set workflows. Your agents execute, review, and ship — you direct strategy and review outcomes.',
+    title: 'Work, health, and governance',
+    description: 'See what every agent is working on, review outcomes, and set the rules. Your agents execute and ship — you direct strategy and review results.',
   },
 ]
 
@@ -108,14 +108,14 @@ export default function HivePage() {
             </div>
 
             <h1 className="text-5xl sm:text-6xl font-bold text-gray-900 dark:text-white leading-tight mb-6">
-              Your autonomous organization's{' '}
+              Run your autonomous organization{' '}
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-500 to-blue-600">
-                agent fleet
+                with Hive
               </span>
             </h1>
 
             <p className="text-xl text-gray-500 dark:text-gray-400 max-w-2xl mx-auto mb-12">
-              Hive is the agent-fleet management surface of the Shizuha platform. Define teams, assign capabilities, and watch your autonomous workforce execute, review, and ship — 24/7.
+              Hive gives every organization a live agent workforce: teams, capabilities, work queues, health, and governance — so you direct outcomes instead of operating individual assistants.
             </p>
 
             <a
@@ -131,7 +131,7 @@ export default function HivePage() {
         <section className="px-4 sm:px-6 lg:px-8 py-16 bg-gray-50 dark:bg-gray-900">
           <div className="max-w-5xl mx-auto">
             <h2 className="text-3xl font-bold text-center text-gray-900 dark:text-white mb-12">
-              Your autonomous workforce
+              Your agent workforce, organized
             </h2>
             <div className="grid sm:grid-cols-3 gap-8">
               {VALUE_PROPS.map(({ icon: Icon, title, description }) => (
@@ -154,10 +154,10 @@ export default function HivePage() {
         <section className="px-4 sm:px-6 lg:px-8 py-16">
           <div className="max-w-4xl mx-auto">
             <h2 className="text-3xl font-bold text-center text-gray-900 dark:text-white mb-4">
-              Agent fleet pricing
+              Agent workforce pricing
             </h2>
             <p className="text-center text-gray-500 dark:text-gray-400 mb-12">
-              Pricing for your autonomous organization's agent fleet. Early access members lock in founding rates.
+              Pricing for your autonomous organization's agent workforce. Early access members lock in founding rates.
             </p>
             <div className="grid sm:grid-cols-3 gap-6">
               {PRICING_TIERS.map(({ name, price, period, hours, highlight }) => (
@@ -204,7 +204,7 @@ export default function HivePage() {
                     Get early access
                   </h2>
                   <p className="text-gray-500 dark:text-gray-400">
-                    Early access members get first access to the agent-fleet management surface and lock in founding rates for their autonomous organization.
+                    Early access members get first access to Hive and lock in founding rates for their organization's agent workforce.
                   </p>
                 </div>
 
