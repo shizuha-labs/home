@@ -7,12 +7,14 @@ the home nginx: `/api/home/*` → BFF, else → SPA). **No ORM/DB** — Django r
 the platform default for anything with models/tenant data; this is sanctioned
 only as a stateless async BFF.
 
-## Endpoint (slice 1)
+## Endpoint (slices 1–2)
 
 `GET /api/home/summary?org_id=<optional>` → `HomeSummaryV1` (versioned envelope).
 
 - **orgs** — from the verified JWT's `organization_memberships` claim (no downstream call).
 - **widgets.tasks_by_status** — counts of the caller's tasks by status (pulse; caller's Bearer forwarded).
+- **widgets.agent_activity** — compact `{active, error}` roster/health rollup (pulse `agent_overview`; caller's Bearer forwarded).
+- **widgets.alerts** — compact active alert summaries `[{sev, summary}]` (pulse alerts; caller's Bearer forwarded).
 - Always **200 (partial)**; each widget carries `status ∈ ok|degraded|stale|unauthorized|empty` so the SPA renders shell+skeletons and hydrates independently. A slow/down source degrades ONE widget (per-source timeout), never the page.
 
 ## Tenant isolation (the load-bearing control)
@@ -36,14 +38,13 @@ pip install -r requirements.txt
 python -m pytest tests/ -q
 ```
 
-Slice-1 tests cover the auth/tenant-scope invariants (PLAT-1236 cross-org→403,
-wrong-key/expired→401, scope-from-token) and the pulse client's
+Tests cover the auth/tenant-scope invariants (PLAT-1236 cross-org→403,
+wrong-key/expired→401, scope-from-token) and the pulse clients'
 graceful-degrade / unauthorized / Bearer-forwarding — all offline (TestClient +
 httpx MockTransport).
 
 ## Roadmap (remaining slices — see HIVE-375)
 
-2. `agent_activity` (hive) + `alerts`.
 3. `financial_snapshot` (books, **authz-gated**) + `recent_conversations` (connect) + cortex.
 4. Redis short-TTL cache + serve-stale + p95 budget verification + degradation e2e.
 Deploy wiring (nginx `/api/home/*` route + sibling container + CI test gate) lands with the rollout.

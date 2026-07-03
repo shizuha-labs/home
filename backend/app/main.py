@@ -11,6 +11,7 @@ otherwise); downstreams receive the caller's own Bearer so each applies its own
 authz — the BFF holds no privileged token and can never widen scope / leak
 cross-org. (STRIDE-lite on the task; PLAT-1236 cross-org→403 tests below.)
 """
+import asyncio
 import datetime
 from typing import Optional
 
@@ -18,7 +19,7 @@ import httpx
 from fastapi import Depends, FastAPI, Query
 
 from .auth import Caller, resolve_scope_org, verify_caller
-from .clients import fetch_tasks_by_status
+from .clients import fetch_agent_activity, fetch_alerts, fetch_tasks_by_status
 from .schema import HomeSummaryV1, OrgRef, SUMMARY_VERSION
 
 app = FastAPI(title="Shizuha Home BFF", version=str(SUMMARY_VERSION))
@@ -39,14 +40,22 @@ async def home_summary(
 
     orgs = [OrgRef(id=oid, role=role) for oid, role in caller.memberships.items()]
 
-    # Fan out to downstreams concurrently, forwarding the caller's Bearer. Slice 1
-    # has one source (pulse); more join via asyncio.gather in later slices.
+    # Fan out to downstreams concurrently, forwarding the caller's Bearer. Each
+    # client is fail-soft, so a slow/down source degrades only its widget.
     async with httpx.AsyncClient() as client:
-        tasks_widget = await fetch_tasks_by_status(client, caller.bearer, caller.email)
+        tasks_widget, agent_widget, alerts_widget = await asyncio.gather(
+            fetch_tasks_by_status(client, caller.bearer, caller.email, scope_org),
+            fetch_agent_activity(client, caller.bearer, scope_org),
+            fetch_alerts(client, caller.bearer, scope_org),
+        )
 
     return HomeSummaryV1(
         generated_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
         org_id=scope_org,
         orgs=orgs,
-        widgets={"tasks_by_status": tasks_widget},
+        widgets={
+            "agent_activity": agent_widget,
+            "tasks_by_status": tasks_widget,
+            "alerts": alerts_widget,
+        },
     )
