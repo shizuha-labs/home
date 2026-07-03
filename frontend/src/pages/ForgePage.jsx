@@ -16,6 +16,22 @@ function campaignSource() {
   return params.get('utm_source') || params.get('source') || ''
 }
 
+let forgeLandingViewSent = false
+
+function trackForgeLandingView() {
+  if (typeof window === 'undefined' || typeof fetch === 'undefined' || forgeLandingViewSent) return
+  forgeLandingViewSent = true
+  try {
+    fetch('/api/forge/landing', {
+      method: 'GET',
+      cache: 'no-store',
+      keepalive: true,
+    }).catch(() => {})
+  } catch {
+    // Best-effort funnel beacon only; never block the landing page.
+  }
+}
+
 function trackForge(eventType, extra = {}) {
   if (typeof navigator === 'undefined') return
   const payload = JSON.stringify({
@@ -137,6 +153,7 @@ function SignupForm() {
 
 export default function ForgePage() {
   useEffect(() => {
+    trackForgeLandingView()
     trackForge('page_view')
   }, [])
 
