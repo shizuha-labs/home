@@ -117,12 +117,14 @@ def test_tasks_widget_counts_by_status():
     def handler(request):
         # The caller's Bearer must be forwarded verbatim (no privileged token).
         assert request.headers.get("Authorization") == "Bearer caller-tok"
+        assert request.url.params.get("organization") == "7"
+        assert "org_id" not in request.url.params
         return httpx.Response(200, json={"results": [
             {"status": "open"}, {"status": "open"}, {"status": "in_review"}, {"status": "done"},
         ]})
     async def go():
         async with _mock_client(handler) as c:
-            return await clients.fetch_tasks_by_status(c, "caller-tok", "a@org1.example")
+            return await clients.fetch_tasks_by_status(c, "caller-tok", "a@org1.example", 7)
     w = _run(go())
     assert w.status == "ok"
     assert w.data["open"] == 2 and w.data["in_review"] == 1
@@ -147,39 +149,22 @@ def test_tasks_widget_unauthorized_on_403():
     assert _run(go()).status == "unauthorized"
 
 
-def test_agent_activity_widget_counts_active_and_error_agents():
+def test_agent_activity_widget_disabled_until_pulse_endpoint_is_scoped():
     def handler(request):
-        assert request.headers.get("Authorization") == "Bearer caller-tok"
-        assert request.url.params.get("org_id") == "7"
-        return httpx.Response(200, json={"generated_at": "2026-07-03T00:00:00Z", "teams": [
-            {"team": "engineering", "agents": [
-                {"email": "a@shizuha.com", "active": 2, "health": {"status": "active"}},
-                {"email": "b@shizuha.com", "active": 0, "health": {"status": "down"}},
-                {"email": "c@shizuha.com", "active": 1, "health": {"auth_errors": 1}},
-            ]}
-        ]})
+        raise AssertionError("unscoped Pulse agent_overview must not be called")
     async def go():
         async with _mock_client(handler) as c:
             return await clients.fetch_agent_activity(c, "caller-tok", 7)
     w = _run(go())
-    assert w.status == "ok"
-    assert w.data == {"active": 1, "error": 2}
-    assert w.as_of == "2026-07-03T00:00:00Z"
-
-
-def test_agent_activity_widget_degrades_on_timeout():
-    def handler(request):
-        raise httpx.ReadTimeout("boom")
-    async def go():
-        async with _mock_client(handler) as c:
-            return await clients.fetch_agent_activity(c, "t")
-    assert _run(go()).status == "degraded"
+    assert w.status == "degraded"
+    assert w.data == {"active": None, "error": None}
 
 
 def test_alerts_widget_returns_compact_severity_summaries():
     def handler(request):
         assert request.headers.get("Authorization") == "Bearer caller-tok"
-        assert request.url.params.get("org_id") == "7"
+        assert request.url.params.get("organization") == "7"
+        assert "org_id" not in request.url.params
         return httpx.Response(200, json={"alerts": [
             {"severity": "critical", "summary": "Node CPU high"},
             {"priority": "high", "title": "Agent down"},

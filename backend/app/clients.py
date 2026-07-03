@@ -24,7 +24,10 @@ def _auth_headers(bearer: str) -> dict[str, str]:
 
 
 def _scope_params(org_id: Optional[int] = None) -> dict[str, str]:
-    return {"org_id": str(org_id)} if org_id is not None else {}
+    # Pulse scopes ItemViewSet by `organization`, not `org_id`. Keep this helper
+    # as the single source for Pulse fan-outs so Home's selected-org envelope
+    # cannot be mislabeled while downstream returns cross-org data.
+    return {"organization": str(org_id)} if org_id is not None else {}
 
 
 async def fetch_tasks_by_status(client: httpx.AsyncClient, bearer: str,
@@ -72,50 +75,13 @@ async def fetch_agent_activity(client: httpx.AsyncClient, bearer: str,
                                org_id: Optional[int] = None) -> Widget:
     """Compact live agent rollup for the command center.
 
-    Pulse owns roster/task/health state via `agent_overview`; this BFF only
-    forwards the caller's Bearer and reduces it to the frontend's contract:
-    `{active, error}`. A downstream 403 means the caller cannot see org agent
-    activity; source failures degrade only this widget.
+    Disabled for slice 2 until Pulse exposes an org/permission-scoped agent
+    activity endpoint. `/api/items/agent_overview/` currently aggregates global
+    roster/task state and ignores ItemViewSet organization scoping; forwarding a
+    caller Bearer is therefore not sufficient to make it tenant-safe.
     """
-    try:
-        resp = await client.get(
-            f"{settings.PULSE_API_URL}/api/items/agent_overview/",
-            headers=_auth_headers(bearer),
-            params=_scope_params(org_id),
-            timeout=settings.SOURCE_TIMEOUT_SECONDS,
-        )
-    except (httpx.TimeoutException, httpx.TransportError) as exc:
-        logger.warning("agent_activity source failed: %s", type(exc).__name__)
-        return Widget.degraded_(data={"active": None, "error": None})
-    if resp.status_code == 403:
-        return Widget.unauthorized_()
-    if resp.status_code >= 400:
-        logger.warning("agent_activity source HTTP %s", resp.status_code)
-        return Widget.degraded_(data={"active": None, "error": None})
-    try:
-        payload = resp.json()
-    except ValueError:
-        return Widget.degraded_(data={"active": None, "error": None})
-    active = 0
-    error = 0
-    for team in payload.get("teams", []) if isinstance(payload, dict) else []:
-        for agent in (team or {}).get("agents", []) or []:
-            health = (agent or {}).get("health") or {}
-            status = str(health.get("status") or health.get("state") or "").lower()
-            is_error = (
-                status in {"error", "down", "stopped", "unhealthy", "wedged"}
-                or bool(health.get("auth_errors"))
-            )
-            if is_error:
-                error += 1
-            else:
-                # Count agents with work or an explicitly healthy/active signal as active.
-                if (agent or {}).get("active", 0) or status in {"active", "ok", "healthy", "up", "running"}:
-                    active += 1
-    if active == 0 and error == 0:
-        return Widget.empty_()
-    return Widget.ok_(data={"active": active, "error": error},
-                      as_of=(payload.get("generated_at") if isinstance(payload, dict) else None))
+    logger.info("agent_activity disabled until Pulse exposes a scoped endpoint")
+    return Widget.degraded_(data={"active": None, "error": None})
 
 
 async def fetch_alerts(client: httpx.AsyncClient, bearer: str,
