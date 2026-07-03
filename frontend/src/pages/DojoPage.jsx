@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { ArrowRight, Brain, CheckCircle, Code2, MessageSquare, Route, Sparkles, Target } from 'lucide-react'
-import Navbar from '../components/Navbar'
+import GlobalNavBar from '../components/shared/GlobalNavBar'
 import Footer from '../components/Footer'
 
 const BENEFITS = [
@@ -148,7 +148,7 @@ function DojoWaitlistForm() {
 export default function DojoPage() {
   return (
     <div className="min-h-screen flex flex-col bg-white dark:bg-gray-950">
-      <Navbar />
+      <GlobalNavBar />
 
       <main className="flex-1 pt-16">
         <section className="relative overflow-hidden px-4 py-20 sm:px-6 lg:px-8 lg:py-28">

@@ -1,23 +1,23 @@
 import { useState } from 'react'
 import { CheckCircle, Zap, Globe, Code2, Search, Image, FlaskConical } from 'lucide-react'
-import Navbar from '../components/Navbar'
+import GlobalNavBar from '../components/shared/GlobalNavBar'
 import Footer from '../components/Footer'
 
 const VALUE_PROPS = [
   {
     icon: Zap,
-    title: 'Multi-skill agent fleet',
-    description: 'Browser automation, web search, code execution, image generation, and deep research — in one fleet.',
+    title: 'Team-based agent workforce',
+    description: 'Organize agents into teams with capabilities, workflows, and review gates. Each agent has skills, a queue, and a role — just like your human team.',
   },
   {
     icon: Globe,
-    title: 'API + dashboard access',
-    description: 'Integrate via REST API or control your agents from the Shizuha dashboard. Runs 24/7, no babysitting required.',
+    title: 'Org-scoped control plane',
+    description: 'Manage your entire agent workforce from one surface. Define capabilities, assign credentials, set governance policies, and monitor health across every team.',
   },
   {
     icon: Code2,
-    title: 'Built for builders',
-    description: 'Automate complex multi-step workflows. Agents hand off tasks between skills and report back structured results.',
+    title: 'Work, health, and governance',
+    description: 'See what every agent is working on, review outcomes, and set the rules. Your agents execute and ship — you direct strategy and review results.',
   },
 ]
 
@@ -96,7 +96,7 @@ export default function HivePage() {
 
   return (
     <div className="min-h-screen flex flex-col bg-white dark:bg-gray-950">
-      <Navbar />
+      <GlobalNavBar />
 
       <main className="flex-1 pt-16">
         {/* Hero */}
@@ -108,14 +108,14 @@ export default function HivePage() {
             </div>
 
             <h1 className="text-5xl sm:text-6xl font-bold text-gray-900 dark:text-white leading-tight mb-6">
-              Your autonomous AI agent fleet{' '}
+              Run your autonomous organization{' '}
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-500 to-blue-600">
-                — from $29/mo
+                with Hive
               </span>
             </h1>
 
             <p className="text-xl text-gray-500 dark:text-gray-400 max-w-2xl mx-auto mb-12">
-              HIVE gives you a fleet of specialized agents — browser, search, code, image, and research — accessible via API and dashboard, running around the clock.
+              Hive gives every organization a live agent workforce: teams, capabilities, work queues, health, and governance — so you direct outcomes instead of operating individual assistants.
             </p>
 
             <a
@@ -131,7 +131,7 @@ export default function HivePage() {
         <section className="px-4 sm:px-6 lg:px-8 py-16 bg-gray-50 dark:bg-gray-900">
           <div className="max-w-5xl mx-auto">
             <h2 className="text-3xl font-bold text-center text-gray-900 dark:text-white mb-12">
-              One fleet. Every skill.
+              Your agent workforce, organized
             </h2>
             <div className="grid sm:grid-cols-3 gap-8">
               {VALUE_PROPS.map(({ icon: Icon, title, description }) => (
@@ -154,10 +154,10 @@ export default function HivePage() {
         <section className="px-4 sm:px-6 lg:px-8 py-16">
           <div className="max-w-4xl mx-auto">
             <h2 className="text-3xl font-bold text-center text-gray-900 dark:text-white mb-4">
-              Simple, transparent pricing
+              Agent workforce pricing
             </h2>
             <p className="text-center text-gray-500 dark:text-gray-400 mb-12">
-              Pricing tiers are indicative — early access members lock in founding rates.
+              Pricing for your autonomous organization's agent workforce. Early access members lock in founding rates.
             </p>
             <div className="grid sm:grid-cols-3 gap-6">
               {PRICING_TIERS.map(({ name, price, period, hours, highlight }) => (
@@ -194,17 +194,17 @@ export default function HivePage() {
                 <CheckCircle className="w-16 h-16 text-cyan-500 mx-auto mb-4" />
                 <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">You're on the list!</h2>
                 <p className="text-gray-500 dark:text-gray-400">
-                  We'll reach out as soon as HIVE early access opens. Check your inbox for a confirmation.
+                  We'll reach out as soon as Hive early access opens. Your autonomous organization is one step closer.
                 </p>
               </div>
             ) : (
               <>
                 <div className="text-center mb-10">
                   <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-3">
-                    Join the waitlist
+                    Get early access
                   </h2>
                   <p className="text-gray-500 dark:text-gray-400">
-                    Early access members lock in founding rates and get first access to new agent skills.
+                    Early access members get first access to Hive and lock in founding rates for their organization's agent workforce.
                   </p>
                 </div>
 
@@ -243,7 +243,7 @@ export default function HivePage() {
 
                   <div>
                     <label htmlFor="use_case" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      How will you use HIVE?
+                      What describes your organization?
                     </label>
                     <select
                       id="use_case"

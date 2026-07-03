@@ -1,5 +1,5 @@
 import { ArrowRight, Bot, Building2, Cpu, GitBranch, LineChart, Shield, Sparkles, Users, Workflow } from 'lucide-react'
-import Navbar from '../components/Navbar'
+import GlobalNavBar from '../components/shared/GlobalNavBar'
 import Footer from '../components/Footer'
 import WelcomeBanner from '../components/WelcomeBanner'
 import AppGrid from '../components/AppGrid'
@@ -56,7 +56,7 @@ export default function LandingPage() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <Navbar />
+      <GlobalNavBar />
 
       <main className="flex-1">
         {/* ── Hero ─────────────────────────────────────────────── */}

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useLocation } from 'react-router-dom'
 import { ChevronRight, Copy, Check, Terminal, BookOpen, ArrowLeft } from 'lucide-react'
-import Navbar from '../components/Navbar'
+import GlobalNavBar from '../components/shared/GlobalNavBar'
 import Footer from '../components/Footer'
 
 // ── Code block with copy ──
@@ -134,7 +134,7 @@ export default function DocsPage() {
 
   return (
     <div className="min-h-screen flex flex-col bg-white dark:bg-gray-950">
-      <Navbar />
+      <GlobalNavBar />
 
       <main className="flex-1 pt-16">
         <div className="max-w-[90rem] mx-auto flex">

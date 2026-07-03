@@ -1,4 +1,4 @@
-import Navbar from '../components/Navbar'
+import GlobalNavBar from '../components/shared/GlobalNavBar'
 import Footer from '../components/Footer'
 import { BarChart3, Trophy, GitBranch, Clock, ExternalLink } from 'lucide-react'
 
@@ -27,7 +27,7 @@ const METHODOLOGY = [
 export default function BenchmarksPage() {
   return (
     <div className="min-h-screen flex flex-col bg-white dark:bg-gray-950">
-      <Navbar />
+      <GlobalNavBar />
       <main className="flex-1 pt-20 pb-16">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
 
