@@ -18,22 +18,22 @@ export default function Footer() {
           {/* Links */}
           <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-6 text-sm">
             <a
+              href="#how-it-works"
+              className="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white transition-colors"
+            >
+              How it works
+            </a>
+            <a
               href="#capabilities"
               className="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white transition-colors"
             >
-              Agents
+              Capabilities
             </a>
             <a
-              href="#products"
+              href="#proof"
               className="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white transition-colors"
             >
-              Services
-            </a>
-            <a
-              href="#features"
-              className="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white transition-colors"
-            >
-              Features
+              Proof
             </a>
             <a
               href="/docs"
@@ -42,10 +42,10 @@ export default function Footer() {
               Docs
             </a>
             <a
-              href="/install.sh"
+              href="/autonomous-org"
               className="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white transition-colors"
             >
-              Install
+              Create org
             </a>
           </div>
 
