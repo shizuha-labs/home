@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Search, MessageCircle, ExternalLink, CornerDownLeft, ShieldCheck } from 'lucide-react'
 import { SHIZUHA_APPS, useEnabledServices } from '@shizuha/ui'
-import { ASSISTANT_ACTIONS, ACTION_TIERS, actionMatches } from './assistantActions'
+import { ASSISTANT_ACTIONS, ACTION_TIERS, actionMatches, getAssistantActionExecution } from './assistantActions'
 
 function normalizeEnabledServices(value) {
   if (Array.isArray(value)) return value
@@ -21,6 +21,7 @@ export default function CommandPalette({ isOpen, onClose, onAskShizuha, onNaviga
   const enabled = normalizeEnabledServices(useEnabledServices())
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
+  const [pendingConfirmation, setPendingConfirmation] = useState(null)
   const inputRef = useRef(null)
 
   const enabledApps = useMemo(() => SHIZUHA_APPS.filter((app) => {
@@ -48,8 +49,13 @@ export default function CommandPalette({ isOpen, onClose, onAskShizuha, onNaviga
     if (!isOpen) return
     setQuery('')
     setActiveIndex(0)
+    setPendingConfirmation(null)
     setTimeout(() => inputRef.current?.focus(), 0)
   }, [isOpen])
+
+  useEffect(() => {
+    setPendingConfirmation(null)
+  }, [query])
 
   useEffect(() => {
     setActiveIndex((idx) => Math.min(idx, Math.max(items.length - 1, 0)))
@@ -57,13 +63,26 @@ export default function CommandPalette({ isOpen, onClose, onAskShizuha, onNaviga
 
   if (!isOpen) return null
 
+  const finishAsk = (prompt) => {
+    onAskShizuha(prompt)
+    setPendingConfirmation(null)
+    onClose()
+  }
+
   const runItem = (item = items[activeIndex]) => {
     if (!item) return
-    if (item.type === 'ask') onAskShizuha(query.trim())
-    else if (item.type === 'navigate') onNavigate(item.href)
-    else if (item.tier === 3) onNavigate(item.href)
-    else onAskShizuha(item.prompt)
-    onClose()
+    if (item.type === 'ask') return finishAsk(query.trim())
+    if (item.type === 'navigate') { onNavigate(item.href); onClose(); return }
+
+    const execution = getAssistantActionExecution(item)
+    if (execution.mode === 'confirm') { setPendingConfirmation(item); return }
+    if (execution.mode === 'navigate') { onNavigate(execution.href); onClose(); return }
+    if (execution.mode === 'ask') finishAsk(execution.prompt)
+  }
+
+  const confirmPendingAction = () => {
+    const execution = getAssistantActionExecution(pendingConfirmation, { confirmed: true })
+    if (execution.mode === 'ask') finishAsk(execution.prompt)
   }
 
   const onKeyDown = (event) => {
@@ -115,6 +134,22 @@ export default function CommandPalette({ isOpen, onClose, onAskShizuha, onNaviga
             )
           })}
         </div>
+        {pendingConfirmation ? (
+            <div className="border-t border-amber-200 bg-amber-50/90 p-4 text-sm text-amber-950 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-100">
+              <p className="font-semibold">Confirm before continuing: {pendingConfirmation.label}</p>
+              <p className="mt-1 text-xs opacity-80">{pendingConfirmation.confirmationCopy}</p>
+              <dl className="mt-3 grid gap-1 text-xs sm:grid-cols-2">
+                <div><dt className="font-semibold">Owner</dt><dd>{pendingConfirmation.owner}</dd></div>
+                <div><dt className="font-semibold">Audit event</dt><dd>{pendingConfirmation.auditEvent}</dd></div>
+                <div><dt className="font-semibold">Auth surface</dt><dd>{pendingConfirmation.authSurface}</dd></div>
+                <div><dt className="font-semibold">Required inputs</dt><dd>{(pendingConfirmation.requiredInputs || []).join(', ') || 'None'}</dd></div>
+              </dl>
+              <div className="mt-4 flex justify-end gap-2">
+                <button onClick={() => setPendingConfirmation(null)} className="rounded-xl border border-amber-300 px-3 py-2 text-xs font-semibold hover:bg-amber-100 dark:border-amber-800 dark:hover:bg-amber-900/40">Cancel</button>
+                <button onClick={confirmPendingAction} className="rounded-xl bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-700">Confirm and ask Shizuha</button>
+              </div>
+            </div>
+        ) : null}
       </div>
     </div>
   )

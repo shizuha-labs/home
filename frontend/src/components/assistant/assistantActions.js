@@ -147,3 +147,34 @@ export function actionMatches(action, query) {
     .toLowerCase()
   return haystack.includes(q)
 }
+
+export function getAssistantActionExecution(action, { confirmed = false } = {}) {
+  if (!action) return { mode: 'none', writeAllowed: false }
+  if (action.tier === 3) {
+    return {
+      mode: 'navigate',
+      href: action.deepLink || action.href,
+      writeAllowed: false,
+      reason: ACTION_TIERS[3].description,
+    }
+  }
+  if (action.tier === 2 && !confirmed) {
+    return {
+      mode: 'confirm',
+      writeAllowed: false,
+      preview: {
+        label: action.label,
+        owner: action.owner,
+        consequence: action.confirmationCopy,
+        requiredInputs: action.requiredInputs || [],
+        auditEvent: action.auditEvent,
+        authSurface: action.authSurface,
+      },
+    }
+  }
+  return {
+    mode: 'ask',
+    prompt: action.prompt,
+    writeAllowed: action.tier === 1 || (action.tier === 2 && confirmed),
+  }
+}
