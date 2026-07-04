@@ -4,6 +4,8 @@ import { useAuth } from '../contexts/AuthContext'
 import { ConnectChatProvider, ChatLayout, MessageList, MessageInput, Avatar, NewChatModal, useConnectChat } from '@shizuha/chat'
 import { SHIZUHA_APPS, useEnabledServices } from '@shizuha/ui'
 import CommandCenterDashboard from '../components/dashboard/CommandCenterDashboard'
+import CommandPalette from '../components/assistant/CommandPalette'
+import { useHomeSummary } from '../hooks/useHomeSummary'
 
 const ACCESS_TOKEN_KEY = 'shizuha_access_token'
 function getAuthToken() {
@@ -89,8 +91,22 @@ function ChatHomeInner() {
   const [isSending, setIsSending] = useState(false)
   const [showApps, setShowApps] = useState(false)
   const [showNewChat, setShowNewChat] = useState(false)
+  const [showCommandPalette, setShowCommandPalette] = useState(false)
   const [pendingRequestCount, setPendingRequestCount] = useState(0)
   const textareaRef = useRef(null)
+  const { summary } = useHomeSummary()
+  const orgs = Array.isArray(summary?.orgs) ? summary.orgs : null
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setShowCommandPalette(true)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
 
   // Fetch pending connection requests count
   useEffect(() => {
@@ -186,6 +202,20 @@ function ChatHomeInner() {
 
   const handleChipClick = useCallback((prompt) => {
     sendToShizuha(prompt)
+  }, [sendToShizuha])
+
+  const handlePaletteNavigate = useCallback((href) => {
+    if (!href) return
+    if (href.startsWith('/c')) navigate(href)
+    else window.location.assign(href)
+  }, [navigate])
+
+  const handleCreateOrgRoute = useCallback(() => {
+    window.location.assign('/hive?intent=create-org')
+  }, [])
+
+  const handleAskCreateOrg = useCallback(() => {
+    sendToShizuha('I do not have an organization yet. Help me create one from a template and route me to the guided wizard when ready.')
   }, [sendToShizuha])
 
   const handleNewChatUser = useCallback(async (userId, details) => {
@@ -437,9 +467,30 @@ function ChatHomeInner() {
           </div>
 
           {/* Greeting — personalized */}
-          <p className="text-lg text-gray-600 dark:text-gray-400 text-center mb-8">
+          <p className="text-lg text-gray-600 dark:text-gray-400 text-center mb-3">
             {getGreeting()}{firstName ? `, ${firstName}` : ''}. How can I help?
           </p>
+
+          <div className="flex justify-center mb-6">
+            <button
+              onClick={() => setShowCommandPalette(true)}
+              className="inline-flex items-center gap-2 rounded-full border border-gray-200/70 bg-white/70 px-3 py-1.5 text-xs font-medium text-gray-500 shadow-sm backdrop-blur-sm transition-colors hover:border-brand-300 hover:text-brand-600 dark:border-gray-800/70 dark:bg-gray-900/50 dark:text-gray-400 dark:hover:border-brand-700 dark:hover:text-brand-300"
+            >
+              <span>Open command palette</span>
+              <kbd className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] dark:bg-gray-800">⌘K</kbd>
+            </button>
+          </div>
+
+          {orgs && orgs.length === 0 && (
+            <div className="mb-6 rounded-2xl border border-brand-200/70 bg-white/75 p-4 text-left shadow-lg shadow-brand-900/5 backdrop-blur-sm dark:border-brand-900/60 dark:bg-gray-900/60">
+              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">You don’t have an organization yet.</p>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Create one from a template to unlock agents, work, and the command-center dashboard.</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button onClick={handleCreateOrgRoute} className="rounded-xl bg-brand-600 px-3 py-2 text-xs font-semibold text-white hover:bg-brand-700">Open org wizard</button>
+                <button onClick={handleAskCreateOrg} className="rounded-xl border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:border-brand-300 hover:text-brand-600 dark:border-gray-700 dark:text-gray-300">Ask Shizuha to guide me</button>
+              </div>
+            </div>
+          )}
 
           {/* Input — dark card style matching the Hero code block */}
           <div className="relative mb-8">
@@ -519,6 +570,13 @@ function ChatHomeInner() {
 
       {/* Apps drawer */}
       <AppsDrawer isOpen={showApps} onClose={() => setShowApps(false)} />
+
+      <CommandPalette
+        isOpen={showCommandPalette}
+        onClose={() => setShowCommandPalette(false)}
+        onAskShizuha={sendToShizuha}
+        onNavigate={handlePaletteNavigate}
+      />
     </div>
   )
 }
