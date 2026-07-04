@@ -346,3 +346,17 @@ def test_widget_cache_serves_stale_after_source_failure(monkeypatch):
     assert first.status == "ok"
     assert second.status == "stale"
     assert second.data == {"open": 1}
+
+
+def test_pyjwt_rsa_backend_available():
+    """RS256/JWKS user-token verification needs PyJWT's cryptography backend.
+
+    Without the `cryptography` package RSAAlgorithm is silently absent and
+    _jwks_fetch_keys() returns {} — every real shizuha-id token then 401s
+    (the 2026-07-05 dashboard 'Couldn't load' incident). Fail loud here.
+    """
+    import jwt as _jwt
+
+    assert hasattr(_jwt.algorithms, "RSAAlgorithm"), (
+        "PyJWT lacks the RSA backend — is 'cryptography' in requirements?"
+    )
