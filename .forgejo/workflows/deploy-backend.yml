@@ -12,6 +12,7 @@ on:
     branches: [main, master]
     paths:
       - 'backend/**'
+      - '.forgejo/workflows/deploy-backend.yml'
 concurrency:
   group: deploy-shizuha-home-backend-${{ github.ref }}
   cancel-in-progress: true
@@ -33,6 +34,7 @@ jobs:
           set -euo pipefail
           SHORT="$(echo "${{ github.sha }}" | cut -c1-7)"
           BTAG="home-backend-${SHORT}"
+          BOOTSTRAP_TAG="home-backend-bootstrap"
           REG="registry.registry.svc.cluster.local:5000"
           echo "Multi-arch build shizuha-home-backend:${BTAG} (amd64 + arm64)"
 
@@ -81,6 +83,7 @@ jobs:
                       - --context=dir:///workspace/src/backend
                       - --dockerfile=/workspace/src/backend/Dockerfile
                       - --destination=${REG}/shizuha-home-backend:${BTAG}-${ARCH}
+                      - --destination=${REG}/shizuha-home-backend:${BOOTSTRAP_TAG}-${ARCH}
                       - --insecure
                       - --skip-tls-verify
                       - --insecure-pull
@@ -144,6 +147,39 @@ jobs:
           kubectl wait -n build --for=condition=complete "job/ci-manifest-home-backend-${SHORT}" --timeout=300s || {
             echo "::error::backend manifest combine failed"
             kubectl logs -n build "job/ci-manifest-home-backend-${SHORT}" --tail=80 || true
+            exit 1
+          }
+
+          cat <<YAML | kubectl apply -f -
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: ci-manifest-home-backend-bootstrap-${SHORT}
+            namespace: build
+            labels: { app: ci-manifest, service: home-backend }
+          spec:
+            backoffLimit: 0
+            ttlSecondsAfterFinished: 900
+            template:
+              spec:
+                restartPolicy: Never
+                containers:
+                  - name: crane
+                    image: gcr.io/go-containerregistry/crane:latest
+                    args:
+                      - index
+                      - append
+                      - --insecure
+                      - -t
+                      - ${REG}/shizuha-home-backend:${BOOTSTRAP_TAG}
+                      - -m
+                      - ${REG}/shizuha-home-backend:${BOOTSTRAP_TAG}-amd64
+                      - -m
+                      - ${REG}/shizuha-home-backend:${BOOTSTRAP_TAG}-arm64
+          YAML
+          kubectl wait -n build --for=condition=complete "job/ci-manifest-home-backend-bootstrap-${SHORT}" --timeout=300s || {
+            echo "::error::backend bootstrap manifest combine failed"
+            kubectl logs -n build "job/ci-manifest-home-backend-bootstrap-${SHORT}" --tail=80 || true
             exit 1
           }
 
