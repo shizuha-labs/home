@@ -22,7 +22,8 @@ jobs:
       - name: Install kubectl + cluster access
         run: |
           set -euo pipefail
-          curl -fsSLO "https://dl.k8s.io/release/v1.30.0/bin/linux/amd64/kubectl"
+          KUBECTL_ARCH=$(uname -m); case "$KUBECTL_ARCH" in x86_64) KUBECTL_ARCH=amd64;; aarch64) KUBECTL_ARCH=arm64;; esac
+          curl -fsSLO "https://dl.k8s.io/release/v1.30.0/bin/linux/${KUBECTL_ARCH}/kubectl"
           install -m 0755 kubectl /usr/local/bin/kubectl
           mkdir -p "$HOME/.kube"
           printf '%s' "${{ secrets.KUBE_CONFIG_B64 }}" | base64 -d > "$HOME/.kube/config"
