@@ -85,13 +85,7 @@ function sourceSummary(form) {
   const parts = [
     'autonomous-org-design-partner',
     `company=${form.company}`,
-    `country=${form.country}`,
     `segment=${form.segment}`,
-    `workflow=${form.workflow.slice(0, 120)}`,
-    `sop=${form.sopLink.slice(0, 120)}`,
-    `weeklySponsor=${form.weeklySponsor}`,
-    `security=${form.securitySensitivity}`,
-    `targetStart=${form.targetStartMonth}`,
   ]
   return parts.join('|').slice(0, 900)
 }
@@ -101,13 +95,7 @@ function DesignPartnerForm() {
     name: '',
     email: '',
     company: '',
-    country: '',
     segment: '',
-    workflow: '',
-    sopLink: '',
-    weeklySponsor: '',
-    securitySensitivity: '',
-    targetStartMonth: '',
   })
   const [status, setStatus] = useState('idle')
   const [errorMsg, setErrorMsg] = useState('')
@@ -127,10 +115,10 @@ function DesignPartnerForm() {
 
   async function handleSubmit(e) {
     e.preventDefault()
-    if (!form.name || !form.email || !form.company || !form.country || !form.segment || !form.workflow || !form.weeklySponsor || !form.securitySensitivity || !form.targetStartMonth) return
+    if (!form.name || !form.email || !form.company || !form.segment) return
     setStatus('submitting')
     setErrorMsg('')
-    trackAutonomousOrg('autonomous_org_apply_submit', { segment: form.segment, security: form.securitySensitivity })
+    trackAutonomousOrg('autonomous_org_apply_submit', { segment: form.segment })
 
     try {
       const res = await fetch('/api/forge/signup', {
@@ -164,6 +152,9 @@ function DesignPartnerForm() {
         <p className="text-gray-600 dark:text-gray-300">
           We will review fit, security sensitivity, and sponsor availability before proposing a scoped design-partner pilot. No payment is collected on this page.
         </p>
+        <p className="mt-3 text-sm text-emerald-600 dark:text-emerald-400 font-medium">
+          We typically respond within 5 business days.
+        </p>
       </div>
     )
   }
@@ -193,50 +184,11 @@ function DesignPartnerForm() {
           <input name="company" required value={form.company} onChange={updateField} className="mt-1 w-full rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 text-gray-900 dark:text-white" />
         </label>
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-          Country
-          <input name="country" required value={form.country} onChange={updateField} className="mt-1 w-full rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 text-gray-900 dark:text-white" />
-        </label>
-      </div>
-
-      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-        Segment
-        <select name="segment" required value={form.segment} onChange={updateField} className="mt-1 w-full rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 text-gray-900 dark:text-white">
-          <option value="">Choose one</option>
-          {SEGMENTS.map((segment) => <option key={segment} value={segment}>{segment}</option>)}
-        </select>
-      </label>
-
-      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-        Workflow to automate
-        <textarea name="workflow" required rows={3} value={form.workflow} onChange={updateField} placeholder="Example: weekly release-note packet from shipped PRs, or research brief → draft → editor handoff" className="mt-1 w-full rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 text-gray-900 dark:text-white" />
-      </label>
-
-      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-        Current SOP/backlog link (optional)
-        <input name="sopLink" value={form.sopLink} onChange={updateField} placeholder="URL or short note" className="mt-1 w-full rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 text-gray-900 dark:text-white" />
-      </label>
-
-      <div className="grid sm:grid-cols-3 gap-4">
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-          Weekly sponsor?
-          <select name="weeklySponsor" required value={form.weeklySponsor} onChange={updateField} className="mt-1 w-full rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 text-gray-900 dark:text-white">
-            <option value="">Choose</option>
-            <option value="yes">Yes</option>
-            <option value="no">No</option>
+          Segment
+          <select name="segment" required value={form.segment} onChange={updateField} className="mt-1 w-full rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 text-gray-900 dark:text-white">
+            <option value="">Choose one</option>
+            {SEGMENTS.map((segment) => <option key={segment} value={segment}>{segment}</option>)}
           </select>
-        </label>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-          Security sensitivity
-          <select name="securitySensitivity" required value={form.securitySensitivity} onChange={updateField} className="mt-1 w-full rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 text-gray-900 dark:text-white">
-            <option value="">Choose</option>
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-          </select>
-        </label>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-          Target start month
-          <input name="targetStartMonth" type="month" required value={form.targetStartMonth} onChange={updateField} className="mt-1 w-full rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 text-gray-900 dark:text-white" />
         </label>
       </div>
 
