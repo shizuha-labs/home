@@ -7,6 +7,15 @@ class Settings:
     JWT_SECRET_KEY: str = os.environ.get("JWT_SECRET_KEY", os.environ.get("SECRET_KEY", ""))
     JWT_ALGORITHM: str = os.environ.get("JWT_ALGORITHM", "HS256")
 
+    # RS256/JWKS verification (canonical shizuha-id user tokens, PLAT-675/987).
+    # Same envs the Django services' shizuha_auth uses; default = in-cluster id.
+    JWKS_URL: str = os.environ.get(
+        "SHIZUHA_OAUTH_JWKS_URL",
+        (os.environ.get("SHIZUHA_EXPECTED_ISSUER") or "http://shizuha-id:8001").rstrip("/")
+        + "/.well-known/jwks.json",
+    )
+    JWKS_TTL_SECONDS: float = float(os.environ.get("HOME_BFF_JWKS_TTL", "600"))
+
     # Downstream service base URLs (in-cluster). The BFF forwards the CALLER's
     # Bearer to each — it holds NO privileged service token (the load-bearing
     # tenant-isolation control: each service applies its own authz).

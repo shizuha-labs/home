@@ -45,20 +45,84 @@ def _normalize_memberships(raw) -> dict:
     return out
 
 
+# JWKS cache for RS256 user tokens (canonical shizuha-id scheme, PLAT-675/987).
+# Mirrors the Django services' shizuha_auth contract: alg allowlist, REQUIRE
+# kid, honor-kid-fail-closed (a forced refresh returns ONLY the fresh key set,
+# so an unknown kid / JWKS outage can never validate against a stale key).
+_JWKS_CACHE: dict = {"keys": {}, "fetched_at": 0.0}
+_ALLOWED_ALGS = {"HS256", "RS256"}
+
+
+def _jwks_fetch_keys(force_refresh: bool = False) -> dict:
+    import json as _json
+    import time as _time
+    import urllib.request as _urlreq
+
+    if (
+        not force_refresh
+        and _time.time() - _JWKS_CACHE["fetched_at"] < settings.JWKS_TTL_SECONDS
+        and _JWKS_CACHE["keys"]
+    ):
+        return _JWKS_CACHE["keys"]
+    try:
+        resp = _urlreq.urlopen(settings.JWKS_URL, timeout=5)
+        jwks = _json.loads(resp.read())
+        keys = {
+            k["kid"]: jwt.algorithms.RSAAlgorithm.from_jwk(_json.dumps(k))
+            for k in jwks.get("keys", [])
+            if k.get("kid") and k.get("kty") == "RSA" and k.get("alg") in (None, "RS256")
+        }
+        _JWKS_CACHE["keys"] = keys
+        _JWKS_CACHE["fetched_at"] = _time.time()
+        return keys
+    except Exception:
+        return {} if force_refresh else _JWKS_CACHE["keys"]
+
+
+def _decode_verified(token: str) -> dict:
+    """Verify signature + expiry; dual-accept RS256 (JWKS) and HS256 (shared key)."""
+    try:
+        header = jwt.get_unverified_header(token)
+    except jwt.PyJWTError:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token")
+    alg = header.get("alg")
+    if alg not in _ALLOWED_ALGS:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token")
+
+    if alg == "RS256":
+        kid = header.get("kid")
+        if not kid:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token")
+        key = _jwks_fetch_keys().get(kid)
+        if key is None:
+            key = _jwks_fetch_keys(force_refresh=True).get(kid)
+        if key is None:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token")
+        try:
+            return jwt.decode(token, key=key, algorithms=["RS256"], options={"verify_aud": False})
+        except jwt.ExpiredSignatureError:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token expired")
+        except jwt.InvalidTokenError:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token")
+
+    # HS256 — legacy/dual-accept path via the shared signing key.
+    if not settings.JWT_SECRET_KEY:
+        # Fail closed: without the shared key we cannot verify HS256 callers.
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "BFF misconfigured: no JWT key")
+    try:
+        return jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=["HS256"])
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token")
+
+
 def verify_caller(authorization: Optional[str] = Header(default=None)) -> Caller:
     """FastAPI dependency: 401 unless a valid Bearer id-JWT is present."""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Missing bearer token")
     token = authorization[len("Bearer "):].strip()
-    if not settings.JWT_SECRET_KEY:
-        # Fail closed: without the shared key we cannot verify anyone.
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "BFF misconfigured: no JWT key")
-    try:
-        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token expired")
-    except jwt.InvalidTokenError:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token")
+    payload = _decode_verified(token)
     uid = payload.get("user_id") or payload.get("sub") or payload.get("id")
     try:
         uid = int(uid)
