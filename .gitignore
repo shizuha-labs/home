@@ -24,3 +24,8 @@ Thumbs.db
 npm-debug.log*
 yarn-error.log*
 yarn-debug.log*
+
+# Python generated files
+__pycache__/
+*.py[cod]
+.pytest_cache/
