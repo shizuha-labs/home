@@ -3,9 +3,12 @@ import os
 
 
 class Settings:
-    # Shared HS256 signing key with shizuha-id (same var the Django services use).
-    JWT_SECRET_KEY: str = os.environ.get("JWT_SECRET_KEY", os.environ.get("SECRET_KEY", ""))
-    JWT_ALGORITHM: str = os.environ.get("JWT_ALGORITHM", "HS256")
+    # Shizuha ID issues RS256 tokens and publishes the public keys via JWKS.
+    SHIZUHA_ID_URL: str = os.environ.get("SHIZUHA_ID_URL", "http://shizuha-id:8001").rstrip("/")
+    SHIZUHA_JWKS_URL: str = os.environ.get(
+        "SHIZUHA_JWKS_URL",
+        os.environ.get("SHIZUHA_ID_JWKS_URL", f"{SHIZUHA_ID_URL}/.well-known/jwks.json"),
+    ).rstrip("/")
 
     # RS256/JWKS verification (canonical shizuha-id user tokens, PLAT-675/987).
     # Same envs the Django services' shizuha_auth uses; default = in-cluster id.

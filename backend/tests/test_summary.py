@@ -7,23 +7,40 @@ import datetime
 import os
 
 # Must be set BEFORE importing the app (config reads it at import).
-os.environ.setdefault("JWT_SECRET_KEY", "test-secret-hive375")
+os.environ.setdefault("SHIZUHA_JWKS_URL", "https://id.test/.well-known/jwks.json")
 
 import httpx
 import jwt
 import pytest
+from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
-from app import clients
+from app import auth, clients
 from app.cache import widget_cache
 from app.config import settings
 from app.main import app
 
 client = TestClient(app)
-SECRET = settings.JWT_SECRET_KEY
+_PRIVATE_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+_PUBLIC_KEY = _PRIVATE_KEY.public_key()
 
 
-def _token(user_id=101, email="a@org1.example", memberships=None, expired=False):
+class _FakeSigningKey:
+    key = _PUBLIC_KEY
+
+
+class _FakeJWKClient:
+    def __init__(self, url):
+        self.url = url
+
+    def get_signing_key_from_jwt(self, token):
+        header = jwt.get_unverified_header(token)
+        if header.get("kid") != "test-kid":
+            raise jwt.exceptions.PyJWKClientError("unknown kid")
+        return _FakeSigningKey()
+
+
+def _token(user_id=101, email="a@org1.example", memberships=None, expired=False, key=None, kid="test-kid", alg="RS256"):
     now = datetime.datetime.now(datetime.timezone.utc)
     payload = {
         "user_id": user_id,
@@ -31,11 +48,19 @@ def _token(user_id=101, email="a@org1.example", memberships=None, expired=False)
         "organization_memberships": memberships if memberships is not None else {"1": "admin"},
         "exp": now - datetime.timedelta(hours=1) if expired else now + datetime.timedelta(hours=1),
     }
-    return jwt.encode(payload, SECRET, algorithm="HS256")
+    return jwt.encode(payload, key or _PRIVATE_KEY, algorithm=alg, headers={"kid": kid} if kid else None)
 
 
 def _auth(tok):
     return {"Authorization": f"Bearer {tok}"}
+
+
+@pytest.fixture(autouse=True)
+def _stub_jwks(monkeypatch):
+    auth._jwks_client.cache_clear()
+    monkeypatch.setattr("app.auth.jwt.PyJWKClient", _FakeJWKClient)
+    yield
+    auth._jwks_client.cache_clear()
 
 
 @pytest.fixture(autouse=True)
@@ -79,8 +104,18 @@ def test_expired_token_is_401():
 
 
 def test_token_signed_with_wrong_key_is_401():
+    attacker_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    forged = _token(user_id=1, memberships={"1": "admin"}, key=attacker_key)
+    assert client.get("/api/home/summary", headers=_auth(forged)).status_code == 401
+
+
+def test_hs256_token_is_rejected():
     forged = jwt.encode({"user_id": 1, "organization_memberships": {"1": "admin"}}, "attacker-key", algorithm="HS256")
     assert client.get("/api/home/summary", headers=_auth(forged)).status_code == 401
+
+
+def test_unknown_kid_is_rejected():
+    assert client.get("/api/home/summary", headers=_auth(_token(kid="missing"))).status_code == 401
 
 
 def test_valid_token_returns_scoped_summary():

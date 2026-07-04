@@ -118,7 +118,7 @@ def _decode_verified(token: str) -> dict:
 
 
 def verify_caller(authorization: Optional[str] = Header(default=None)) -> Caller:
-    """FastAPI dependency: 401 unless a valid Bearer id-JWT is present."""
+    """FastAPI dependency: 401 unless a valid Bearer Shizuha ID RS256 JWT is present."""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Missing bearer token")
     token = authorization[len("Bearer "):].strip()
