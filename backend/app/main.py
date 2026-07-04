@@ -61,6 +61,7 @@ async def home_summary(
             widget_cache.get_or_fetch(
                 cache_key("financial_snapshot", caller.user_id, scope_org),
                 lambda: fetch_financial_snapshot(client, caller.bearer, scope_org),
+                cache_fresh=False,
             ),
             widget_cache.get_or_fetch(
                 cache_key("recent_conversations", caller.user_id, scope_org),

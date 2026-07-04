@@ -33,10 +33,16 @@ class WidgetCache:
     def _stale_allowed(self, entry: _Entry, now: float) -> bool:
         return now - entry.stored_at <= settings.STALE_TTL_SECONDS
 
-    async def get_or_fetch(self, key: str, fetch: Callable[[], Awaitable[Widget]]) -> Widget:
+    async def get_or_fetch(
+        self,
+        key: str,
+        fetch: Callable[[], Awaitable[Widget]],
+        *,
+        cache_fresh: bool = True,
+    ) -> Widget:
         now = time.monotonic()
         entry = self._store.get(key)
-        if entry and self._fresh(entry, now):
+        if cache_fresh and entry and self._fresh(entry, now):
             return entry.widget
 
         widget = await fetch()
