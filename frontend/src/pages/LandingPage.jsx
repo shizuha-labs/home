@@ -1,4 +1,5 @@
-import { ArrowRight, Bot, Building2, Cpu, GitBranch, LineChart, Shield, Sparkles, Users, Workflow } from 'lucide-react'
+import { useState } from 'react'
+import { ArrowRight, Bot, Building2, Check, Copy, Cpu, GitBranch, LineChart, Shield, Sparkles, Terminal, Users, Workflow } from 'lucide-react'
 import GlobalNavBar from '../components/shared/GlobalNavBar'
 import Footer from '../components/Footer'
 import WelcomeBanner from '../components/WelcomeBanner'
@@ -50,6 +51,47 @@ const CAPABILITIES = [
   { icon: GitBranch, title: 'Workflow engine', description: 'Queues, review gates, blockers, verification — your process, automated' },
   { icon: Sparkles, title: 'Command center', description: 'Live dashboard of your org — agents, work, finances, alerts' },
 ]
+
+const INSTALL_COMMANDS = [
+  {
+    key: 'unix',
+    label: 'macOS / Linux',
+    command: 'curl -fsSL https://shizuha.com/install.sh | bash',
+  },
+  {
+    key: 'windows',
+    label: 'Windows (PowerShell)',
+    command: 'irm https://shizuha.com/install.ps1 | iex',
+  },
+]
+
+function InstallCommand({ label, command }) {
+  const [copied, setCopied] = useState(false)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(command)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch { /* clipboard unavailable (http/permissions) — command stays selectable */ }
+  }
+  return (
+    <div>
+      <div className="text-xs font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-2">{label}</div>
+      <div className="flex items-center gap-2 rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-950 px-4 py-3">
+        <Terminal className="w-4 h-4 shrink-0 text-emerald-400" />
+        <code className="flex-1 overflow-x-auto whitespace-nowrap text-sm text-gray-100 font-mono">{command}</code>
+        <button
+          type="button"
+          onClick={copy}
+          aria-label={`Copy ${label} install command`}
+          className="shrink-0 p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
+        >
+          {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+        </button>
+      </div>
+    </div>
+  )
+}
 
 export default function LandingPage() {
   const { isAuthenticated } = useAuth()
@@ -204,6 +246,33 @@ export default function LandingPage() {
                   <p className="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">{point.description}</p>
                 </div>
               ))}
+            </div>
+          </div>
+        </section>
+
+        {/* ── Install the CLI ──────────────────────────────────── */}
+        <section id="install" className="py-20 sm:py-28 px-4 sm:px-6 lg:px-8">
+          <div className="max-w-7xl mx-auto">
+            <div className="max-w-3xl mx-auto">
+              <div className="text-center mb-10">
+                <h2 className="text-3xl sm:text-4xl font-bold text-gray-900 dark:text-white">
+                  Set up in one command
+                </h2>
+                <p className="mt-4 text-lg text-gray-500 dark:text-gray-400">
+                  The Shizuha CLI runs your agents, TUI, and local daemon. One line installs a
+                  self-contained binary — no system dependencies.
+                </p>
+              </div>
+              <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 sm:p-8 space-y-6">
+                {INSTALL_COMMANDS.map((c) => (
+                  <InstallCommand key={c.key} label={c.label} command={c.command} />
+                ))}
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Then run <code className="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 font-mono text-gray-700 dark:text-gray-200">shizuha</code> to
+                  open the TUI, or <code className="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 font-mono text-gray-700 dark:text-gray-200">shizuha up</code> to
+                  start your agent daemon. Self-hosted — your data stays on your infrastructure.
+                </p>
+              </div>
             </div>
           </div>
         </section>
