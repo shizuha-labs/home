@@ -257,13 +257,48 @@ def test_recent_conversations_compacts_visible_connect_rows():
         }])
     async def go():
         async with _mock_client(handler) as c:
-            return await clients.fetch_recent_conversations(c, "caller-tok", 7)
+            return await clients.fetch_recent_conversations(c, "caller-tok", None)
     w = _run(go())
     assert w.status == "ok"
     assert w.data == [{
         "id": "conv-1", "title": "Kai", "type": "direct", "unread": 3,
         "last_at": "2026-07-03T12:00:00Z", "last_preview": "Please review",
     }]
+
+
+
+def test_recent_conversations_degrades_for_selected_org_until_connect_is_scoped():
+    def handler(request):
+        raise AssertionError("unscoped Connect conversations must not be called for selected org")
+    async def go():
+        async with _mock_client(handler) as c:
+            return await clients.fetch_recent_conversations(c, "caller-tok", 7)
+    w = _run(go())
+    assert w.status == "degraded"
+    assert w.data == []
+
+
+def test_widget_cache_does_not_serve_stale_over_unauthorized(monkeypatch):
+    from app.schema import Widget
+    from app.cache import WidgetCache
+
+    cache = WidgetCache()
+    calls = {"n": 0}
+
+    async def fetch():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return Widget.ok_(data={"cash": 1234.5})
+        return Widget.unauthorized_()
+
+    monkeypatch.setattr(settings, "CACHE_TTL_SECONDS", 0)
+    monkeypatch.setattr(settings, "STALE_TTL_SECONDS", 60)
+
+    first = _run(cache.get_or_fetch("financial:u=1:org=7", fetch))
+    second = _run(cache.get_or_fetch("financial:u=1:org=7", fetch))
+    assert first.status == "ok"
+    assert second.status == "unauthorized"
+    assert second.data is None
 
 
 def test_widget_cache_serves_stale_after_source_failure(monkeypatch):

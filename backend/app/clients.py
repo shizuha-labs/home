@@ -182,11 +182,15 @@ async def fetch_recent_conversations(client: httpx.AsyncClient, bearer: str,
     """Recent Connect conversations visible to the caller.
 
     Connect's conversations endpoint scopes to the authenticated participant via
-    the forwarded bearer. It has no org filter today, so when Home is scoped to a
-    selected org we still rely on Connect's participant/org gates and expose only
-    compact conversation metadata, never message bodies beyond the existing last
-    preview field.
+    the forwarded bearer, but it does not yet accept a selected-organization
+    filter. When Home is scoped to one org, surfacing unfiltered conversation
+    metadata/previews would leak another org's activity into that org summary;
+    degrade the widget until Connect exposes an org-scoped list endpoint.
     """
+    if org_id is not None:
+        logger.info("recent_conversations disabled until Connect exposes a scoped endpoint")
+        return Widget.degraded_(data=[])
+
     try:
         resp = await client.get(
             f"{settings.CONNECT_API_URL}/conversations/",

@@ -44,7 +44,14 @@ class WidgetCache:
             self._store[key] = _Entry(widget=widget, stored_at=time.monotonic())
             return widget
 
-        if entry and self._stale_allowed(entry, now):
+        # Serve stale only for brownout-style failures. Authz outcomes (for
+        # example Books 403 -> unauthorized) must never be masked by a cached
+        # value from an earlier, more-privileged read.
+        if (
+            widget.status == WidgetStatus.degraded
+            and entry
+            and self._stale_allowed(entry, now)
+        ):
             return Widget.stale_(data=entry.widget.data, as_of=entry.widget.as_of)
         return widget
 
