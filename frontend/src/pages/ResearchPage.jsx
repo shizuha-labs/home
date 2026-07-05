@@ -1,9 +1,36 @@
 import { useEffect } from 'react'
-import { ExternalLink, FileText, ArrowRight, SearchCheck, ShieldCheck, MousePointerClick } from 'lucide-react'
+import { ExternalLink, FileText, ArrowRight, SearchCheck, ShieldCheck, MousePointerClick, IndianRupee, Clock3 } from 'lucide-react'
 import GlobalNavBar from '../components/shared/GlobalNavBar'
 import Footer from '../components/Footer'
 import { setPageMeta } from '../utils/pageMeta'
 import { trackResearchEvent } from '../utils/analytics'
+
+const AUDIT_DISCLAIMER =
+  'This is a research/advisory audit of AI-search and generative-engine visibility. It does not guarantee search rankings, AI-answer inclusion, citations, or any placement outcome. Results depend on third-party engines outside our control.'
+
+const AUDIT_TIERS = [
+  {
+    name: 'Sample / demo',
+    price: '₹0',
+    description: 'See the output shape before sharing an audit target.',
+    href: '/research/geo-audit-sample',
+    event: 'research_sample_click',
+  },
+  {
+    name: 'AI-search visibility audit',
+    price: '₹1,499',
+    description: 'Fixed-scope 24–48h audit with visibility checks, entity/content gaps, and citation-readiness fixes.',
+    href: '/research/order?offer=ai-search-audit&tier=audit',
+    event: 'research_order_start',
+  },
+  {
+    name: 'Audit + recheck',
+    price: '₹2,499',
+    description: 'The audit plus one follow-up recheck after you apply the remediation checklist.',
+    href: '/research/order?offer=ai-search-audit&tier=audit-recheck',
+    event: 'research_order_start',
+  },
+]
 
 const REPORTS = [
   {
@@ -33,7 +60,7 @@ export default function ResearchPage() {
   useEffect(() => {
     setPageMeta({
       title: 'AI Search Visibility Audit — Shizuha Research',
-      description: 'Draft Research-as-a-Service offer: audit how an organization appears in AI search and answer engines, with evidence-based recommendations and no ranking guarantees.',
+      description: 'Fixed-scope 24–48h AI-search/GEO visibility audit for ₹1,499, with a ₹0 sample and ₹2,499 audit-plus-recheck option. Intent only; no payment is collected.',
     })
     trackResearchEvent('research_offer_view', { offer: 'ai_search_visibility_audit', route: '/research' })
   }, [])
@@ -54,72 +81,103 @@ export default function ResearchPage() {
             </div>
 
             <h1 className="text-4xl sm:text-5xl font-bold text-gray-900 dark:text-white mb-4">
-              AI Research Reports
+              AI-search visibility audit for founders and teams
             </h1>
             <p className="text-xl text-gray-500 dark:text-gray-400 mb-10">
-              Free sample reports produced by Shizuha's multi-agent deep-research harness — adversarially verified, vendor-claim-free.
+              A fixed-scope 24–48h research/advisory audit of how AI answer engines understand your company, where entity and content gaps appear, and which citation-readiness fixes to prioritize.
             </p>
 
-            <a
-              href="/research/order?offer=ai-search-audit"
-              onClick={() => trackClick('research_order_start', { source: 'hero_cta' })}
-              className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-semibold transition-colors shadow-md shadow-violet-500/20"
-            >
-              Request an AI-search audit
-              <ArrowRight className="w-4 h-4" />
-            </a>
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+              <a
+                href="/research/order?offer=ai-search-audit&tier=audit"
+                onClick={() => trackClick('research_order_start', { source: 'hero_cta', tier: 'audit' })}
+                className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-semibold transition-colors shadow-md shadow-violet-500/20"
+              >
+                Submit paid-intent request
+                <ArrowRight className="w-4 h-4" />
+              </a>
+              <a
+                href="/research/geo-audit-sample"
+                onClick={() => trackClick('research_sample_click', { source: 'hero_cta' })}
+                className="inline-flex items-center gap-2 px-6 py-3 rounded-xl border border-violet-200 dark:border-violet-700 text-violet-700 dark:text-violet-300 font-semibold hover:bg-violet-50 dark:hover:bg-violet-950/40 transition-colors"
+              >
+                View ₹0 sample audit
+                <ExternalLink className="w-4 h-4" />
+              </a>
+            </div>
           </div>
         </section>
 
-
         {/* AI-search/GEO audit offer */}
         <section className="px-4 sm:px-6 lg:px-8 pb-14">
-          <div className="max-w-4xl mx-auto rounded-3xl border border-violet-200 dark:border-violet-800 bg-violet-50/70 dark:bg-violet-950/30 p-6 sm:p-8">
+          <div className="max-w-5xl mx-auto rounded-3xl border border-violet-200 dark:border-violet-800 bg-violet-50/70 dark:bg-violet-950/30 p-6 sm:p-8">
             <div className="flex flex-col lg:flex-row gap-8">
               <div className="flex-1">
                 <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white dark:bg-gray-900 text-violet-700 dark:text-violet-300 text-sm font-medium mb-4 border border-violet-200 dark:border-violet-800">
                   <SearchCheck className="w-4 h-4" />
-                  Draft offer · AI-search / GEO audit
+                  AI-search / GEO audit · 24–48h fixed scope
                 </div>
                 <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white mb-3">
                   Find out how AI answer engines describe your company.
                 </h2>
                 <p className="text-gray-600 dark:text-gray-300 leading-relaxed mb-5">
-                  We review visible public pages, answer-engine snippets, citation candidates, and gaps that may stop AI systems from understanding your positioning. The output is an evidence-first audit and prioritized content fixes — not a promise of rankings, citations, or inclusion.
+                  We review visible public pages, answer-engine responses, entity signals, citation candidates, and gaps that may stop AI systems from understanding your positioning. The deliverable is an evidence-first audit, a prioritized remediation checklist, and citation-readiness fixes — not a promise of rankings, citations, or inclusion.
                 </p>
                 <div className="grid sm:grid-cols-3 gap-3 text-sm text-gray-600 dark:text-gray-300">
                   <div className="rounded-xl bg-white dark:bg-gray-900 p-4 border border-violet-100 dark:border-violet-900">
                     <MousePointerClick className="w-5 h-5 text-violet-500 mb-2" />
-                    Intent capture only — no payment now
+                    Intent capture only — no payment collected on this site
                   </div>
                   <div className="rounded-xl bg-white dark:bg-gray-900 p-4 border border-violet-100 dark:border-violet-900">
-                    <FileText className="w-5 h-5 text-violet-500 mb-2" />
-                    Sample audit scope + gap list
+                    <Clock3 className="w-5 h-5 text-violet-500 mb-2" />
+                    Fixed 24–48h scope: visibility checks, gaps, fixes
                   </div>
                   <div className="rounded-xl bg-white dark:bg-gray-900 p-4 border border-violet-100 dark:border-violet-900">
                     <ShieldCheck className="w-5 h-5 text-violet-500 mb-2" />
-                    No guaranteed SEO/GEO outcomes
+                    No guaranteed SEO/GEO outcomes or AI placement
                   </div>
                 </div>
               </div>
-              <div className="lg:w-64 flex flex-col justify-center">
+              <div className="lg:w-72 flex flex-col justify-center">
                 <a
-                  href="/research/order?offer=ai-search-audit"
-                  onClick={() => trackClick('research_order_start', { source: 'audit_card' })}
+                  href="/research/order?offer=ai-search-audit&tier=audit"
+                  onClick={() => trackClick('research_order_start', { source: 'audit_card', tier: 'audit' })}
                   className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-semibold transition-colors shadow-md shadow-violet-500/20"
                 >
-                  Start audit request
+                  Submit paid-intent request
                   <ArrowRight className="w-4 h-4" />
                 </a>
-                <button
-                  type="button"
+                <a
+                  href="/research/geo-audit-sample"
                   onClick={() => trackClick('research_sample_click', { source: 'audit_card' })}
-                  className="mt-3 text-sm text-violet-700 dark:text-violet-300 hover:underline"
+                  className="mt-3 text-center text-sm text-violet-700 dark:text-violet-300 hover:underline"
                 >
-                  Track sample audit interest
-                </button>
+                  Open sample audit artifact
+                </a>
               </div>
             </div>
+
+            <div className="grid md:grid-cols-3 gap-4 mt-8">
+              {AUDIT_TIERS.map((tier) => (
+                <a
+                  key={tier.name}
+                  href={tier.href}
+                  onClick={() => trackClick(tier.event, { source: 'tier_card', tier: tier.name })}
+                  className="rounded-2xl bg-white dark:bg-gray-900 border border-violet-100 dark:border-violet-900 p-5 hover:border-violet-300 dark:hover:border-violet-600 transition-colors"
+                >
+                  <div className="flex items-center gap-2 text-sm font-medium text-violet-700 dark:text-violet-300 mb-2">
+                    <IndianRupee className="w-4 h-4" />
+                    {tier.name}
+                  </div>
+                  <div className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{tier.price}</div>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed">{tier.description}</p>
+                </a>
+              ))}
+            </div>
+
+            <p className="mt-6 text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
+              Disclaimer v2026-07-04: {AUDIT_DISCLAIMER}
+            </p>
           </div>
         </section>
 
@@ -162,16 +220,16 @@ export default function ResearchPage() {
         {/* Order CTA banner */}
         <section className="px-4 sm:px-6 lg:px-8 pb-24">
           <div className="max-w-4xl mx-auto rounded-2xl bg-gradient-to-r from-violet-600 to-indigo-600 p-8 text-center text-white">
-            <h2 className="text-2xl font-bold mb-2">Need a custom report on your industry or topic?</h2>
+            <h2 className="text-2xl font-bold mb-2">Ready to see the AI-search gaps for your company?</h2>
             <p className="text-violet-200 mb-6">
-              $49 · 24-hour delivery · Adversarially verified, no marketing fluff
+              ₹1,499 fixed-scope audit · ₹2,499 audit + recheck · 24–48h advisory deliverable · no payment collected here
             </p>
             <a
-              href="/research/order"
-              onClick={() => trackClick('research_order_start', { source: 'bottom_cta', offer: 'custom_report' })}
+              href="/research/order?offer=ai-search-audit&tier=audit"
+              onClick={() => trackClick('research_order_start', { source: 'bottom_cta', tier: 'audit' })}
               className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-white text-violet-700 font-semibold hover:bg-violet-50 transition-colors shadow-md"
             >
-              Order a Custom Report
+              Submit paid-intent request
               <ArrowRight className="w-4 h-4" />
             </a>
           </div>

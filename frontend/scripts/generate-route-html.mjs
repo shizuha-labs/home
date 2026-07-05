@@ -30,13 +30,19 @@ const routes = [
     output: 'research/index.html',
     title: 'AI Search Visibility Audit — Shizuha Research',
     description:
-      'Draft Research-as-a-Service offer: audit how an organization appears in AI search and answer engines, with evidence-based recommendations and no ranking guarantees.',
+      'Fixed-scope 24–48h AI-search/GEO visibility audit for ₹1,499, with a ₹0 sample and ₹2,499 audit-plus-recheck option. Intent only; no payment is collected.',
   },
   {
     output: 'research/order/index.html',
     title: 'Request a Research or AI-Search Audit — Shizuha',
     description:
       'Submit intent for a Shizuha research report or AI-search visibility audit. No payment is collected on this page and outcomes are not guaranteed.',
+  },
+  {
+    output: 'research/geo-audit-sample/index.html',
+    title: 'Sample GEO Audit Artifact — Shizuha Research',
+    description:
+      'Sample AI-search/GEO visibility audit artifact showing visibility checks, entity/content gaps, citation-readiness fixes, and guardrail disclaimer copy.',
   },
 ]
 

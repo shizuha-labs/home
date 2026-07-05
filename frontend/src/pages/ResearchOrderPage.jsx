@@ -6,22 +6,27 @@ import { setPageMeta } from '../utils/pageMeta'
 import { trackResearchEvent } from '../utils/analytics'
 
 const GUARANTEES = [
-  { icon: Clock, text: 'Intent reviewed within 2 hours' },
-  { icon: FileSearch, text: 'Audit/report scope confirmed before invoicing' },
+  { icon: Clock, text: '24–48h fixed-scope audit window' },
+  { icon: FileSearch, text: 'Scope confirmed before any invoice' },
   { icon: Shield, text: 'Evidence-first — no ranking or citation guarantees' },
 ]
 
+const AUDIT_DISCLAIMER =
+  'This is a research/advisory audit of AI-search and generative-engine visibility. It does not guarantee search rankings, AI-answer inclusion, citations, or any placement outcome. Results depend on third-party engines outside our control.'
+
 const OFFER_TYPES = [
-  { value: 'ai-search-audit', label: 'AI-search visibility audit (draft offer)' },
+  { value: 'ai-search-audit', label: 'AI-search visibility audit — ₹1,499' },
   { value: 'custom-research-report', label: 'Custom research report' },
   { value: 'other', label: 'Other research request' },
 ]
 
 export default function ResearchOrderPage() {
-  const initialOffer = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('offer') === 'ai-search-audit'
+  const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
+  const initialOffer = searchParams?.get('offer') === 'ai-search-audit'
     ? 'ai-search-audit'
     : 'custom-research-report'
-  const [form, setForm] = useState({ name: '', email: '', offerType: initialOffer, topic: '' })
+  const initialTier = searchParams?.get('tier') || (initialOffer === 'ai-search-audit' ? 'audit' : '')
+  const [form, setForm] = useState({ name: '', email: '', offerType: initialOffer, auditTier: initialTier, topic: '' })
   const [status, setStatus] = useState('idle') // idle | submitting | success | error
   const [errorMsg, setErrorMsg] = useState('')
 
@@ -57,7 +62,7 @@ export default function ResearchOrderPage() {
         body: JSON.stringify({
           name: form.name.trim(),
           email: form.email.trim().toLowerCase(),
-          source: `research-order:${form.offerType}:${form.topic.trim().slice(0, 240)}`,
+          source: `research-order:${form.offerType}:${form.auditTier || 'na'}:${form.topic.trim().slice(0, 220)}`,
         }),
       })
 
@@ -88,12 +93,12 @@ export default function ResearchOrderPage() {
             {status === 'success' ? (
               <div className="text-center py-16">
                 <CheckCircle className="w-16 h-16 text-violet-500 mx-auto mb-4" />
-                <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-3">Order received!</h1>
+                <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-3">Intent received!</h1>
                 <p className="text-gray-500 dark:text-gray-400 text-lg mb-2">
-                  We'll confirm your order and send an invoice within 2 hours.
+                  We'll review your request and confirm the fixed scope before any invoice.
                 </p>
                 <p className="text-gray-500 dark:text-gray-400">
-                  Your report will be delivered within 24 hours of payment.
+                  No payment was collected here. AI-search audits are advisory and do not guarantee rankings, citations, or answer-engine inclusion.
                 </p>
                 <a
                   href="/research"
@@ -112,14 +117,14 @@ export default function ResearchOrderPage() {
                     ← Back to Research
                   </a>
                   <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-violet-50 dark:bg-violet-950 text-violet-700 dark:text-violet-300 text-sm font-medium mb-4 border border-violet-200 dark:border-violet-800">
-                    <span className="text-lg font-bold">$49</span>
-                    <span>per report</span>
+                    <span className="text-lg font-bold">Intent only</span>
+                    <span>no payment collected</span>
                   </div>
                   <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-4">
                     Request Research or an AI-Search Audit
                   </h1>
                   <p className="text-gray-500 dark:text-gray-400 text-lg">
-                    Tell us what you want to learn. Choose the draft AI-search visibility audit to capture intent, or request a custom research report. No payment is collected here and we do not guarantee rankings, citations, AI answer inclusion, or SEO/GEO outcomes.
+                    Tell us what you want to learn. Choose the AI-search visibility audit to capture paid intent for a ₹1,499 audit or ₹2,499 audit + recheck, or request a custom research report. No payment is collected here and we do not guarantee rankings, citations, AI answer inclusion, or SEO/GEO outcomes.
                   </p>
 
                   <div className="flex flex-col sm:flex-row gap-4 mt-6">
@@ -149,6 +154,27 @@ export default function ResearchOrderPage() {
                       ))}
                     </select>
                   </div>
+
+                  {form.offerType === 'ai-search-audit' && (
+                    <div>
+                      <label htmlFor="auditTier" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Audit tier
+                      </label>
+                      <select
+                        id="auditTier"
+                        name="auditTier"
+                        value={form.auditTier}
+                        onChange={handleChange}
+                        className="w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent transition"
+                      >
+                        <option value="audit">₹1,499 — fixed-scope audit</option>
+                        <option value="audit-recheck">₹2,499 — audit + one recheck</option>
+                      </select>
+                      <p className="mt-1 text-xs text-gray-400">
+                        Intent only. Shizuha confirms scope before invoicing; this page does not collect payment.
+                      </p>
+                    </div>
+                  )}
 
                   <div>
                     <label htmlFor="name" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -214,7 +240,7 @@ export default function ResearchOrderPage() {
                   </button>
 
                   <p className="text-xs text-center text-gray-400 dark:text-gray-500">
-                    No payment now. We'll confirm scope first; AI-search visibility and SEO/GEO outcomes are not guaranteed.
+                    No payment now. We'll confirm scope first. Disclaimer v2026-07-04: {AUDIT_DISCLAIMER}
                   </p>
                 </form>
               </>
