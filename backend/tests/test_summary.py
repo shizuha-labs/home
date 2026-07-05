@@ -25,21 +25,6 @@ _PRIVATE_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 _PUBLIC_KEY = _PRIVATE_KEY.public_key()
 
 
-class _FakeSigningKey:
-    key = _PUBLIC_KEY
-
-
-class _FakeJWKClient:
-    def __init__(self, url):
-        self.url = url
-
-    def get_signing_key_from_jwt(self, token):
-        header = jwt.get_unverified_header(token)
-        if header.get("kid") != "test-kid":
-            raise jwt.exceptions.PyJWKClientError("unknown kid")
-        return _FakeSigningKey()
-
-
 def _token(user_id=101, email="a@org1.example", memberships=None, expired=False, key=None, kid="test-kid", alg="RS256"):
     now = datetime.datetime.now(datetime.timezone.utc)
     payload = {
@@ -57,10 +42,16 @@ def _auth(tok):
 
 @pytest.fixture(autouse=True)
 def _stub_jwks(monkeypatch):
-    auth._jwks_client.cache_clear()
-    monkeypatch.setattr("app.auth.jwt.PyJWKClient", _FakeJWKClient)
+    # HEAD auth.py verifies RS256 via _jwks_fetch_keys() -> {kid: public_key};
+    # stub it to our in-memory test key so RS256 tests never hit the network.
+    def _fake_fetch(force_refresh=False):
+        return {"test-kid": _PUBLIC_KEY}
+    monkeypatch.setattr("app.auth._jwks_fetch_keys", _fake_fetch)
+    auth._JWKS_CACHE["keys"] = {}
+    auth._JWKS_CACHE["fetched_at"] = 0.0
     yield
-    auth._jwks_client.cache_clear()
+    auth._JWKS_CACHE["keys"] = {}
+    auth._JWKS_CACHE["fetched_at"] = 0.0
 
 
 @pytest.fixture(autouse=True)
