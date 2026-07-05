@@ -386,3 +386,44 @@ def test_pyjwt_rsa_backend_available():
     assert hasattr(_jwt.algorithms, "RSAAlgorithm"), (
         "PyJWT lacks the RSA backend — is 'cryptography' in requirements?"
     )
+
+
+def test_jwks_url_honors_documented_aliases():
+    """HIVE-474 / revi P2: auth.py fetches settings.JWKS_URL, so JWKS_URL MUST
+    resolve the DOCUMENTED aliases — an operator who sets SHIZUHA_JWKS_URL (or
+    SHIZUHA_ID_JWKS_URL) must actually change the endpoint the verifier fetches,
+    in precedence SHIZUHA_OAUTH_JWKS_URL > SHIZUHA_JWKS_URL > SHIZUHA_ID_JWKS_URL.
+    Without this the newly documented env was silently ignored (still 401s)."""
+    import importlib
+    import os as _os
+    import app.config as cfg
+
+    keys = ("SHIZUHA_OAUTH_JWKS_URL", "SHIZUHA_JWKS_URL", "SHIZUHA_ID_JWKS_URL")
+    saved = {k: _os.environ.get(k) for k in keys}
+
+    def _restore():
+        for k, v in saved.items():
+            if v is None:
+                _os.environ.pop(k, None)
+            else:
+                _os.environ[k] = v
+        importlib.reload(cfg)
+
+    try:
+        for k in keys:
+            _os.environ.pop(k, None)
+        _os.environ["SHIZUHA_ID_JWKS_URL"] = "https://idalias.example/jwks.json"
+        importlib.reload(cfg)
+        assert cfg.settings.JWKS_URL == "https://idalias.example/jwks.json"
+
+        _os.environ["SHIZUHA_JWKS_URL"] = "https://jwksalias.example/jwks.json"
+        importlib.reload(cfg)
+        # SHIZUHA_JWKS_URL takes precedence over SHIZUHA_ID_JWKS_URL
+        assert cfg.settings.JWKS_URL == "https://jwksalias.example/jwks.json"
+
+        _os.environ["SHIZUHA_OAUTH_JWKS_URL"] = "https://oauth.example/jwks.json"
+        importlib.reload(cfg)
+        # the Django-canonical override wins over everything
+        assert cfg.settings.JWKS_URL == "https://oauth.example/jwks.json"
+    finally:
+        _restore()

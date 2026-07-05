@@ -11,12 +11,22 @@ class Settings:
     ).rstrip("/")
 
     # RS256/JWKS verification (canonical shizuha-id user tokens, PLAT-675/987).
-    # Same envs the Django services' shizuha_auth uses; default = in-cluster id.
-    JWKS_URL: str = os.environ.get(
-        "SHIZUHA_OAUTH_JWKS_URL",
-        (os.environ.get("SHIZUHA_EXPECTED_ISSUER") or "http://shizuha-id:8001").rstrip("/")
-        + "/.well-known/jwks.json",
-    )
+    # JWKS_URL is the SINGLE source of truth the verifier (auth.py) fetches, so
+    # it MUST honor every documented alias in precedence order — otherwise an
+    # operator who sets the documented SHIZUHA_JWKS_URL would be silently ignored
+    # and the BFF would fetch the wrong endpoint and 401 real users (HIVE-474 /
+    # revi P2). Order: SHIZUHA_OAUTH_JWKS_URL (Django shizuha_auth canonical) →
+    # SHIZUHA_JWKS_URL → SHIZUHA_ID_JWKS_URL → (SHIZUHA_EXPECTED_ISSUER |
+    # SHIZUHA_ID_URL)/.well-known/jwks.json (in-cluster default).
+    JWKS_URL: str = (
+        os.environ.get("SHIZUHA_OAUTH_JWKS_URL")
+        or os.environ.get("SHIZUHA_JWKS_URL")
+        or os.environ.get("SHIZUHA_ID_JWKS_URL")
+        or (
+            (os.environ.get("SHIZUHA_EXPECTED_ISSUER") or SHIZUHA_ID_URL).rstrip("/")
+            + "/.well-known/jwks.json"
+        )
+    ).rstrip("/")
     JWKS_TTL_SECONDS: float = float(os.environ.get("HOME_BFF_JWKS_TTL", "600"))
 
     # Downstream service base URLs (in-cluster). The BFF forwards the CALLER's
