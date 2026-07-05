@@ -39,7 +39,7 @@ function DojoWaitlistForm() {
   }
 
   const submitWaitlist = async (payload) => {
-    const res = await fetch('/api/forge/signup', {
+    const res = await fetch('/dojo/api/waitlist/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -60,8 +60,10 @@ function DojoWaitlistForm() {
 
     try {
       const { res, data } = await submitWaitlist({
-        name: `${name} (DOJO waitlist)`,
+        name,
         email,
+        source: 'dojo',
+        campaign: 'organic_waitlist',
       })
 
       if (res.status === 201 || res.status === 200) {
