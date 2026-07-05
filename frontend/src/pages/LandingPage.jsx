@@ -1,10 +1,11 @@
-import { useState } from 'react'
-import { ArrowRight, Bot, Building2, Check, Copy, Cpu, GitBranch, LineChart, Shield, Sparkles, Terminal, Users, Workflow } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { ArrowRight, Bot, Building2, Calendar, Check, Copy, Cpu, Download, GitBranch, LineChart, QrCode, Shield, Smartphone, Sparkles, Terminal, Users, Workflow } from 'lucide-react'
 import GlobalNavBar from '../components/shared/GlobalNavBar'
 import Footer from '../components/Footer'
 import WelcomeBanner from '../components/WelcomeBanner'
 import AppGrid from '../components/AppGrid'
 import { useAuth } from '../contexts/AuthContext'
+import androidApkQr from '../assets/android-apk-qr.svg'
 
 const STEPS = [
   {
@@ -64,6 +65,120 @@ const INSTALL_COMMANDS = [
     command: 'irm https://shizuha.com/install.ps1 | iex',
   },
 ]
+
+const ANDROID_RELEASE_ENDPOINT = '/builds/releases/android.json'
+const ANDROID_RELEASES_URL = '/builds/releases'
+const ANDROID_APK_URL = 'https://shizuha.com/builds/releases/shizuha-assistant-prod.apk'
+const ANDROID_RELEASE_FALLBACK = {
+  versionName: '1.1.1',
+  versionCode: 237,
+  built: '2026-07-05T01:20:05Z',
+  url: ANDROID_APK_URL,
+  size: 87065907,
+}
+
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return null
+  const units = ['B', 'KB', 'MB', 'GB']
+  let size = bytes
+  let unit = 0
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024
+    unit += 1
+  }
+  return `${size.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`
+}
+
+function formatBuildDate(value) {
+  if (!value) return null
+  try {
+    return new Intl.DateTimeFormat('en', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      timeZone: 'UTC',
+    }).format(new Date(value))
+  } catch {
+    return value.slice(0, 10)
+  }
+}
+
+function AndroidDownloadCard() {
+  const [release, setRelease] = useState(ANDROID_RELEASE_FALLBACK)
+
+  useEffect(() => {
+    let cancelled = false
+    fetch(ANDROID_RELEASE_ENDPOINT, { cache: 'no-store' })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return
+        const prod = data.variants?.prod || {}
+        setRelease({
+          versionName: data.versionName || ANDROID_RELEASE_FALLBACK.versionName,
+          versionCode: data.versionCode || ANDROID_RELEASE_FALLBACK.versionCode,
+          built: data.built || ANDROID_RELEASE_FALLBACK.built,
+          url: prod.url || ANDROID_RELEASE_FALLBACK.url,
+          size: prod.size || ANDROID_RELEASE_FALLBACK.size,
+        })
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+
+  const buildDate = formatBuildDate(release.built)
+  const size = formatBytes(release.size)
+
+  return (
+    <div className="rounded-2xl border border-emerald-200 dark:border-emerald-900/70 bg-emerald-50/70 dark:bg-emerald-950/20 p-5 sm:p-6">
+      <div className="grid gap-5 sm:grid-cols-[1fr_auto] sm:items-center">
+        <div>
+          <div className="inline-flex items-center gap-2 rounded-full bg-emerald-100 dark:bg-emerald-900/50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300 mb-3">
+            <Smartphone className="w-3.5 h-3.5" /> Android app
+          </div>
+          <h3 className="text-xl font-semibold text-gray-900 dark:text-white">Download the Android APK</h3>
+          <p className="mt-2 text-sm text-gray-600 dark:text-gray-300 max-w-xl">
+            Install the Shizuha mobile app on Android. Scan the QR code from your phone or use the direct download link.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-3 text-sm text-gray-600 dark:text-gray-300">
+            <span className="inline-flex items-center gap-1.5 rounded-lg bg-white/70 dark:bg-gray-900/70 px-3 py-1.5 ring-1 ring-emerald-200/70 dark:ring-emerald-900/70">
+              <Check className="w-4 h-4 text-emerald-500" /> v{release.versionName} ({release.versionCode})
+            </span>
+            {buildDate && (
+              <span className="inline-flex items-center gap-1.5 rounded-lg bg-white/70 dark:bg-gray-900/70 px-3 py-1.5 ring-1 ring-emerald-200/70 dark:ring-emerald-900/70">
+                <Calendar className="w-4 h-4 text-emerald-500" /> Built {buildDate} UTC
+              </span>
+            )}
+            {size && (
+              <span className="inline-flex items-center gap-1.5 rounded-lg bg-white/70 dark:bg-gray-900/70 px-3 py-1.5 ring-1 ring-emerald-200/70 dark:ring-emerald-900/70">
+                <Download className="w-4 h-4 text-emerald-500" /> {size}
+              </span>
+            )}
+          </div>
+          <div className="mt-5 flex flex-col sm:flex-row gap-3">
+            <a
+              href={release.url || ANDROID_APK_URL}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white hover:bg-emerald-700 transition-colors"
+            >
+              <Download className="w-4 h-4" /> Download APK
+            </a>
+            <a
+              href={ANDROID_RELEASES_URL}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-300 dark:border-emerald-800 px-5 py-3 text-sm font-semibold text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100/70 dark:hover:bg-emerald-900/30 transition-colors"
+            >
+              View all builds <ArrowRight className="w-4 h-4" />
+            </a>
+          </div>
+        </div>
+        <div className="flex flex-col items-center justify-center rounded-2xl bg-white dark:bg-gray-950 p-4 ring-1 ring-emerald-200 dark:ring-emerald-900">
+          <img src={androidApkQr} alt="QR code to download the Shizuha Android APK" className="w-32 h-32" />
+          <div className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+            <QrCode className="w-3.5 h-3.5" /> Scan to download
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 function InstallCommand({ label, command }) {
   const [copied, setCopied] = useState(false)
@@ -267,6 +382,7 @@ export default function LandingPage() {
                 {INSTALL_COMMANDS.map((c) => (
                   <InstallCommand key={c.key} label={c.label} command={c.command} />
                 ))}
+                <AndroidDownloadCard />
                 <p className="text-sm text-gray-500 dark:text-gray-400">
                   Then run <code className="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 font-mono text-gray-700 dark:text-gray-200">shizuha</code> to
                   open the TUI, or <code className="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 font-mono text-gray-700 dark:text-gray-200">shizuha up</code> to
