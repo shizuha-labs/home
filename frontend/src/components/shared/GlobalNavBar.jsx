@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { LayoutDashboard, Cpu, ListChecks, Shield, Search, Menu, X, LogOut } from 'lucide-react'
 import ThemeToggle from '../ThemeToggle'
+import { AppSwitcher } from '@shizuha/ui'
 import { useAuth } from '../../contexts/AuthContext'
 
 const NAV_ITEMS = [
@@ -31,6 +32,9 @@ export default function GlobalNavBar() {
         <div className="flex items-center justify-between h-14">
           {/* Logo + Nav Items */}
           <div className="flex items-center gap-1">
+            <div className="mr-2">
+              <AppSwitcher currentAppId={currentSurface} variant="compact" enableShortcuts popoverPosition="left" />
+            </div>
             <a href="/" className="flex items-center gap-2 mr-4">
               <div className="w-7 h-7 rounded-lg bg-brand-600 flex items-center justify-center">
                 <span className="text-white font-bold text-xs">S</span>
