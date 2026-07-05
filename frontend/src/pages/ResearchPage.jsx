@@ -13,7 +13,7 @@ const AUDIT_TIERS = [
     name: 'Sample / demo',
     price: '₹0',
     description: 'See the output shape before sharing an audit target.',
-    href: '/research/geo-audit-sample',
+    href: '/geo-audit-sample.html',
     event: 'research_sample_click',
   },
   {
@@ -97,7 +97,9 @@ export default function ResearchPage() {
                 <ArrowRight className="w-4 h-4" />
               </a>
               <a
-                href="/research/geo-audit-sample"
+                href="/geo-audit-sample.html"
+                target="_blank"
+                rel="noopener noreferrer"
                 onClick={() => trackClick('research_sample_click', { source: 'hero_cta' })}
                 className="inline-flex items-center gap-2 px-6 py-3 rounded-xl border border-violet-200 dark:border-violet-700 text-violet-700 dark:text-violet-300 font-semibold hover:bg-violet-50 dark:hover:bg-violet-950/40 transition-colors"
               >
@@ -148,11 +150,13 @@ export default function ResearchPage() {
                   <ArrowRight className="w-4 h-4" />
                 </a>
                 <a
-                  href="/research/geo-audit-sample"
+                  href="/geo-audit-sample.html"
+                  target="_blank"
+                  rel="noopener noreferrer"
                   onClick={() => trackClick('research_sample_click', { source: 'audit_card' })}
-                  className="mt-3 text-center text-sm text-violet-700 dark:text-violet-300 hover:underline"
+                  className="mt-3 text-sm text-violet-700 dark:text-violet-300 hover:underline inline-flex items-center gap-1"
                 >
-                  Open sample audit artifact
+                  View sample audit report <ExternalLink className="w-3 h-3" />
                 </a>
               </div>
             </div>

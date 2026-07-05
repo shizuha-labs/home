@@ -38,12 +38,6 @@ const routes = [
     description:
       'Submit intent for a Shizuha research report or AI-search visibility audit. No payment is collected on this page and outcomes are not guaranteed.',
   },
-  {
-    output: 'research/geo-audit-sample/index.html',
-    title: 'Sample GEO Audit Artifact — Shizuha Research',
-    description:
-      'Sample AI-search/GEO visibility audit artifact showing visibility checks, entity/content gaps, citation-readiness fixes, and guardrail disclaimer copy.',
-  },
 ]
 
 const replaceTag = (html, pattern, replacement) => {

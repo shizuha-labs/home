@@ -10,7 +10,6 @@ import ApiPage from './pages/ApiPage'
 import HivePage from './pages/HivePage'
 import ResearchPage from './pages/ResearchPage'
 import ResearchOrderPage from './pages/ResearchOrderPage'
-import ResearchGeoAuditSamplePage from './pages/ResearchGeoAuditSamplePage'
 import DojoPage from './pages/DojoPage'
 import AutonomousOrgPage from './pages/AutonomousOrgPage'
 
@@ -72,7 +71,6 @@ export default function App() {
       <Route path="/autonomous-org" element={<AutonomousOrgPage />} />
       <Route path="/research" element={<ResearchPage />} />
       <Route path="/research/order" element={<ResearchOrderPage />} />
-      <Route path="/research/geo-audit-sample" element={<ResearchGeoAuditSamplePage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )

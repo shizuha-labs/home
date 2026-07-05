@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GEO Audit Sample — Shizuha Global Pvt. Ltd. | AI-Search Visibility Report</title>
+  <meta name="description" content="Sample AI-Search / Generative Engine Optimization audit report for Shizuha Global. Shows visibility checks, content gaps, citation-readiness fixes, and a prioritized remediation checklist.">
+  <meta property="og:title" content="GEO Audit Sample — Shizuha Global Pvt. Ltd.">
+  <meta property="og:description" content="Sample AI-Search visibility audit: visibility checks, entity gaps, citation-readiness, and remediation checklist.">
+  <meta property="og:type" content="article">
+  <style>
+    :root { --bg: #fafafa; --card: #ffffff; --text: #1a1a2e; --muted: #6b7280; --accent: #4f46e5; --green: #059669; --amber: #d97706; --red: #dc2626; --border: #e5e7eb; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+    .container { max-width: 860px; margin: 0 auto; padding: 2rem 1.5rem; }
+    header { text-align: center; padding: 3rem 1.5rem 2rem; background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); color: white; margin-bottom: 2rem; }
+    header h1 { font-size: 1.75rem; font-weight: 700; margin-bottom: 0.5rem; }
+    header p { opacity: 0.9; font-size: 1rem; }
+    .badge { display: inline-block; background: rgba(255,255,255,0.2); padding: 0.25rem 0.75rem; border-radius: 999px; font-size: 0.8rem; margin-top: 0.75rem; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; }
+    .card h2 { font-size: 1.25rem; margin-bottom: 1rem; padding-bottom: 0.5rem; border-bottom: 2px solid var(--accent); }
+    .card h3 { font-size: 1.05rem; margin: 1rem 0 0.5rem; color: var(--accent); }
+    .score-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1rem; }
+    .score-item { text-align: center; padding: 1rem; background: #f9fafb; border-radius: 8px; }
+    .score-item .value { font-size: 2rem; font-weight: 700; }
+    .score-item .label { font-size: 0.85rem; color: var(--muted); }
+    .score-good { color: var(--green); } .score-warn { color: var(--amber); } .score-bad { color: var(--red); }
+    table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+    th, td { text-align: left; padding: 0.6rem 0.75rem; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
+    th { background: #f9fafb; font-weight: 600; }
+    .tag { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+    .tag-critical { background: #fef2f2; color: var(--red); }
+    .tag-high { background: #fffbeb; color: var(--amber); }
+    .tag-medium { background: #eff6ff; color: var(--accent); }
+    .tag-low { background: #f0fdf4; color: var(--green); }
+    .finding { padding: 1rem; margin: 0.75rem 0; border-left: 3px solid var(--border); background: #fafafa; border-radius: 0 8px 8px 0; }
+    .finding.critical { border-left-color: var(--red); }
+    .finding.high { border-left-color: var(--amber); }
+    .finding.medium { border-left-color: var(--accent); }
+    .finding.low { border-left-color: var(--green); }
+    .finding h4 { margin-bottom: 0.25rem; }
+    .finding p { font-size: 0.9rem; color: var(--muted); }
+    .finding .fix { font-size: 0.85rem; color: var(--green); margin-top: 0.5rem; font-weight: 500; }
+    .checklist { list-style: none; }
+    .checklist li { padding: 0.5rem 0; border-bottom: 1px solid var(--border); display: flex; align-items: flex-start; gap: 0.75rem; font-size: 0.9rem; }
+    .checklist li:last-child { border-bottom: none; }
+    .checklist .priority { flex-shrink: 0; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: 700; color: white; }
+    .p1 { background: var(--red); } .p2 { background: var(--amber); } .p3 { background: var(--accent); } .p4 { background: var(--green); }
+    footer { text-align: center; padding: 2rem 1.5rem; color: var(--muted); font-size: 0.8rem; border-top: 1px solid var(--border); margin-top: 2rem; }
+    .disclaimer { background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 1rem; margin-top: 1rem; font-size: 0.85rem; }
+    .disclaimer strong { color: var(--amber); }
+    .meta { display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.85rem; color: var(--muted); margin-bottom: 1.5rem; }
+    .meta span { display: flex; align-items: center; gap: 0.25rem; }
+    @media print { header { background: #4f46e5 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>AI-Search / GEO Audit Report</h1>
+    <p>Generative Engine Optimization Assessment</p>
+    <span class="badge">SAMPLE REPORT — Shizuha-owned target</span>
+  </header>
+
+  <div class="container">
+    <div class="meta">
+      <span>📋 Target: <strong>shizuha.com</strong> (Shizuha Global Pvt. Ltd.)</span>
+      <span>📅 Date: 2026-07-05</span>
+      <span>🔬 Scope: Fixed-scope 24–48h audit</span>
+      <span>📊 Version: 1.0</span>
+    </div>
+
+    <!-- Executive Summary -->
+    <div class="card">
+      <h2>Executive Summary</h2>
+      <p>Shizuha Global's digital presence shows <strong>fragmented AI-search visibility</strong>. While the brand is discoverable through developer-community channels (GitHub, technical forums), the primary domain (shizuha.com) lacks the structured signals that AI answer engines need to cite the company confidently. The site currently serves a minimal SPA shell with limited crawlable content, no structured data, and no entity-rich pages — making it difficult for generative engines to answer questions like "What does Shizuha build?" or "Who is behind Shizuha?" with sourced, cited responses.</p>
+      <div class="score-grid">
+        <div class="score-item"><div class="value score-warn">42</div><div class="label">AI-Answer Readiness</div></div>
+        <div class="score-item"><div class="value score-bad">18</div><div class="label">Entity Coverage</div></div>
+        <div class="score-item"><div class="value score-warn">55</div><div class="label">Citation Readiness</div></div>
+        <div class="score-item"><div class="value score-bad">25</div><div class="label">Structured Data</div></div>
+      </div>
+      <p><strong>Overall GEO Score: 35/100</strong> — Significant opportunity to improve AI-search visibility with targeted structural and content fixes.</p>
+    </div>
+
+    <!-- Section 1: AI-Answer Visibility Checks -->
+    <div class="card">
+      <h2>1. AI-Answer Visibility Checks</h2>
+      <p>How well can AI answer engines find, understand, and cite Shizuha when users ask relevant questions?</p>
+
+      <h3>1.1 Query Simulation Results</h3>
+      <table>
+        <thead><tr><th>Sample Query</th><th>Current Visibility</th><th>Cited?</th><th>Confidence</th></tr></thead>
+        <tbody>
+          <tr><td>"What is Shizuha Global?"</td><td>Partial — brand name appears</td><td>❌ No direct citation</td><td>Low</td></tr>
+          <tr><td>"Shizuha AI agent platform"</td><td>Found via GitHub repos</td><td>⚠️ Indirect (via GitHub)</td><td>Medium</td></tr>
+          <tr><td>"Shizuha products and services"</td><td>Minimal — no product pages</td><td>❌ Not cited</td><td>Very Low</td></tr>
+          <tr><td>"Who founded Shizuha?"</td><td>Founder name in GitHub</td><td>⚠️ Indirect</td><td>Low</td></tr>
+          <tr><td>"Shizuha vs competitors"</td><td>Not found</td><td>❌ Absent</td><td>None</td></tr>
+          <tr><td>"Shizuha pricing plans"</td><td>Not found</td><td>❌ Absent</td><td>None</td></tr>
+        </tbody>
+      </table>
+
+      <h3>1.2 Indexing & Crawlability</h3>
+      <div class="finding critical">
+        <h4>🔴 SPA Shell Returns Generic Content to Crawlers</h4>
+        <p>Public fetches of shizuha.com return a minimal SPA shell ("Shizuha") with no meaningful content, title tags, or meta descriptions. AI engines and search crawlers see an empty page, severely limiting indexable surface area.</p>
+        <div class="fix">✅ Fix: Implement server-side rendering (SSR) or static pre-rendering for key pages. Ensure &lt;title&gt;, &lt;meta description&gt;, and body content are present in initial HTML.</div>
+      </div>
+      <div class="finding high">
+        <h4>🟡 robots.txt and sitemap.xml Return SPA Shell</h4>
+        <p>Both /robots.txt and /sitemap.xml return the generic SPA shell instead of their expected content. Crawlers cannot discover the site's page structure or crawl directives.</p>
+        <div class="fix">✅ Fix: Serve actual robots.txt (with sitemap reference) and sitemap.xml from the edge/CDN, bypassing the SPA router.</div>
+      </div>
+      <div class="finding medium">
+        <h4>🔵 No Open Graph or Twitter Card Meta Tags</h4>
+        <p>Missing og:title, og:description, og:image, and twitter:card tags. When Shizuha links are shared on social platforms or cited by AI engines that scrape link previews, they show as blank or generic.</p>
+        <div class="fix">✅ Fix: Add OG/Twitter meta tags to all public-facing pages with descriptive titles, summaries, and branded images.</div>
+      </div>
+    </div>
+
+    <!-- Section 2: Entity & Content Gaps -->
+    <div class="card">
+      <h2>2. Entity & Content Gaps</h2>
+      <p>AI answer engines rely on structured entity information to build knowledge graphs. Shizuha's digital presence lacks the entity signals needed for confident citation.</p>
+
+      <h3>2.1 Missing Entity Signals</h3>
+      <table>
+        <thead><tr><th>Entity Type</th><th>Present?</th><th>Impact</th><th>Priority</th></tr></thead>
+        <tbody>
+          <tr><td>Organization (schema.org)</td><td>❌ Absent</td><td>AI engines can't identify the company as a distinct entity</td><td><span class="tag tag-critical">Critical</span></td></tr>
+          <tr><td>Person (founder/team)</td><td>❌ Absent</td><td>No connection between people and the organization</td><td><span class="tag tag-high">High</span></td></tr>
+          <tr><td>Product/Service definitions</td><td>❌ Absent</td><td>AI can't describe what Shizuha offers</td><td><span class="tag tag-critical">Critical</span></td></tr>
+          <tr><td>FAQ / Q&amp;A structured data</td><td>❌ Absent</td><td>Missed opportunity for direct AI answer inclusion</td><td><span class="tag tag-high">High</span></td></tr>
+          <tr><td>HowTo / Article markup</td><td>❌ Absent</td><td>Blog/docs content not machine-readable</td><td><span class="tag tag-medium">Medium</span></td></tr>
+          <tr><td>BreadcrumbList</td><td>❌ Absent</td><td>No site hierarchy signals for crawlers</td><td><span class="tag tag-low">Low</span></td></tr>
+        </tbody>
+      </table>
+
+      <h3>2.2 Content Depth Gaps</h3>
+      <div class="finding critical">
+        <h4>🔴 No Dedicated "About" or "Products" Pages</h4>
+        <p>The site lacks dedicated pages describing what Shizuha builds, who the team is, or what products/services are offered. Without these pages, AI engines have no authoritative source to cite for basic company questions.</p>
+        <div class="fix">✅ Fix: Create /about, /products, and /team pages with rich, entity-dense content. Include schema.org Organization, Person, and Product markup.</div>
+      </div>
+      <div class="finding high">
+        <h4>🟡 No Blog or Thought-Leadership Content</h4>
+        <p>AI engines heavily cite fresh, authoritative content. Shizuha has no visible blog, case studies, or technical articles on the primary domain that could establish topical authority.</p>
+        <div class="fix">✅ Fix: Launch a /blog section with regular technical and product content. Each post should include Article schema markup and internal links to product pages.</div>
+      </div>
+      <div class="finding high">
+        <h4>🟡 No FAQ or Help Center</h4>
+        <p>FAQ pages are the highest-converting content type for AI answer inclusion. Shizuha has no FAQ surface, missing the easiest path to appearing in AI-generated answers.</p>
+        <div class="fix">✅ Fix: Create a /faq page with common questions about Shizuha's products, pricing, and capabilities. Use FAQPage schema markup.</div>
+      </div>
+      <div class="finding medium">
+        <h4>🔵 GitHub Repos Are the Primary Source of Truth</h4>
+        <p>Most discoverable information about Shizuha comes from GitHub repositories (shizuha-labs), not the company website. This means AI engines associate Shizuha with code, not with its products or services.</p>
+        <div class="fix">✅ Fix: Cross-link GitHub repos from the website. Add "Code" and "Open Source" sections that reference key repos, creating a bidirectional entity graph.</div>
+      </div>
+    </div>
+
+    <!-- Section 3: Citation-Readiness Fixes -->
+    <div class="card">
+      <h2>3. Citation-Readiness Fixes</h2>
+      <p>For AI engines to cite Shizuha confidently, the site needs to provide clear, structured, and authoritative information that matches common user queries.</p>
+
+      <h3>3.1 Structured Data Implementation</h3>
+      <div class="finding critical">
+        <h4>🔴 Zero JSON-LD Structured Data</h4>
+        <p>No JSON-LD or microdata markup exists on any page. This is the single biggest gap — structured data is the primary mechanism by which AI engines extract entity information for citation.</p>
+        <div class="fix">✅ Fix: Implement Organization JSON-LD on all pages:
+<pre style="background:#f3f4f6;padding:0.75rem;border-radius:6px;margin-top:0.5rem;font-size:0.8rem;overflow-x:auto;">{
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  "name": "Shizuha Global Pvt. Ltd.",
+  "url": "https://shizuha.com",
+  "logo": "https://shizuha.com/logo.png",
+  "sameAs": [
+    "https://github.com/shizuha-labs",
+    "https://x.com/shizuha"
+  ],
+  "founder": {
+    "@type": "Person",
+    "name": "Hritik Soni"
+  },
+  "description": "AI agent platform and developer tools for autonomous workflows",
+  "knowsAbout": ["Artificial Intelligence", "Developer Tools", "Agent Platforms"]
+}</pre></div>
+      </div>
+
+      <h3>3.2 Content Authority Signals</h3>
+      <div class="finding high">
+        <h4>🟡 No Authoritative "About" Content for Entity Resolution</h4>
+        <p>AI engines need a clear, self-described "who we are" page to resolve entity ambiguity. Without it, Shizuha may be confused with other entities sharing the name.</p>
+        <div class="fix">✅ Fix: Create an /about page with: company description, founding story, team bios, mission statement, and clear differentiation from competitors. Include Person schema for key team members.</div>
+      </div>
+      <div class="finding high">
+        <h4>🟡 No Product/Service Descriptions with Structured Data</h4>
+        <p>AI engines can't answer "What does Shizuha offer?" because there are no product pages with structured descriptions, pricing, or feature lists.</p>
+        <div class="fix">✅ Fix: Create product pages (/products/hive, /products/pulse, etc.) with SoftwareApplication schema, feature lists, and clear value propositions.</div>
+      </div>
+      <div class="finding medium">
+        <h4>🔵 Missing Backlink Profile from Authority Sites</h4>
+        <p>AI engines weigh backlinks from authoritative sources. Shizuha's backlink profile is limited to GitHub and developer forums, missing industry publications, directories, and news mentions.</p>
+        <div class="fix">✅ Fix: Submit to relevant directories (Crunchbase, Product Hunt, G2). Pursue press coverage and guest posts on AI/developer blogs to build authority backlinks.</div>
+      </div>
+    </div>
+
+    <!-- Section 4: Prioritized Remediation Checklist -->
+    <div class="card">
+      <h2>4. Prioritized Remediation Checklist</h2>
+      <p>Ordered by impact on AI-search visibility. Estimated effort and expected timeline for each fix.</p>
+
+      <ol class="checklist">
+        <li>
+          <span class="priority p1">1</span>
+          <div><strong>Implement SSR / pre-rendering for key pages</strong><br><span style="color:var(--muted)">Fix the SPA shell problem so crawlers see actual content. Start with homepage, /about, /products, /research.</span><br><span style="color:var(--muted)">⏱ ~2 days | Impact: High — unlocks all other visibility improvements</span></div>
+        </li>
+        <li>
+          <span class="priority p1">2</span>
+          <div><strong>Add Organization JSON-LD structured data to all pages</strong><br><span style="color:var(--muted)">Implement the schema.org Organization markup with founder, products, and social links.</span><br><span style="color:var(--muted)">⏱ ~0.5 days | Impact: High — direct entity signal for AI engines</span></div>
+        </li>
+        <li>
+          <span class="priority p1">3</span>
+          <div><strong>Fix robots.txt and sitemap.xml</strong><br><span style="color:var(--muted)">Serve actual robots.txt and sitemap.xml from the edge, listing all crawlable pages.</span><br><span style="color:var(--muted)">⏱ ~1 day | Impact: High — enables crawler discovery</span></div>
+        </li>
+        <li>
+          <span class="priority p2">4</span>
+          <div><strong>Create /about, /products, /team pages</strong><br><span style="color:var(--muted)">Rich entity-dense pages describing the company, products, and team. Include Person and Product schema.</span><br><span style="color:var(--muted)">⏱ ~3 days | Impact: High — gives AI engines content to cite</span></div>
+        </li>
+        <li>
+          <span class="priority p2">5</span>
+          <div><strong>Add Open Graph and Twitter Card meta tags</strong><br><span style="color:var(--muted)">Ensure all shared links render with proper titles, descriptions, and images.</span><br><span style="color:var(--muted)">⏱ ~1 day | Impact: Medium — improves social sharing and link preview quality</span></div>
+        </li>
+        <li>
+          <span class="priority p2">6</span>
+          <div><strong>Launch /faq page with FAQPage schema</strong><br><span style="color:var(--muted)">Answer common questions about Shizuha's products, pricing, and capabilities in structured format.</span><br><span style="color:var(--muted)">⏱ ~2 days | Impact: High — FAQ pages have the highest AI answer inclusion rate</span></div>
+        </li>
+        <li>
+          <span class="priority p3">7</span>
+          <div><strong>Launch /blog with regular technical content</strong><br><span style="color:var(--muted)">Publish articles about AI agents, developer tools, and product updates. Use Article schema markup.</span><br><span style="color:var(--muted)">⏱ ~1 week (initial) + ongoing | Impact: Medium — builds topical authority over time</span></div>
+        </li>
+        <li>
+          <span class="priority p3">8</span>
+          <div><strong>Cross-link GitHub repos from website</strong><br><span style="color:var(--muted)">Create an "Open Source" section linking to key shizuha-labs repos, and reference the website from repo READMEs.</span><br><span style="color:var(--muted)">⏱ ~1 day | Impact: Medium — connects code presence with brand presence</span></div>
+        </li>
+        <li>
+          <span class="priority p4">9</span>
+          <div><strong>Submit to directories and pursue press coverage</strong><br><span style="color:var(--muted)">Crunchbase, Product Hunt, G2, AI tool directories. Guest posts on developer/AI blogs.</span><br><span style="color:var(--muted)">⏱ ~2 weeks | Impact: Medium — builds authority backlink profile</span></div>
+        </li>
+        <li>
+          <span class="priority p4">10</span>
+          <div><strong>Implement BreadcrumbList schema on all pages</strong><br><span style="color:var(--muted)">Helps crawlers understand site hierarchy and improves rich snippet eligibility.</span><br><span style="color:var(--muted)">⏱ ~0.5 days | Impact: Low — incremental improvement to crawlability</span></div>
+        </li>
+      </ol>
+    </div>
+
+    <!-- Summary -->
+    <div class="card">
+      <h2>Summary & Expected Impact</h2>
+      <table>
+        <thead><tr><th>Phase</th><th>Items</th><th>Timeline</th><th>Expected GEO Score</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Phase 1: Foundation</strong></td><td>#1–3 (SSR, structured data, crawlability)</td><td>~3.5 days</td><td>35 → 55</td></tr>
+          <tr><td><strong>Phase 2: Content</strong></td><td>#4–6 (about/products, OG tags, FAQ)</td><td>~6 days</td><td>55 → 72</td></tr>
+          <tr><td><strong>Phase 3: Authority</strong></td><td>#7–10 (blog, cross-links, directories, breadcrumbs)</td><td>~3 weeks</td><td>72 → 85+</td></tr>
+        </tbody>
+      </table>
+      <p style="margin-top:1rem">With these fixes, Shizuha's AI-search visibility should improve from <strong>35/100 to 85+/100</strong>, enabling AI answer engines to confidently cite the company for relevant queries about its products, team, and capabilities.</p>
+    </div>
+
+    <!-- Disclaimer -->
+    <div class="disclaimer">
+      <strong>⚠️ Disclaimer (v1.0):</strong> This is a research/advisory audit of AI-search and generative-engine visibility. It does not guarantee search rankings, AI-answer inclusion, citations, or any placement outcome. Results depend on third-party engines outside our control. This sample report uses Shizuha's own digital presence as the audit target and is provided for demonstration purposes only.
+    </div>
+  </div>
+
+  <footer>
+    <p><strong>Shizuha Global Pvt. Ltd.</strong> — GEO Audit Sample Report</p>
+    <p>Generated 2026-07-05 | Report Version 1.0 | Disclaimer Version 1.0</p>
+    <p style="margin-top:0.5rem">This is a research/advisory audit of AI-search and generative-engine visibility. It does not guarantee search rankings, AI-answer inclusion, citations, or any placement outcome. Results depend on third-party engines outside our control.</p>
+  </footer>
+</body>
+</html>
