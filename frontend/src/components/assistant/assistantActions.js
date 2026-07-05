@@ -1,0 +1,180 @@
+export const ACTION_TIERS = {
+  1: {
+    label: 'Inline safe',
+    tone: 'emerald',
+    description: 'Low-risk action or read. The assistant can do it and return a link.',
+  },
+  2: {
+    label: 'Confirm first',
+    tone: 'amber',
+    description: 'Preview the consequence and require explicit confirmation before writing.',
+  },
+  3: {
+    label: 'Deep-link only',
+    tone: 'slate',
+    description: 'Privileged, destructive, regulated, or high-blast-radius work stays in the owning surface.',
+  },
+}
+
+export const ASSISTANT_ACTIONS = [
+  {
+    id: 'create-task',
+    label: 'Create a task',
+    description: 'Draft a Pulse task from your request and confirm with a link.',
+    tier: 1,
+    owner: 'Pulse',
+    href: '/pulse/',
+    deepLink: '/pulse/',
+    requiredInputs: ['title', 'project', 'priority'],
+    authSurface: 'forward-caller-jwt:pulse',
+    confirmationCopy: 'I will create a low-risk Pulse task and return its link.',
+    auditEvent: 'assistant_action_create_task',
+    prompt: 'Create a Pulse task. Ask me for any missing title, project, priority, or assignee, then create it and return the task link.',
+    keywords: ['task', 'todo', 'issue', 'pulse', 'ticket'],
+  },
+  {
+    id: 'show-my-work',
+    label: 'Show my work',
+    description: 'Summarize open, blocked, review, and merge work using the home context.',
+    tier: 1,
+    owner: 'Pulse',
+    href: '/pulse/',
+    deepLink: '/pulse/',
+    requiredInputs: [],
+    authSurface: 'forward-caller-jwt:pulse',
+    confirmationCopy: 'I will read only the work you are authorized to see.',
+    auditEvent: 'assistant_action_show_my_work',
+    prompt: 'Show my current work summary: open, in progress, in review, blocked, and awaiting merge. Include links for anything that needs action.',
+    keywords: ['my work', 'tasks', 'blocked', 'review', 'merge'],
+  },
+  {
+    id: 'create-org',
+    label: 'Create an organization',
+    description: 'Open the guided org wizard; org creation requires preview and confirmation.',
+    tier: 2,
+    owner: 'Hive/Admin',
+    href: '/hive?intent=create-org',
+    deepLink: '/hive?intent=create-org',
+    requiredInputs: ['organization_name', 'template'],
+    authSurface: 'hive-org-wizard',
+    confirmationCopy: 'Opening the guided org wizard; organization creation requires preview and explicit confirmation.',
+    auditEvent: 'assistant_action_create_org_route',
+    prompt: 'Help me create an organization. Walk me through template, name, and confirmation using the guided wizard.',
+    keywords: ['org', 'organization', 'company', 'build a company', 'workspace'],
+  },
+  {
+    id: 'invite-member',
+    label: 'Invite a member',
+    description: 'Preview recipient, org/team, and role before sending an invite.',
+    tier: 2,
+    owner: 'Admin',
+    href: '/admin/',
+    deepLink: '/admin/',
+    requiredInputs: ['email', 'organization_or_team', 'role'],
+    authSurface: 'admin-invite-flow',
+    confirmationCopy: 'Invites require preview and explicit confirmation before a message is sent.',
+    auditEvent: 'assistant_action_invite_member_route',
+    prompt: 'Help me invite a member. Ask for the email, organization/team, role, and show a confirmation preview before sending.',
+    keywords: ['invite', 'member', 'team', 'role', 'admin'],
+  },
+  {
+    id: 'financial-snapshot',
+    label: 'Check financials',
+    description: 'Read-only Books summary when authorized; otherwise route to Books.',
+    tier: 1,
+    owner: 'Books',
+    href: '/books/',
+    deepLink: '/books/',
+    requiredInputs: [],
+    authSurface: 'forward-caller-jwt:books-readonly',
+    confirmationCopy: 'I will only read Books data you are authorized to see; financial writes stay in Books.',
+    auditEvent: 'assistant_action_financial_snapshot',
+    prompt: 'Give me a read-only financial snapshot I am authorized to see: cash, P&L, invoices or vouchers needing attention, and links to the Books surface.',
+    keywords: ['finance', 'financials', 'books', 'cash', 'invoice', 'pnl'],
+  },
+  {
+    id: 'books-write',
+    label: 'Create/post financial record',
+    description: 'Financial writes are routed to Books; the assistant must not post them inline.',
+    tier: 3,
+    owner: 'Books',
+    href: '/books/',
+    deepLink: '/books/',
+    requiredInputs: ['record_type'],
+    authSurface: 'books-owned-write-flow',
+    confirmationCopy: 'Financial writes are deep-link only; the assistant will not create, post, file, or pay inline.',
+    auditEvent: 'assistant_action_books_write_route',
+    prompt: 'Route me to Books for this financial write. Explain why posting vouchers, invoices, filings, or payments must happen in Books.',
+    keywords: ['voucher', 'payment', 'tax', 'filing', 'post invoice'],
+  },
+  {
+    id: 'open-wiki',
+    label: 'Search docs/wiki',
+    description: 'Search or open the wiki and explain the best matching route.',
+    tier: 1,
+    owner: 'Wiki',
+    href: '/wiki/',
+    deepLink: '/wiki/',
+    requiredInputs: ['search_term'],
+    authSurface: 'forward-caller-jwt:wiki-read',
+    confirmationCopy: 'I will search/open wiki content you are authorized to see.',
+    auditEvent: 'assistant_action_open_wiki',
+    prompt: 'Help me find the right Shizuha docs/wiki page. Ask for a search term if needed and return the best link.',
+    keywords: ['wiki', 'docs', 'documentation', 'runbook', 'adr'],
+  },
+  {
+    id: 'production-control',
+    label: 'Deploy/restart/fix production',
+    description: 'Production, credential, cluster, and security-posture controls are deep-link only.',
+    tier: 3,
+    owner: 'Hive/DevOps',
+    href: '/hive/',
+    deepLink: '/hive/',
+    requiredInputs: ['target', 'requested_action'],
+    authSurface: 'devops-owned-control-plane',
+    confirmationCopy: 'Privileged production, credential, cluster, and security-posture actions are deep-link only.',
+    auditEvent: 'assistant_action_production_control_route',
+    prompt: 'Route this production-control request to the owning Hive/DevOps surface or task. Do not execute privileged production, credential, or cluster actions inline.',
+    keywords: ['deploy', 'restart', 'production', 'credential', 'cluster', 'devops'],
+  },
+]
+
+export function actionMatches(action, query) {
+  const q = query.trim().toLowerCase()
+  if (!q) return true
+  const haystack = [action.label, action.description, action.owner, ...(action.keywords || [])]
+    .join(' ')
+    .toLowerCase()
+  return haystack.includes(q)
+}
+
+export function getAssistantActionExecution(action, { confirmed = false } = {}) {
+  if (!action) return { mode: 'none', writeAllowed: false }
+  if (action.tier === 3) {
+    return {
+      mode: 'navigate',
+      href: action.deepLink || action.href,
+      writeAllowed: false,
+      reason: ACTION_TIERS[3].description,
+    }
+  }
+  if (action.tier === 2 && !confirmed) {
+    return {
+      mode: 'confirm',
+      writeAllowed: false,
+      preview: {
+        label: action.label,
+        owner: action.owner,
+        consequence: action.confirmationCopy,
+        requiredInputs: action.requiredInputs || [],
+        auditEvent: action.auditEvent,
+        authSurface: action.authSurface,
+      },
+    }
+  }
+  return {
+    mode: 'ask',
+    prompt: action.prompt,
+    writeAllowed: action.tier === 1 || (action.tier === 2 && confirmed),
+  }
+}
