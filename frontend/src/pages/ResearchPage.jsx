@@ -111,13 +111,15 @@ export default function ResearchPage() {
                   Start audit request
                   <ArrowRight className="w-4 h-4" />
                 </a>
-                <button
-                  type="button"
+                <a
+                  href="/geo-audit-sample.html"
+                  target="_blank"
+                  rel="noopener noreferrer"
                   onClick={() => trackClick('research_sample_click', { source: 'audit_card' })}
-                  className="mt-3 text-sm text-violet-700 dark:text-violet-300 hover:underline"
+                  className="mt-3 text-sm text-violet-700 dark:text-violet-300 hover:underline inline-flex items-center gap-1"
                 >
-                  Track sample audit interest
-                </button>
+                  View sample audit report <ExternalLink className="w-3 h-3" />
+                </a>
               </div>
             </div>
           </div>
