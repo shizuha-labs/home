@@ -13,10 +13,14 @@ cross-org. (STRIDE-lite on the task; PLAT-1236 cross-org→403 tests below.)
 """
 import asyncio
 import datetime
+import time
 from typing import Optional
 
 import httpx
-from fastapi import Depends, FastAPI, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 
 from .auth import Caller, resolve_scope_org, verify_caller
 from .cache import cache_key, widget_cache
@@ -24,14 +28,65 @@ from .clients import (
     fetch_agent_activity, fetch_alerts, fetch_financial_snapshot,
     fetch_recent_conversations, fetch_tasks_by_status,
 )
+from .audit_leads import AuditLeadRequest, AuditLeadResponse, persist_audit_lead
+from .config import settings
 from .schema import HomeSummaryV1, OrgRef, SUMMARY_VERSION
 
 app = FastAPI(title="Shizuha Home BFF", version=str(SUMMARY_VERSION))
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Avoid reflecting AuditLead PII in public validation error traces."""
+    if request.url.path == "/api/research/audit-leads":
+        errors = []
+        for err in exc.errors():
+            scrubbed = {k: v for k, v in err.items() if k not in {"input", "ctx"}}
+            errors.append(scrubbed)
+        return JSONResponse(status_code=422, content={"detail": errors})
+    return await request_validation_exception_handler(request, exc)
+
+_audit_lead_rate_window: dict[str, list[float]] = {}
+
+
+def _check_audit_lead_rate_limit(request: Request) -> None:
+    """Small public-intake anti-abuse guard; fail closed per client IP."""
+    ip = request.client.host if request.client else "unknown"
+    now = time.monotonic()
+    window_start = now - 60
+    recent = [ts for ts in _audit_lead_rate_window.get(ip, []) if ts >= window_start]
+    if len(recent) >= settings.AUDIT_LEAD_RATE_LIMIT_PER_MINUTE:
+        _audit_lead_rate_window[ip] = recent
+        raise HTTPException(status_code=429, detail="Too many audit-intent submissions; please retry later")
+    recent.append(now)
+    _audit_lead_rate_window[ip] = recent
+
+
+def _clear_audit_lead_rate_limits_for_tests() -> None:
+    _audit_lead_rate_window.clear()
 
 
 @app.get("/api/home/health")
 async def health():
     return {"status": "ok", "version": SUMMARY_VERSION}
+
+
+@app.post("/api/research/audit-leads", response_model=AuditLeadResponse, status_code=201)
+async def create_audit_lead(payload: AuditLeadRequest, request: Request) -> AuditLeadResponse:
+    """Intent-only GEO audit intake. No payment, fetching, or fulfillment."""
+    _check_audit_lead_rate_limit(request)
+    record = persist_audit_lead(payload)
+    return AuditLeadResponse(
+        lead_id=record.lead_id,
+        offer_tier=record.offer_tier,
+        price_shown=record.price_shown,
+        intent=record.intent,
+        disclaimer_version=record.disclaimer_version,
+        dpdp_notice_version=record.dpdp_notice_version,
+        message=(
+            "Intent received. This is not a purchase: no payment was collected, "
+            "no live-site audit has started, and Shizuha will contact you to confirm scope first."
+        ),
+    )
 
 
 @app.get("/api/home/summary", response_model=HomeSummaryV1)

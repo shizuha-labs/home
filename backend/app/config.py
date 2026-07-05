@@ -32,5 +32,10 @@ class Settings:
     CACHE_TTL_SECONDS: float = float(os.environ.get("HOME_BFF_CACHE_TTL", "15"))
     STALE_TTL_SECONDS: float = float(os.environ.get("HOME_BFF_STALE_TTL", "300"))
 
+    # VEN-97 AuditLead intent records: no payment/fulfillment, minimal PII.
+    AUDIT_LEAD_STORE_PATH: str = os.environ.get("HOME_AUDIT_LEAD_STORE_PATH", "/data/home/audit-leads.jsonl")
+    AUDIT_LEAD_RETENTION_DAYS: int = int(os.environ.get("HOME_AUDIT_LEAD_RETENTION_DAYS", "45"))
+    AUDIT_LEAD_RATE_LIMIT_PER_MINUTE: int = int(os.environ.get("HOME_AUDIT_LEAD_RATE_LIMIT_PER_MINUTE", "5"))
+
 
 settings = Settings()
