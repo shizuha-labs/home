@@ -7,23 +7,25 @@ import datetime
 import os
 
 # Must be set BEFORE importing the app (config reads it at import).
-os.environ.setdefault("JWT_SECRET_KEY", "test-secret-hive375")
+os.environ.setdefault("SHIZUHA_JWKS_URL", "https://id.test/.well-known/jwks.json")
 
 import httpx
 import jwt
 import pytest
+from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
-from app import clients
+from app import auth, clients
 from app.cache import widget_cache
 from app.config import settings
 from app.main import app
 
 client = TestClient(app)
-SECRET = settings.JWT_SECRET_KEY
+_PRIVATE_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+_PUBLIC_KEY = _PRIVATE_KEY.public_key()
 
 
-def _token(user_id=101, email="a@org1.example", memberships=None, expired=False):
+def _token(user_id=101, email="a@org1.example", memberships=None, expired=False, key=None, kid="test-kid", alg="RS256"):
     now = datetime.datetime.now(datetime.timezone.utc)
     payload = {
         "user_id": user_id,
@@ -31,11 +33,25 @@ def _token(user_id=101, email="a@org1.example", memberships=None, expired=False)
         "organization_memberships": memberships if memberships is not None else {"1": "admin"},
         "exp": now - datetime.timedelta(hours=1) if expired else now + datetime.timedelta(hours=1),
     }
-    return jwt.encode(payload, SECRET, algorithm="HS256")
+    return jwt.encode(payload, key or _PRIVATE_KEY, algorithm=alg, headers={"kid": kid} if kid else None)
 
 
 def _auth(tok):
     return {"Authorization": f"Bearer {tok}"}
+
+
+@pytest.fixture(autouse=True)
+def _stub_jwks(monkeypatch):
+    # HEAD auth.py verifies RS256 via _jwks_fetch_keys() -> {kid: public_key};
+    # stub it to our in-memory test key so RS256 tests never hit the network.
+    def _fake_fetch(force_refresh=False):
+        return {"test-kid": _PUBLIC_KEY}
+    monkeypatch.setattr("app.auth._jwks_fetch_keys", _fake_fetch)
+    auth._JWKS_CACHE["keys"] = {}
+    auth._JWKS_CACHE["fetched_at"] = 0.0
+    yield
+    auth._JWKS_CACHE["keys"] = {}
+    auth._JWKS_CACHE["fetched_at"] = 0.0
 
 
 @pytest.fixture(autouse=True)
@@ -79,8 +95,18 @@ def test_expired_token_is_401():
 
 
 def test_token_signed_with_wrong_key_is_401():
+    attacker_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    forged = _token(user_id=1, memberships={"1": "admin"}, key=attacker_key)
+    assert client.get("/api/home/summary", headers=_auth(forged)).status_code == 401
+
+
+def test_hs256_token_is_rejected():
     forged = jwt.encode({"user_id": 1, "organization_memberships": {"1": "admin"}}, "attacker-key", algorithm="HS256")
     assert client.get("/api/home/summary", headers=_auth(forged)).status_code == 401
+
+
+def test_unknown_kid_is_rejected():
+    assert client.get("/api/home/summary", headers=_auth(_token(kid="missing"))).status_code == 401
 
 
 def test_valid_token_returns_scoped_summary():
@@ -360,3 +386,44 @@ def test_pyjwt_rsa_backend_available():
     assert hasattr(_jwt.algorithms, "RSAAlgorithm"), (
         "PyJWT lacks the RSA backend — is 'cryptography' in requirements?"
     )
+
+
+def test_jwks_url_honors_documented_aliases():
+    """HIVE-474 / revi P2: auth.py fetches settings.JWKS_URL, so JWKS_URL MUST
+    resolve the DOCUMENTED aliases — an operator who sets SHIZUHA_JWKS_URL (or
+    SHIZUHA_ID_JWKS_URL) must actually change the endpoint the verifier fetches,
+    in precedence SHIZUHA_OAUTH_JWKS_URL > SHIZUHA_JWKS_URL > SHIZUHA_ID_JWKS_URL.
+    Without this the newly documented env was silently ignored (still 401s)."""
+    import importlib
+    import os as _os
+    import app.config as cfg
+
+    keys = ("SHIZUHA_OAUTH_JWKS_URL", "SHIZUHA_JWKS_URL", "SHIZUHA_ID_JWKS_URL")
+    saved = {k: _os.environ.get(k) for k in keys}
+
+    def _restore():
+        for k, v in saved.items():
+            if v is None:
+                _os.environ.pop(k, None)
+            else:
+                _os.environ[k] = v
+        importlib.reload(cfg)
+
+    try:
+        for k in keys:
+            _os.environ.pop(k, None)
+        _os.environ["SHIZUHA_ID_JWKS_URL"] = "https://idalias.example/jwks.json"
+        importlib.reload(cfg)
+        assert cfg.settings.JWKS_URL == "https://idalias.example/jwks.json"
+
+        _os.environ["SHIZUHA_JWKS_URL"] = "https://jwksalias.example/jwks.json"
+        importlib.reload(cfg)
+        # SHIZUHA_JWKS_URL takes precedence over SHIZUHA_ID_JWKS_URL
+        assert cfg.settings.JWKS_URL == "https://jwksalias.example/jwks.json"
+
+        _os.environ["SHIZUHA_OAUTH_JWKS_URL"] = "https://oauth.example/jwks.json"
+        importlib.reload(cfg)
+        # the Django-canonical override wins over everything
+        assert cfg.settings.JWKS_URL == "https://oauth.example/jwks.json"
+    finally:
+        _restore()

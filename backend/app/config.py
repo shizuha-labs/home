@@ -3,17 +3,30 @@ import os
 
 
 class Settings:
-    # Shared HS256 signing key with shizuha-id (same var the Django services use).
-    JWT_SECRET_KEY: str = os.environ.get("JWT_SECRET_KEY", os.environ.get("SECRET_KEY", ""))
-    JWT_ALGORITHM: str = os.environ.get("JWT_ALGORITHM", "HS256")
+    # Shizuha ID issues RS256 tokens and publishes the public keys via JWKS.
+    SHIZUHA_ID_URL: str = os.environ.get("SHIZUHA_ID_URL", "http://shizuha-id:8001").rstrip("/")
+    SHIZUHA_JWKS_URL: str = os.environ.get(
+        "SHIZUHA_JWKS_URL",
+        os.environ.get("SHIZUHA_ID_JWKS_URL", f"{SHIZUHA_ID_URL}/.well-known/jwks.json"),
+    ).rstrip("/")
 
     # RS256/JWKS verification (canonical shizuha-id user tokens, PLAT-675/987).
-    # Same envs the Django services' shizuha_auth uses; default = in-cluster id.
-    JWKS_URL: str = os.environ.get(
-        "SHIZUHA_OAUTH_JWKS_URL",
-        (os.environ.get("SHIZUHA_EXPECTED_ISSUER") or "http://shizuha-id:8001").rstrip("/")
-        + "/.well-known/jwks.json",
-    )
+    # JWKS_URL is the SINGLE source of truth the verifier (auth.py) fetches, so
+    # it MUST honor every documented alias in precedence order — otherwise an
+    # operator who sets the documented SHIZUHA_JWKS_URL would be silently ignored
+    # and the BFF would fetch the wrong endpoint and 401 real users (HIVE-474 /
+    # revi P2). Order: SHIZUHA_OAUTH_JWKS_URL (Django shizuha_auth canonical) →
+    # SHIZUHA_JWKS_URL → SHIZUHA_ID_JWKS_URL → (SHIZUHA_EXPECTED_ISSUER |
+    # SHIZUHA_ID_URL)/.well-known/jwks.json (in-cluster default).
+    JWKS_URL: str = (
+        os.environ.get("SHIZUHA_OAUTH_JWKS_URL")
+        or os.environ.get("SHIZUHA_JWKS_URL")
+        or os.environ.get("SHIZUHA_ID_JWKS_URL")
+        or (
+            (os.environ.get("SHIZUHA_EXPECTED_ISSUER") or SHIZUHA_ID_URL).rstrip("/")
+            + "/.well-known/jwks.json"
+        )
+    ).rstrip("/")
     JWKS_TTL_SECONDS: float = float(os.environ.get("HOME_BFF_JWKS_TTL", "600"))
 
     # Downstream service base URLs (in-cluster). The BFF forwards the CALLER's

@@ -22,7 +22,7 @@ only as a stateless async BFF.
 
 ## Tenant isolation (the load-bearing control)
 
-- Identity + org scope come **only from the verified id-JWT** (shared HS256 `JWT_SECRET_KEY`) — never a request field.
+- Identity + org scope come **only from the verified id-JWT** (shizuha-id **RS256**, verified against id's **JWKS**, signing key resolved by `kid`) — never a request field. Non-RS256 tokens (HS256/`none`) are rejected.
 - A requested `org_id` must be one the caller is a member of, else **403** (never leak another org's summary).
 - Downstreams receive the **caller's own Bearer** — each applies its own authz; the BFF holds **no privileged service token** and can never widen scope / leak cross-org.
 
@@ -30,7 +30,8 @@ only as a stateless async BFF.
 
 | var | default | note |
 |-----|---------|------|
-| `JWT_SECRET_KEY` | (required) | shared HS256 key with shizuha-id; fail-closed if unset |
+| `SHIZUHA_OAUTH_JWKS_URL` / `SHIZUHA_JWKS_URL` | `http://shizuha-id:8001/.well-known/jwks.json` | shizuha-id JWKS (RS256 public keys); RS256 verification fails closed if unreachable |
+| `HOME_BFF_JWKS_TTL` | `600` | JWKS cache TTL (seconds) |
 | `PULSE_API_URL` | `http://shizuha-pulse:8002` | pulse base for tasks/alerts |
 | `BOOKS_API_URL` | `http://shizuha-books:8000/api` | books base for financial snapshot |
 | `CONNECT_API_URL` | `http://shizuha-connect:8000/api` | connect base for recent conversations |

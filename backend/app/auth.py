@@ -49,8 +49,10 @@ def _normalize_memberships(raw) -> dict:
 # Mirrors the Django services' shizuha_auth contract: alg allowlist, REQUIRE
 # kid, honor-kid-fail-closed (a forced refresh returns ONLY the fresh key set,
 # so an unknown kid / JWKS outage can never validate against a stale key).
+# HIVE-474: shizuha-id issues RS256/JWKS ONLY — accept RS256 and fail closed on
+# every other alg (HS256/shared-secret and `none` are rejected).
 _JWKS_CACHE: dict = {"keys": {}, "fetched_at": 0.0}
-_ALLOWED_ALGS = {"HS256", "RS256"}
+_ALLOWED_ALGS = {"RS256"}
 
 
 def _jwks_fetch_keys(force_refresh: bool = False) -> dict:
@@ -80,37 +82,29 @@ def _jwks_fetch_keys(force_refresh: bool = False) -> dict:
 
 
 def _decode_verified(token: str) -> dict:
-    """Verify signature + expiry; dual-accept RS256 (JWKS) and HS256 (shared key)."""
+    """Verify signature + expiry against shizuha-id's RS256 JWKS, resolving the
+    signing key by `kid`. Fail closed on any non-RS256 alg (HIVE-474: HS256/
+    shared-secret and `none` tokens are rejected; id issues RS256/JWKS only)."""
     try:
         header = jwt.get_unverified_header(token)
     except jwt.PyJWTError:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token")
-    alg = header.get("alg")
-    if alg not in _ALLOWED_ALGS:
+    if header.get("alg") not in _ALLOWED_ALGS:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token")
 
-    if alg == "RS256":
-        kid = header.get("kid")
-        if not kid:
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token")
-        key = _jwks_fetch_keys().get(kid)
-        if key is None:
-            key = _jwks_fetch_keys(force_refresh=True).get(kid)
-        if key is None:
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token")
-        try:
-            return jwt.decode(token, key=key, algorithms=["RS256"], options={"verify_aud": False})
-        except jwt.ExpiredSignatureError:
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token expired")
-        except jwt.InvalidTokenError:
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token")
-
-    # HS256 — legacy/dual-accept path via the shared signing key.
-    if not settings.JWT_SECRET_KEY:
-        # Fail closed: without the shared key we cannot verify HS256 callers.
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "BFF misconfigured: no JWT key")
+    kid = header.get("kid")
+    if not kid:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token")
+    key = _jwks_fetch_keys().get(kid)
+    if key is None:
+        # Unknown kid → force a single refresh (honor-kid-fail-closed): the
+        # refresh returns ONLY the current key set, so a rotated-out/forged kid
+        # can never validate against a stale key.
+        key = _jwks_fetch_keys(force_refresh=True).get(kid)
+    if key is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token")
     try:
-        return jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=["HS256"])
+        return jwt.decode(token, key=key, algorithms=["RS256"], options={"verify_aud": False})
     except jwt.ExpiredSignatureError:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token expired")
     except jwt.InvalidTokenError:
@@ -118,7 +112,7 @@ def _decode_verified(token: str) -> dict:
 
 
 def verify_caller(authorization: Optional[str] = Header(default=None)) -> Caller:
-    """FastAPI dependency: 401 unless a valid Bearer id-JWT is present."""
+    """FastAPI dependency: 401 unless a valid Bearer Shizuha ID RS256 JWT is present."""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Missing bearer token")
     token = authorization[len("Bearer "):].strip()
