@@ -8,3 +8,18 @@ export function trackResearchEvent(name, payload = {}) {
     console.debug('[research-intent]', event)
   }
 }
+
+export function trackPlausibleEvent(name, props = {}, options = {}) {
+  if (typeof window === 'undefined' || typeof window.plausible !== 'function') return
+  const cleanProps = Object.fromEntries(
+    Object.entries(props).filter(([, value]) => value !== undefined && value !== null && value !== '')
+  )
+  try {
+    window.plausible(name, {
+      ...options,
+      props: cleanProps,
+    })
+  } catch {
+    // Best-effort analytics only; never block user flows.
+  }
+}

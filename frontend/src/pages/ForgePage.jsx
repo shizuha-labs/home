@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import GlobalNavBar from '../components/shared/GlobalNavBar'
 import Footer from '../components/Footer'
+import { trackPlausibleEvent } from '../utils/analytics'
 
 // VEN-7: Shizuha Forge public API landing + pricing page (shizuha.com/forge).
 // "Get API key" posts to the public-api signup endpoint and shows the issued key.
@@ -71,6 +72,15 @@ function campaignSource() {
   return params.get('utm_source') || params.get('source') || ''
 }
 
+function forgePlausibleProps(extra = {}) {
+  return {
+    product: 'forge-api',
+    surface: 'forge',
+    source: campaignSource(),
+    ...extra,
+  }
+}
+
 let forgeLandingViewSent = false
 
 function trackForgeLandingView() {
@@ -88,9 +98,20 @@ function trackForgeLandingView() {
 }
 
 function trackForge(eventType, extra = {}) {
+  const plausibleEvent = {
+    signup: 'signup',
+    api_key_generated: 'api_key_generated',
+  }[eventType]
+  if (plausibleEvent) {
+    trackPlausibleEvent(plausibleEvent, forgePlausibleProps(extra))
+  }
+  const firstPartyEventType = {
+    signup: 'signup_submit',
+    api_key_generated: 'key_generated',
+  }[eventType] || eventType
   if (typeof navigator === 'undefined') return
   const payload = JSON.stringify({
-    event_type: eventType,
+    event_type: firstPartyEventType,
     surface: 'forge',
     path: `${window.location.pathname}${window.location.search}`,
     source: campaignSource(),
@@ -185,6 +206,7 @@ function SignupForm() {
 
   async function onSubmit(e) {
     e.preventDefault()
+    trackForge('signup', { path: '/forge/signup' })
     trackForge('order_intent', { path: '/forge#signup' })
     setState({ status: 'loading' })
     try {
@@ -195,6 +217,7 @@ function SignupForm() {
       })
       const data = await r.json().catch(() => ({}))
       if (!r.ok) throw new Error(data.detail || 'Signup failed. Please try again.')
+      trackForge('api_key_generated', { path: '/forge/signup', tier: data.tier || 'free' })
       setState({ status: 'done', apiKey: data.api_key, free: data.free_per_day })
     } catch (err) {
       setState({ status: 'error', message: String(err.message || err) })
@@ -239,7 +262,11 @@ function SignupForm() {
 }
 
 export default function ForgePage() {
+  const pageviewSent = useRef(false)
+
   useEffect(() => {
+    if (pageviewSent.current) return
+    pageviewSent.current = true
     trackForgeLandingView()
     trackForge('page_view')
     trackForge('quickstart_view')
