@@ -1,10 +1,13 @@
 import { createContext, useContext, useState, useEffect } from 'react'
+import {
+  ACCESS_TOKEN_KEY,
+  USER_KEY,
+  clearAuthStorage,
+  expireSessionAndRedirect,
+  isAccessTokenExpired,
+} from '../utils/auth'
 
 const AuthContext = createContext(null)
-
-// Token storage keys - shared across all Shizuha apps
-const ACCESS_TOKEN_KEY = 'shizuha_access_token'
-const USER_KEY = 'shizuha_user'
 
 /**
  * Read-only AuthProvider for shizuha-home
@@ -22,7 +25,11 @@ export function AuthProvider({ children }) {
       const accessToken = localStorage.getItem(ACCESS_TOKEN_KEY)
       const storedUser = localStorage.getItem(USER_KEY)
 
-      if (accessToken && storedUser) {
+      if (accessToken && isAccessTokenExpired(accessToken)) {
+        expireSessionAndRedirect()
+        setUser(null)
+        setIsAuthenticated(false)
+      } else if (accessToken && storedUser) {
         try {
           const userData = JSON.parse(storedUser)
           setUser(userData)
@@ -45,11 +52,15 @@ export function AuthProvider({ children }) {
   // Listen for storage events (cross-tab sync)
   useEffect(() => {
     const handleStorageChange = (e) => {
-      if (e.key === ACCESS_TOKEN_KEY || e.key === USER_KEY) {
+      if (e.type === 'shizuha-auth-cleared' || e.key === ACCESS_TOKEN_KEY || e.key === USER_KEY) {
         const accessToken = localStorage.getItem(ACCESS_TOKEN_KEY)
         const storedUser = localStorage.getItem(USER_KEY)
 
-        if (accessToken && storedUser) {
+        if (accessToken && isAccessTokenExpired(accessToken)) {
+          expireSessionAndRedirect()
+          setUser(null)
+          setIsAuthenticated(false)
+        } else if (accessToken && storedUser) {
           try {
             const userData = JSON.parse(storedUser)
             setUser(userData)
@@ -66,7 +77,11 @@ export function AuthProvider({ children }) {
     }
 
     window.addEventListener('storage', handleStorageChange)
-    return () => window.removeEventListener('storage', handleStorageChange)
+    window.addEventListener('shizuha-auth-cleared', handleStorageChange)
+    return () => {
+      window.removeEventListener('storage', handleStorageChange)
+      window.removeEventListener('shizuha-auth-cleared', handleStorageChange)
+    }
   }, [])
 
   const value = {

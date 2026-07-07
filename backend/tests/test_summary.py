@@ -115,6 +115,7 @@ def test_valid_token_returns_scoped_summary():
     body = r.json()
     assert body["version"] == 1
     assert {o["id"] for o in body["orgs"]} == {1, 7}
+    assert all(o["name"] is not None for o in body["orgs"])
     assert body["widgets"]["tasks_by_status"]["status"] == "ok"
     assert body["widgets"]["agent_activity"]["data"] == {"active": 2, "error": 1}
     assert body["widgets"]["alerts"]["data"][0]["sev"] == "high"
@@ -187,15 +188,62 @@ def test_tasks_widget_unauthorized_on_403():
     assert _run(go()).status == "unauthorized"
 
 
-def test_agent_activity_widget_disabled_until_pulse_endpoint_is_scoped():
+def test_org_refs_are_hydrated_from_admin_without_widening_memberships():
     def handler(request):
-        raise AssertionError("unscoped Pulse agent_overview must not be called")
+        assert request.url.path == "/api/internal/users/101/organizations/"
+        assert request.headers.get("Authorization") == "Bearer caller-tok"
+        return httpx.Response(200, json={"organizations": [
+            {"id": 7, "name": "Shizuha Labs", "slug": "shizuha"},
+            {"id": 999, "name": "Foreign Org", "slug": "foreign"},
+        ]})
+    async def go():
+        async with _mock_client(handler) as c:
+            return await clients.fetch_org_refs(c, "caller-tok", 101, "a@org1.example", {7: "owner"})
+    orgs = _run(go())
+    assert [getattr(o, "model_dump", o.dict)() for o in orgs] == [{
+        "id": 7,
+        "role": "owner",
+        "name": "Shizuha Labs",
+        "slug": "shizuha",
+    }]
+
+
+def test_org_refs_fallback_to_stable_labels_on_admin_failure():
+    def handler(request):
+        raise httpx.ReadTimeout("boom")
+    async def go():
+        async with _mock_client(handler) as c:
+            return await clients.fetch_org_refs(c, "caller-tok", 101, None, {7: "owner"})
+    orgs = _run(go())
+    assert orgs[0].name == "Organization 7"
+
+
+def test_agent_activity_widget_counts_hive_fleet_statuses():
+    def handler(request):
+        assert request.url.path == "/hive/api/v1/fleet/agents/"
+        assert request.headers.get("Authorization") == "Bearer caller-tok"
+        assert request.url.params.get("page_size") == "250"
+        return httpx.Response(200, json={"results": [
+            {"status": "running", "enabled": True},
+            {"status": "Alive"},
+            {"status": "Unavailable"},
+            {"status": "stopped", "enabled": False},
+        ]})
     async def go():
         async with _mock_client(handler) as c:
             return await clients.fetch_agent_activity(c, "caller-tok", 7)
     w = _run(go())
-    assert w.status == "degraded"
-    assert w.data == {"active": None, "error": None}
+    assert w.status == "ok"
+    assert w.data == {"active": 2, "error": 1, "stopped": 1, "total": 4}
+
+
+def test_agent_activity_widget_unauthorized_on_hive_403():
+    def handler(request):
+        return httpx.Response(403, json={"detail": "forbidden"})
+    async def go():
+        async with _mock_client(handler) as c:
+            return await clients.fetch_agent_activity(c, "caller-tok", None)
+    assert _run(go()).status == "unauthorized"
 
 
 def test_alerts_widget_returns_compact_severity_summaries():

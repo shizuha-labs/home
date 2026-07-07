@@ -49,6 +49,8 @@ class Widget(BaseModel):
 class OrgRef(BaseModel):
     id: int
     role: str
+    name: Optional[str] = None
+    slug: Optional[str] = None
 
 
 class HomeSummaryV1(BaseModel):

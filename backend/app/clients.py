@@ -11,7 +11,7 @@ from typing import Optional
 import httpx
 
 from .config import settings
-from .schema import Widget, WidgetStatus
+from .schema import OrgRef, Widget
 
 logger = logging.getLogger("home_bff.clients")
 
@@ -39,6 +39,71 @@ def _compact_amount(value):
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _widget_count_status(item: dict) -> str:
+    return str(
+        item.get("status")
+        or item.get("health")
+        or item.get("status_label")
+        or item.get("state")
+        or ""
+    ).strip().lower()
+
+
+async def fetch_org_refs(client: httpx.AsyncClient, bearer: str, user_id: int,
+                         email: Optional[str], memberships: dict[int, str]) -> list[OrgRef]:
+    """Return JWT-scoped organization refs, hydrated with Admin display names.
+
+    The verified JWT membership claim remains the source of authorization. Admin
+    is used only as a best-effort label source so the dashboard never renders
+    anonymous "? owner" chips when the token only carries org ids/roles.
+    """
+    fallback = [
+        OrgRef(id=oid, role=role, name=f"Organization {oid}")
+        for oid, role in memberships.items()
+    ]
+    if not memberships:
+        return []
+    try:
+        resp = await client.get(
+            f"{settings.ADMIN_API_URL}/internal/users/{user_id}/organizations/",
+            headers=_auth_headers(bearer),
+            params={"email": email} if email else {},
+            timeout=settings.SOURCE_TIMEOUT_SECONDS,
+        )
+    except (httpx.TimeoutException, httpx.TransportError) as exc:
+        logger.warning("org_refs source failed: %s", type(exc).__name__)
+        return fallback
+    if resp.status_code >= 400:
+        logger.warning("org_refs source HTTP %s", resp.status_code)
+        return fallback
+    try:
+        payload = resp.json()
+    except ValueError:
+        return fallback
+    raw_orgs = payload.get("organizations", payload.get("results", payload)) if isinstance(payload, dict) else payload
+    names = {}
+    for org in raw_orgs or []:
+        if not isinstance(org, dict):
+            continue
+        try:
+            oid = int(org.get("id"))
+        except (TypeError, ValueError):
+            continue
+        names[oid] = {
+            "name": org.get("name") or org.get("slug") or f"Organization {oid}",
+            "slug": org.get("slug"),
+        }
+    return [
+        OrgRef(
+            id=oid,
+            role=role,
+            name=(names.get(oid) or {}).get("name") or f"Organization {oid}",
+            slug=(names.get(oid) or {}).get("slug"),
+        )
+        for oid, role in memberships.items()
+    ]
 
 
 async def fetch_tasks_by_status(client: httpx.AsyncClient, bearer: str,
@@ -86,13 +151,52 @@ async def fetch_agent_activity(client: httpx.AsyncClient, bearer: str,
                                org_id: Optional[int] = None) -> Widget:
     """Compact live agent rollup for the command center.
 
-    Disabled for slice 2 until Pulse exposes an org/permission-scoped agent
-    activity endpoint. `/api/items/agent_overview/` currently aggregates global
-    roster/task state and ignores ItemViewSet organization scoping; forwarding a
-    caller Bearer is therefore not sufficient to make it tenant-safe.
+    Hive's fleet index is authenticated and owner/staff scoped. Forwarding the
+    caller bearer keeps Home read-only and tenant-safe; non-operators receive a
+    403/unauthorized widget instead of a global roster leak.
     """
-    logger.info("agent_activity disabled until Pulse exposes a scoped endpoint")
-    return Widget.degraded_(data={"active": None, "error": None})
+    params = {"page_size": "250"}
+    if org_id is not None:
+        # Hive currently accepts org_slug on some fleet views; keep this as an
+        # additive hint only. The forwarded bearer remains the authorization
+        # boundary, and a service that ignores this hint still scopes internally.
+        params["organization"] = str(org_id)
+    try:
+        resp = await client.get(
+            f"{settings.HIVE_API_URL}/v1/fleet/agents/",
+            headers=_auth_headers(bearer),
+            params=params,
+            timeout=settings.SOURCE_TIMEOUT_SECONDS,
+        )
+    except (httpx.TimeoutException, httpx.TransportError) as exc:
+        logger.warning("agent_activity source failed: %s", type(exc).__name__)
+        return Widget.degraded_(data={"active": None, "error": None, "total": None})
+    if resp.status_code in (401, 403):
+        return Widget.unauthorized_()
+    if resp.status_code >= 400:
+        logger.warning("agent_activity source HTTP %s", resp.status_code)
+        return Widget.degraded_(data={"active": None, "error": None, "total": None})
+    try:
+        payload = resp.json()
+    except ValueError:
+        return Widget.degraded_(data={"active": None, "error": None, "total": None})
+    agents = payload.get("results", payload.get("agents", payload)) if isinstance(payload, dict) else payload
+    active = error = stopped = 0
+    for agent in agents or []:
+        if not isinstance(agent, dict):
+            continue
+        status = _widget_count_status(agent)
+        enabled = agent.get("enabled")
+        if status in {"failed", "error", "unavailable", "crashloopbackoff", "needs_help"}:
+            error += 1
+        elif status in {"stopped", "disabled", "offline"} or enabled is False:
+            stopped += 1
+        elif status in {"running", "alive", "loaded", "ready", "ok"} or enabled is True:
+            active += 1
+    total = active + error + stopped
+    if total == 0:
+        return Widget.empty_()
+    return Widget.ok_(data={"active": active, "error": error, "stopped": stopped, "total": total})
 
 
 async def fetch_alerts(client: httpx.AsyncClient, bearer: str,

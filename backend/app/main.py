@@ -26,11 +26,11 @@ from .auth import Caller, resolve_scope_org, verify_caller
 from .cache import cache_key, widget_cache
 from .clients import (
     fetch_agent_activity, fetch_alerts, fetch_financial_snapshot,
-    fetch_recent_conversations, fetch_tasks_by_status,
+    fetch_org_refs, fetch_recent_conversations, fetch_tasks_by_status,
 )
 from .audit_leads import AuditLeadRequest, AuditLeadResponse, persist_audit_lead
 from .config import settings
-from .schema import HomeSummaryV1, OrgRef, SUMMARY_VERSION
+from .schema import HomeSummaryV1, SUMMARY_VERSION
 
 app = FastAPI(title="Shizuha Home BFF", version=str(SUMMARY_VERSION))
 
@@ -97,13 +97,12 @@ async def home_summary(
     # 403 if the caller asked for an org they don't belong to.
     scope_org = resolve_scope_org(caller, org_id)
 
-    orgs = [OrgRef(id=oid, role=role) for oid, role in caller.memberships.items()]
-
     # Fan out to downstreams concurrently, forwarding the caller's Bearer. Each
     # client is fail-soft, so a slow/down source degrades only its widget.
     # Cacheable widgets serve recently-good stale data during brownouts.
     async with httpx.AsyncClient() as client:
-        tasks_widget, agent_widget, alerts_widget, financial_widget, conversations_widget = await asyncio.gather(
+        orgs, tasks_widget, agent_widget, alerts_widget, financial_widget, conversations_widget = await asyncio.gather(
+            fetch_org_refs(client, caller.bearer, caller.user_id, caller.email, caller.memberships),
             widget_cache.get_or_fetch(
                 cache_key("tasks_by_status", caller.user_id, scope_org),
                 lambda: fetch_tasks_by_status(client, caller.bearer, caller.email, scope_org),

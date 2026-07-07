@@ -16,8 +16,8 @@ import { useHomeSummary } from '../../hooks/useHomeSummary'
  */
 
 const DEEP_LINKS = {
-  pulse: '/hive', // pending work deep-links to Pulse; adjust to the canonical /pulse route when wired
-  books: '/hive',
+  pulse: '/pulse',
+  books: '/books',
 }
 
 function WidgetShell({ title, icon: Icon, status, children, action }) {
@@ -76,7 +76,7 @@ function ByStatus({ status, render, empty, unauthorized }) {
     default: // degraded / unknown
       return (
         <div className="flex items-center gap-2 text-xs text-amber-500/90">
-          <AlertTriangle className="w-3.5 h-3.5" /> Couldn’t load — retrying…
+          <AlertTriangle className="w-3.5 h-3.5" /> Temporarily unavailable.
         </div>
       )
   }
@@ -84,6 +84,23 @@ function ByStatus({ status, render, empty, unauthorized }) {
 
 function num(v) {
   return typeof v === 'number' ? v : 0
+}
+
+function orgName(o) {
+  return o?.name || (o?.id ? `Organization ${o.id}` : 'Organization')
+}
+
+function formatMoney(value, currency = 'INR') {
+  if (typeof value !== 'number') return '—'
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency,
+      maximumFractionDigits: 0,
+    }).format(value)
+  } catch {
+    return `${currency} ${value.toLocaleString()}`
+  }
 }
 
 export default function CommandCenterDashboard({ orgId }) {
@@ -114,13 +131,13 @@ export default function CommandCenterDashboard({ orgId }) {
             {orgs.map((o) => (
               <button
                 key={o.id}
-                onClick={() => navigate(`/hive?org=${encodeURIComponent(o.id)}`)}
+                onClick={() => navigate(`/hive/agents?org=${encodeURIComponent(o.slug || o.id)}`)}
                 className="group flex items-center gap-2 rounded-2xl border border-gray-200/70 dark:border-gray-800/70 bg-white/70 dark:bg-gray-900/50 px-4 py-2.5 hover:border-brand-300 dark:hover:border-brand-700 transition-colors"
               >
                 <span className="flex w-7 h-7 items-center justify-center rounded-lg bg-brand-100 dark:bg-brand-950/50 text-brand-600 dark:text-brand-400 text-xs font-bold">
-                  {String(o.name || '?').slice(0, 1).toUpperCase()}
+                  {orgName(o).slice(0, 1).toUpperCase()}
                 </span>
-                <span className="text-sm font-medium text-gray-800 dark:text-gray-200">{o.name}</span>
+                <span className="text-sm font-medium text-gray-800 dark:text-gray-200">{orgName(o)}</span>
                 {o.role ? <span className="text-[10px] uppercase tracking-wide text-gray-400">{o.role}</span> : null}
                 <ChevronRight className="w-3.5 h-3.5 text-gray-300 group-hover:text-brand-400 transition-colors" />
               </button>
@@ -139,8 +156,11 @@ export default function CommandCenterDashboard({ orgId }) {
               {num(agent.data?.error) > 0 ? (
                 <span className="ml-auto text-xs font-medium text-red-500">{num(agent.data.error)} stuck</span>
               ) : null}
+              {num(agent.data?.stopped) > 0 ? (
+                <span className="ml-auto text-xs font-medium text-gray-400">{num(agent.data.stopped)} stopped</span>
+              ) : null}
             </div>
-          )} empty={<Muted>No agents yet.</Muted>} />
+          )} empty={<Muted>No agents yet.</Muted>} unauthorized="Fleet activity is not shared with you." />
         </WidgetShell>
 
         <WidgetShell
@@ -170,11 +190,11 @@ export default function CommandCenterDashboard({ orgId }) {
           <ByStatus status={money.status} unauthorized="Financials not shared with you." render={() => (
             <div>
               <div className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                {money.data?.currency || ''} {money.data?.cash ?? '—'}
+                {formatMoney(money.data?.cash, money.data?.currency)}
               </div>
-              <Muted>P&amp;L (MTD): {money.data?.currency || ''} {money.data?.pnl_mtd ?? '—'}</Muted>
+              <Muted>Net this period: {formatMoney(money.data?.period_net, money.data?.currency)}</Muted>
             </div>
-          )} empty={<Muted>No financial data.</Muted>} />
+          )} empty={<Muted>Select an organization to view financials.</Muted>} />
         </WidgetShell>
 
         <WidgetShell title="Attention" icon={Bell} status={alerts.status}>

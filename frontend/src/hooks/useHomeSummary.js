@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { getAccessToken, handleUnauthorized } from '../utils/auth'
 
 /**
  * HIVE-376 / HIVE-375: fetch the command-center `HomeSummaryV1` from the home
@@ -22,7 +23,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
  * (loading state) rather than crashing, so this frontend ships in parallel.
  */
 
-const ACCESS_TOKEN_KEY = 'shizuha_access_token'
 export const SUMMARY_ENDPOINT = '/api/home/summary'
 
 // The widget keys the dashboard renders, in display order.
@@ -33,14 +33,6 @@ export const WIDGET_KEYS = [
   'alerts',
   'recent_conversations',
 ]
-
-function authToken() {
-  try {
-    return localStorage.getItem(ACCESS_TOKEN_KEY) || ''
-  } catch {
-    return ''
-  }
-}
 
 /**
  * @param {{ orgId?: string, refreshMs?: number }} [opts]
@@ -62,9 +54,10 @@ export function useHomeSummary({ orgId, refreshMs = 30000 } = {}) {
     try {
       const qs = orgId ? `?org_id=${encodeURIComponent(orgId)}` : ''
       const resp = await fetch(SUMMARY_ENDPOINT + qs, {
-        headers: { Authorization: `Bearer ${authToken()}` },
+        headers: { Authorization: `Bearer ${getAccessToken()}` },
         signal: controller.signal,
       })
+      if (handleUnauthorized(resp)) return
       if (!resp.ok) {
         // Backend not deployed yet / transient failure — degrade, don't crash.
         throw new Error(`home summary ${resp.status}`)

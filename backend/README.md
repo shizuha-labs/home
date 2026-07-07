@@ -33,9 +33,11 @@ only as a stateless async BFF.
 | `SHIZUHA_OAUTH_JWKS_URL` / `SHIZUHA_JWKS_URL` | `http://shizuha-id:8001/.well-known/jwks.json` | shizuha-id JWKS (RS256 public keys); RS256 verification fails closed if unreachable |
 | `HOME_BFF_JWKS_TTL` | `600` | JWKS cache TTL (seconds) |
 | `PULSE_API_URL` | `http://shizuha-pulse:8002` | pulse base for tasks/alerts |
+| `ADMIN_API_URL` | `http://shizuha-admin:8003/api` | admin base for scoped organization labels |
+| `HIVE_API_URL` | `http://hive.shizuha-hive.svc.cluster.local:8030/hive/api` | hive base for scoped agent activity |
 | `BOOKS_API_URL` | `http://shizuha-books:8000/api` | books base for financial snapshot |
 | `CONNECT_API_URL` | `http://shizuha-connect:8000/api` | connect base for recent conversations |
-| `HOME_BFF_SOURCE_TIMEOUT` | `0.8` | per-source fan-out timeout (s) |
+| `HOME_BFF_SOURCE_TIMEOUT` | `2.5` | per-source fan-out timeout (s) |
 | `HOME_BFF_CACHE_TTL` | `15` | fresh widget cache TTL (s) |
 | `HOME_BFF_STALE_TTL` | `300` | serve-stale window after source failure (s) |
 

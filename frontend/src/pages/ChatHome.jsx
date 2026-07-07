@@ -6,10 +6,10 @@ import { SHIZUHA_APPS, useEnabledServices } from '@shizuha/ui'
 import CommandCenterDashboard from '../components/dashboard/CommandCenterDashboard'
 import CommandPalette from '../components/assistant/CommandPalette'
 import { useHomeSummary } from '../hooks/useHomeSummary'
+import { getAccessToken, handleUnauthorized } from '../utils/auth'
 
-const ACCESS_TOKEN_KEY = 'shizuha_access_token'
 function getAuthToken() {
-  return localStorage.getItem(ACCESS_TOKEN_KEY) || ''
+  return getAccessToken()
 }
 
 const SUGGESTION_CHIPS = [
@@ -116,6 +116,7 @@ function ChatHomeInner() {
         const res = await fetch('/connect/api/connections/requests/', {
           headers: { Authorization: `Bearer ${token}` },
         })
+        if (handleUnauthorized(res)) return
         if (res.ok) {
           const data = await res.json()
           setPendingRequestCount(Array.isArray(data) ? data.length : 0)
@@ -164,6 +165,7 @@ function ChatHomeInner() {
         const searchResp = await fetch(`/connect/api/people/search/?q=shizuha`, {
           headers: { Authorization: `Bearer ${token}` },
         })
+        if (handleUnauthorized(searchResp)) return
         if (searchResp.ok) {
           const users = await searchResp.json()
           const shizuhaUser = users.find(u => u.username === 'shizuha')

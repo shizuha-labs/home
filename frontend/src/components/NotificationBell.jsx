@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Avatar } from '@shizuha/chat'
-
-const ACCESS_TOKEN_KEY = 'shizuha_access_token'
+import { getAccessToken, handleUnauthorized } from '../utils/auth'
 
 export default function NotificationBell() {
   const [isOpen, setIsOpen] = useState(false)
@@ -10,13 +9,12 @@ export default function NotificationBell() {
   const popoverRef = useRef(null)
   const buttonRef = useRef(null)
 
-  const getToken = () => localStorage.getItem(ACCESS_TOKEN_KEY) || ''
-
   const fetchRequests = useCallback(async () => {
     try {
       const res = await fetch('/connect/api/connections/requests/', {
-        headers: { Authorization: `Bearer ${getToken()}` },
+        headers: { Authorization: `Bearer ${getAccessToken()}` },
       })
+      if (handleUnauthorized(res)) return
       if (res.ok) {
         const data = await res.json()
         setRequests(Array.isArray(data) ? data : data.results ?? [])
@@ -49,8 +47,9 @@ export default function NotificationBell() {
     try {
       const res = await fetch(`/connect/api/connections/${requestId}/accept/`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
+        headers: { Authorization: `Bearer ${getAccessToken()}`, 'Content-Type': 'application/json' },
       })
+      if (handleUnauthorized(res)) return
       if (res.ok) {
         setRequests(prev => prev.filter(r => r.id !== requestId))
       }
@@ -61,10 +60,11 @@ export default function NotificationBell() {
   const rejectRequest = async (requestId) => {
     setActionInProgress(`reject-${requestId}`)
     try {
-      await fetch(`/connect/api/connections/${requestId}/reject/`, {
+      const res = await fetch(`/connect/api/connections/${requestId}/reject/`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
+        headers: { Authorization: `Bearer ${getAccessToken()}`, 'Content-Type': 'application/json' },
       })
+      if (handleUnauthorized(res)) return
       setRequests(prev => prev.filter(r => r.id !== requestId))
     } catch { /* ignore */ }
     setActionInProgress(null)
