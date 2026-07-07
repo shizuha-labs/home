@@ -15,6 +15,18 @@ const escapeAttr = (value) =>
 
 const routes = [
   {
+    output: 'forge/pricing/index.html',
+    title: 'Shizuha Forge API Pricing — 10 free images/day, then $0.02/image',
+    description:
+      'Generate images from one REST API call. Start with 10 free images per day, then pay $0.02 per image with GST-compliant invoicing.',
+  },
+  {
+    output: 'forge/signup/index.html',
+    title: 'Get a Shizuha Forge API Key',
+    description:
+      'Sign up for a Shizuha Forge API key and make your first image generation request with the free tier.',
+  },
+  {
     output: 'autonomous-org/index.html',
     title: 'Shizuha Autonomous Org — managed AI workforce for startups',
     description:

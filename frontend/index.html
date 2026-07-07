@@ -18,6 +18,16 @@
     <meta property="og:description" content="The Unified Platform for Work" />
     <meta name="twitter:card" content="summary" />
     <title>Shizuha</title>
+
+    <!-- VEN-148: Plausible Analytics for the Forge API launch funnel.
+         Domain-level install lets /forge/pricing pageviews and custom funnel
+         goals resolve in the same Plausible dashboard. -->
+    <script>
+      window.plausible = window.plausible || function() {
+        (window.plausible.q = window.plausible.q || []).push(arguments)
+      }
+    </script>
+    <script defer data-domain="shizuha.com" src="https://plausible.io/js/script.js"></script>
   </head>
   <body>
     <div id="root"></div>
