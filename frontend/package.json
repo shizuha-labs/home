@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build && node scripts/generate-route-html.mjs",
     "preview": "vite preview",
-    "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0"
+    "lint": "eslint src --report-unused-disable-directives --max-warnings 0"
   },
   "dependencies": {
     "@shizuha/chat": "file:/packages/shizuha-chat",
