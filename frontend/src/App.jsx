@@ -6,6 +6,7 @@ import ChatHome from './pages/ChatHome'
 import DocsPage from './pages/DocsPage'
 import BenchmarksPage from './pages/BenchmarksPage'
 import ForgePage from './pages/ForgePage'
+import ForgeDashboardPage from './pages/ForgeDashboardPage'
 import ApiPage from './pages/ApiPage'
 import HivePage from './pages/HivePage'
 import ResearchPage from './pages/ResearchPage'
@@ -65,6 +66,7 @@ export default function App() {
       <Route path="/docs" element={<DocsPage />} />
       <Route path="/benchmarks" element={<BenchmarksPage />} />
       <Route path="/forge" element={<ForgePage />} />
+      <Route path="/forge/dashboard" element={<ForgeDashboardPage />} />
       <Route path="/forge/pricing" element={<ForgePage />} />
       <Route path="/forge/signup" element={<ForgePage />} />
       <Route path="/api" element={<ApiPage />} />

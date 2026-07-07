@@ -50,6 +50,12 @@ const routes = [
     description:
       'Submit intent for a Shizuha research report or AI-search visibility audit. No payment is collected on this page and outcomes are not guaranteed.',
   },
+  {
+    output: 'forge/dashboard/index.html',
+    title: 'Forge API Dashboard — Shizuha',
+    description:
+      'Manage your Shizuha Forge API key, usage, free-tier quota, billing status, and account settings.',
+  },
 ]
 
 const replaceTag = (html, pattern, replacement) => {
