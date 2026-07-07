@@ -11,6 +11,8 @@ const CODE_SNIPPET = `curl -X POST https://shizuha.com/api/forge/generate \\
   -H "Content-Type: application/json" \\
   -d '{"prompt": "a red fox in snow, golden hour, photorealistic"}'`
 
+const FORGE_API_KEY_STORAGE_KEY = 'shizuha_forge_api_key'
+
 // FRG-24 (VEN-62 §4.1): scriptable examples are the product — curl + Python + JS,
 // same request shape (POST /api/forge/generate, X-API-Key header, {prompt}).
 const PYTHON_SNIPPET = `import requests
@@ -218,6 +220,13 @@ function SignupForm() {
       const data = await r.json().catch(() => ({}))
       if (!r.ok) throw new Error(data.detail || 'Signup failed. Please try again.')
       trackForge('api_key_generated', { path: '/forge/signup', tier: data.tier || 'free' })
+      if (data.api_key) {
+        try {
+          localStorage.setItem(FORGE_API_KEY_STORAGE_KEY, data.api_key)
+        } catch {
+          // Storage may be disabled; the key is still shown once below.
+        }
+      }
       setState({ status: 'done', apiKey: data.api_key, free: data.free_per_day })
     } catch (err) {
       setState({ status: 'error', message: String(err.message || err) })
@@ -233,6 +242,12 @@ function SignupForm() {
         </p>
         <CodeBlock>{state.apiKey}</CodeBlock>
         <CodeBlock>{CODE_SNIPPET.replace('$FORGE_KEY', state.apiKey)}</CodeBlock>
+        <a
+          href="/forge/dashboard"
+          className="mt-4 inline-flex rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
+        >
+          Open dashboard
+        </a>
       </div>
     )
   }
