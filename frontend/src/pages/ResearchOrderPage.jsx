@@ -68,7 +68,6 @@ export default function ResearchOrderPage() {
       description: 'Submit intent for a fixed-scope AI-search/GEO audit. No payment is collected on this page and outcomes are not guaranteed.',
     })
     trackResearchEvent('research_order_view', { offer_tier: initialTier, route: '/research/order' })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const handleChange = (e) => {
