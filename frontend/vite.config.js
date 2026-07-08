@@ -1,10 +1,38 @@
 import { defineConfig, mergeConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { existsSync } from 'node:fs'
-import { pathToFileURL } from 'node:url'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
+const __dirname = dirname(fileURLToPath(import.meta.url))
 const SHARED_VITE_CONFIG = '/packages/shizuha-ui/vite.shared.js'
 const serviceName = 'home'
+
+function findSharedPackageRoot() {
+  return [
+    process.env.SHIZUHA_PACKAGES_DIR,
+    '/packages',
+    resolve(__dirname, '../../packages'),
+  ]
+    .filter(Boolean)
+    .find((root) =>
+      existsSync(resolve(root, 'shizuha-ui', 'src')) &&
+      existsSync(resolve(root, 'shizuha-chat', 'src'))
+    )
+}
+
+function createSharedPackageAliases() {
+  const packageRoot = findSharedPackageRoot()
+
+  if (!packageRoot) {
+    return {}
+  }
+
+  return {
+    '@shizuha/ui': resolve(packageRoot, 'shizuha-ui/src'),
+    '@shizuha/chat': resolve(packageRoot, 'shizuha-chat/src'),
+  }
+}
 
 function createFallbackShizuhaConfig({ port, serviceName }) {
   const basePath = process.env.VITE_BASE_PATH || '/'
@@ -21,6 +49,9 @@ function createFallbackShizuhaConfig({ port, serviceName }) {
 
   return {
     base: basePath,
+    resolve: {
+      alias: createSharedPackageAliases(),
+    },
     optimizeDeps: {
       include: ['lucide-react'],
     },
@@ -54,6 +85,11 @@ export default defineConfig(async () => {
     createShizuhaConfig({ port: 80, serviceName }),
     defineConfig({
       plugins: [react()],
+      resolve: {
+        // Keep local monorepo checkouts working when /packages is absent.
+        // In prod/Origin CI the shared /packages vite config supplies the same aliases.
+        alias: createSharedPackageAliases(),
+      },
     })
   )
 })

@@ -132,7 +132,7 @@ function ChatHomeInner() {
     } else if (!urlConversationId && activeConversationId) {
       setActiveConversation(null)
     }
-  }, [urlConversationId])
+  }, [activeConversationId, setActiveConversation, urlConversationId])
 
   // Send pending message from home input after conversation loads
   useEffect(() => {

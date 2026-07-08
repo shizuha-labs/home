@@ -1,3 +1,5 @@
+import reactHooks from 'eslint-plugin-react-hooks';
+
 const browserGlobals = {
   AbortController: 'readonly',
   clearInterval: 'readonly',
@@ -33,6 +35,9 @@ export default [
   },
   {
     files: ['src/**/*.{js,jsx}'],
+    plugins: {
+      'react-hooks': reactHooks,
+    },
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'module',
@@ -44,6 +49,8 @@ export default [
       globals: browserGlobals,
     },
     rules: {
+      'react-hooks/rules-of-hooks': 'error',
+      'react-hooks/exhaustive-deps': 'error',
       'constructor-super': 'error',
       'for-direction': 'error',
       'getter-return': 'error',
