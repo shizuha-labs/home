@@ -190,3 +190,5 @@ jobs:
           echo "Live backend image: ${LIVE}"
           echo "${LIVE}" | grep -q "${BTAG}" || { echo "::error::backend image mismatch"; exit 1; }
           kubectl get pods -n shizuha -l app.kubernetes.io/name=shizuha-home-backend
+
+# redeploy trigger 20260708T233549Z
