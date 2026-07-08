@@ -45,7 +45,7 @@ function tierFromQuery() {
 }
 
 export default function ResearchOrderPage() {
-  const initialTier = tierFromQuery()
+  const initialTier = useMemo(() => tierFromQuery(), [])
   const [form, setForm] = useState({
     site_url: '',
     contact_name: '',
@@ -68,7 +68,7 @@ export default function ResearchOrderPage() {
       description: 'Submit intent for a fixed-scope AI-search/GEO audit. No payment is collected on this page and outcomes are not guaranteed.',
     })
     trackResearchEvent('research_order_view', { offer_tier: initialTier, route: '/research/order' })
-  }, [])
+  }, [initialTier])
 
   const handleChange = (e) => {
     const { name, value } = e.target
