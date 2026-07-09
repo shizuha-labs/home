@@ -18,7 +18,7 @@ const TIERS = [
       'Community support',
     ],
     cta: 'Get started',
-    href: '/drive',
+    href: '#pricing',
   },
   {
     name: 'Pro',
@@ -90,13 +90,27 @@ export default function DrivePricingPage() {
     })
   }, [])
 
-  const handleWaitlist = (e) => {
+  const handleWaitlist = async (e) => {
     e.preventDefault()
+    setWaitlistError('')
     if (!waitlistEmail || !waitlistEmail.includes('@')) {
       setWaitlistError('Please enter a valid email address.')
       return
     }
-    setWaitlistSubmitted(true)
+    try {
+      const res = await fetch('/api/waitlist/drive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: waitlistEmail }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.detail || data.message || 'Failed to join waitlist')
+      }
+      setWaitlistSubmitted(true)
+    } catch (err) {
+      setWaitlistError(err.message)
+    }
   }
 
   return (
