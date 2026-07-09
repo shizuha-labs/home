@@ -114,3 +114,54 @@ def test_agents_live_unauthorized_on_403():
         async with _mock_client(handler) as c:
             return await clients.fetch_agents_live(c, "t")
     assert _run(go()).status == "unauthorized"
+
+
+# ---- cockpit drill-downs -----------------------------------------------------
+
+def test_agent_peek_endpoint(monkeypatch):
+    widget_cache.clear()
+    from app.schema import Widget
+
+    async def _fake_peek(_client, _bearer, email):
+        assert email == "rei@shizuha.com"
+        return Widget.ok_(data={"tasks": [{"key": "PLAT-1"}], "events": []})
+
+    monkeypatch.setattr("app.main.fetch_agent_peek", _fake_peek)
+    resp = client.get("/api/home/agent?email=rei@shizuha.com", headers=_auth(_token()))
+    assert resp.status_code == 200
+    assert resp.json()["widget"]["data"]["tasks"][0]["key"] == "PLAT-1"
+
+
+def test_org_map_foreign_org_403():
+    widget_cache.clear()
+    assert client.get("/api/home/org-map?org_id=999",
+                      headers=_auth(_token())).status_code == 403
+
+
+def test_task_peek_endpoint(monkeypatch):
+    widget_cache.clear()
+    from app.schema import Widget
+
+    async def _fake_task(_client, _bearer, key):
+        return Widget.ok_(data={"item": {"key": key, "title": "T"},
+                                "activity": [], "comments": []})
+
+    monkeypatch.setattr("app.main.fetch_task_peek", _fake_task)
+    resp = client.get("/api/home/task?key=HIVE-602", headers=_auth(_token()))
+    assert resp.status_code == 200
+    assert resp.json()["widget"]["data"]["item"]["key"] == "HIVE-602"
+
+
+def test_task_peek_client_rejects_mismatched_row():
+    # item_key param unsupported downstream → unrelated first page row must
+    # never render as the requested task.
+    def handler(request):
+        if "activity-feed" in str(request.url):
+            return httpx.Response(200, json={"results": []})
+        return httpx.Response(200, json={"results": [
+            {"id": 1, "item_key": "OTHER-9", "title": "wrong"},
+        ]})
+    async def go():
+        async with _mock_client(handler) as c:
+            return await clients.fetch_task_peek(c, "t", "HIVE-602")
+    assert _run(go()).status == "empty"

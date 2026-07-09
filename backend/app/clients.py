@@ -5,6 +5,7 @@ downstream service applies its own authz; the BFF cannot widen scope. A
 timeout/error never raises to the request path — it returns a degraded Widget,
 so one slow/down source degrades only its own widget (async-frontends doctrine).
 """
+import asyncio
 import logging
 from typing import Optional
 
@@ -475,3 +476,171 @@ async def fetch_recent_conversations(client: httpx.AsyncClient, bearer: str,
     if not out:
         return Widget.empty_()
     return Widget.ok_(data=out)
+
+
+# ── HIVE-602 cockpit drill-downs ─────────────────────────────────────────────
+# On-demand peeks (no cache): agent detail, org team map, task detail. Same
+# tenant model as everything else here — forwarded caller Bearer only.
+
+async def fetch_agent_peek(client: httpx.AsyncClient, bearer: str,
+                           email: str) -> Widget:
+    """One agent's active tasks + recent events for the agent drawer."""
+    headers = _auth_headers(bearer)
+    email = (email or "").strip().lower()
+    if not email:
+        return Widget.empty_()
+    try:
+        tasks_resp, feed_resp = await asyncio.gather(
+            client.get(f"{settings.PULSE_API_URL}/api/items/",
+                       headers=headers,
+                       params={"limit": "10", "mode": "task", "is_active": "true",
+                               "assignee_email": email},
+                       timeout=settings.SOURCE_TIMEOUT_SECONDS),
+            client.get(f"{settings.PULSE_API_URL}/api/items/activity-feed/",
+                       headers=headers,
+                       params={"limit": "20", "actor": email},
+                       timeout=settings.SOURCE_TIMEOUT_SECONDS),
+        )
+    except (httpx.TimeoutException, httpx.TransportError) as exc:
+        logger.warning("agent_peek source failed: %s", type(exc).__name__)
+        return Widget.degraded_()
+    if tasks_resp.status_code in (401, 403) and feed_resp.status_code in (401, 403):
+        return Widget.unauthorized_()
+    tasks = []
+    if tasks_resp.status_code < 400:
+        try:
+            payload = tasks_resp.json()
+            rows = payload.get("results", payload) if isinstance(payload, dict) else payload
+            for it in rows or []:
+                if isinstance(it, dict):
+                    tasks.append({
+                        "key": it.get("item_key"), "title": it.get("title"),
+                        "status": it.get("status"),
+                        "status_category": it.get("status_category"),
+                        "team": it.get("assignment_group"),
+                    })
+        except ValueError:
+            pass
+    events = []
+    if feed_resp.status_code < 400:
+        try:
+            events = (feed_resp.json() or {}).get("results") or []
+        except ValueError:
+            pass
+    if not tasks and not events:
+        return Widget.empty_()
+    return Widget.ok_(data={"tasks": tasks, "events": events})
+
+
+async def fetch_org_map(client: httpx.AsyncClient, bearer: str,
+                        org_slug: str) -> Widget:
+    """Teams-in-org peek: team list + live workload from the Hive fleet
+    snapshot (staff/owner-scoped downstream; others get unauthorized)."""
+    if not org_slug:
+        return Widget.empty_()
+    try:
+        resp = await client.get(
+            f"{settings.HIVE_API_URL}/v1/fleet/pulse-snapshot",
+            headers=_auth_headers(bearer),
+            params={"org": org_slug},
+            timeout=settings.SOURCE_TIMEOUT_SECONDS,
+        )
+    except (httpx.TimeoutException, httpx.TransportError) as exc:
+        logger.warning("org_map source failed: %s", type(exc).__name__)
+        return Widget.degraded_()
+    if resp.status_code in (401, 403):
+        return Widget.unauthorized_()
+    if resp.status_code >= 400:
+        logger.warning("org_map source HTTP %s", resp.status_code)
+        return Widget.degraded_()
+    try:
+        payload = resp.json()
+    except ValueError:
+        return Widget.degraded_()
+    team_workload = payload.get("team_workload") or {}
+    scoped = payload.get("workload_by_assignee_team") or {}
+    teams = []
+    for t in payload.get("teams") or []:
+        if not isinstance(t, dict):
+            continue
+        tid = t.get("id")
+        name = t.get("name") or ""
+        slug = str(name).strip().lower().replace(" ", "-")
+        members = sorted({
+            k.split("::", 1)[0] for k in scoped
+            if k.endswith(f"::{slug}")
+        })
+        teams.append({
+            "id": tid, "name": name,
+            "workload": team_workload.get(str(tid)) or team_workload.get(slug) or {},
+            "members": members,
+        })
+    if not teams:
+        return Widget.empty_()
+    return Widget.ok_(data={"teams": teams})
+
+
+async def fetch_task_peek(client: httpx.AsyncClient, bearer: str,
+                          key: str) -> Widget:
+    """Task drawer: one item by human key + its recent activity + comments."""
+    headers = _auth_headers(bearer)
+    key = (key or "").strip()
+    if not key:
+        return Widget.empty_()
+    try:
+        resp = await client.get(f"{settings.PULSE_API_URL}/api/items/",
+                                headers=headers,
+                                params={"item_key": key, "limit": "1"},
+                                timeout=settings.SOURCE_TIMEOUT_SECONDS)
+    except (httpx.TimeoutException, httpx.TransportError) as exc:
+        logger.warning("task_peek source failed: %s", type(exc).__name__)
+        return Widget.degraded_()
+    if resp.status_code in (401, 403):
+        return Widget.unauthorized_()
+    if resp.status_code >= 400:
+        return Widget.degraded_()
+    try:
+        payload = resp.json()
+        rows = payload.get("results", payload) if isinstance(payload, dict) else payload
+    except ValueError:
+        return Widget.degraded_()
+    if not rows:
+        return Widget.empty_()
+    it = rows[0]
+    if str(it.get("item_key") or "").lower() != key.lower():
+        # item_key param unsupported downstream would return an unrelated page;
+        # never show the wrong task in the drawer.
+        return Widget.empty_()
+    item = {
+        "key": it.get("item_key"), "title": it.get("title"),
+        "status": it.get("status"), "status_category": it.get("status_category"),
+        "assignee": it.get("assignee_email"), "team": it.get("assignment_group"),
+        "updated_at": it.get("updated_at"),
+    }
+    activity, comments = [], []
+    try:
+        act_resp, com_resp = await asyncio.gather(
+            client.get(f"{settings.PULSE_API_URL}/api/items/{it.get('id')}/activity/",
+                       headers=headers, params={"limit": "15"},
+                       timeout=settings.SOURCE_TIMEOUT_SECONDS),
+            client.get(f"{settings.PULSE_API_URL}/api/comments/",
+                       headers=headers, params={"item": str(it.get("id")), "limit": "10"},
+                       timeout=settings.SOURCE_TIMEOUT_SECONDS),
+        )
+        if act_resp.status_code < 400:
+            activity = (act_resp.json() or {}).get("results") or []
+            activity = [{
+                "action": a.get("action"), "at": a.get("created_at"),
+                "actor": a.get("user_email"), "field": a.get("field_name"),
+                "old": a.get("old_value"), "new": a.get("new_value"),
+            } for a in activity[:15] if isinstance(a, dict)]
+        if com_resp.status_code < 400:
+            cpayload = com_resp.json()
+            crows = cpayload.get("results", cpayload) if isinstance(cpayload, dict) else cpayload
+            comments = [{
+                "author": c.get("author_email"), "at": c.get("created_at"),
+                "excerpt": (c.get("content") or "")[:300],
+            } for c in (crows or [])[:10] if isinstance(c, dict)]
+    except (httpx.TimeoutException, httpx.TransportError, ValueError):
+        pass  # drawer degrades to the item header alone
+    return Widget.ok_(data={"item": item, "activity": activity, "comments": comments})

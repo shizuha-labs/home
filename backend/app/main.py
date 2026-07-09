@@ -25,13 +25,13 @@ from fastapi.responses import JSONResponse
 from .auth import Caller, resolve_scope_org, verify_caller
 from .cache import cache_key, widget_cache
 from .clients import (
-    fetch_agent_activity, fetch_agents_live, fetch_alerts,
-    fetch_financial_snapshot, fetch_live_feed, fetch_org_refs,
-    fetch_recent_conversations, fetch_tasks_by_status,
+    fetch_agent_activity, fetch_agent_peek, fetch_agents_live, fetch_alerts,
+    fetch_financial_snapshot, fetch_live_feed, fetch_org_map, fetch_org_refs,
+    fetch_recent_conversations, fetch_task_peek, fetch_tasks_by_status,
 )
 from .audit_leads import AuditLeadRequest, AuditLeadResponse, persist_audit_lead
 from .config import settings
-from .schema import HomeActivityV1, HomeSummaryV1, SUMMARY_VERSION
+from .schema import HomeActivityV1, HomeSummaryV1, SUMMARY_VERSION, Widget
 
 app = FastAPI(title="Shizuha Home BFF", version=str(SUMMARY_VERSION))
 
@@ -206,3 +206,45 @@ async def home_activity(
         org_id=scope_org,
         widgets={"feed": feed_widget, "agents": agents_widget},
     )
+
+
+# ── HIVE-602 cockpit drill-downs — on-demand, uncached, caller-scoped ────────
+
+@app.get("/api/home/agent")
+async def home_agent_peek(
+    caller: Caller = Depends(verify_caller),
+    email: str = Query(min_length=3, max_length=254),
+):
+    """Agent drawer: active tasks + recent events for one agent."""
+    async with httpx.AsyncClient() as client:
+        widget = await fetch_agent_peek(client, caller.bearer, email)
+    return {"generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "email": email.strip().lower(), "widget": widget}
+
+
+@app.get("/api/home/org-map")
+async def home_org_map(
+    caller: Caller = Depends(verify_caller),
+    org_id: int = Query(),
+):
+    """Org peek: teams + live workload + members. 403 for non-members."""
+    scope_org = resolve_scope_org(caller, org_id)
+    async with httpx.AsyncClient() as client:
+        orgs = await fetch_org_refs(client, caller.bearer, caller.user_id,
+                                    caller.email, caller.memberships)
+        slug = next((o.slug for o in orgs if o.id == scope_org and o.slug), None)
+        widget = (await fetch_org_map(client, caller.bearer, slug)) if slug else Widget.empty_()
+    return {"generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "org_id": scope_org, "widget": widget}
+
+
+@app.get("/api/home/task")
+async def home_task_peek(
+    caller: Caller = Depends(verify_caller),
+    key: str = Query(min_length=2, max_length=40),
+):
+    """Task drawer: one item by human key + activity + comments."""
+    async with httpx.AsyncClient() as client:
+        widget = await fetch_task_peek(client, caller.bearer, key)
+    return {"generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "key": key.strip(), "widget": widget}

@@ -103,7 +103,7 @@ function formatMoney(value, currency = 'INR') {
   }
 }
 
-export default function CommandCenterDashboard({ orgId }) {
+export default function CommandCenterDashboard({ orgId, onPeekOrg }) {
   const navigate = useNavigate()
   const { summary, widget } = useHomeSummary({ orgId })
 
@@ -130,7 +130,7 @@ export default function CommandCenterDashboard({ orgId }) {
             {orgs.map((o) => (
               <button
                 key={o.id}
-                onClick={() => navigate(`/hive/agents?org=${encodeURIComponent(o.slug || o.id)}`)}
+                onClick={() => (onPeekOrg ? onPeekOrg(o) : navigate(`/hive/agents?org=${encodeURIComponent(o.slug || o.id)}`))}
                 className="group flex items-center gap-2 rounded-2xl border border-gray-200/70 dark:border-gray-800/70 bg-white/70 dark:bg-gray-900/50 px-4 py-2.5 hover:border-brand-300 dark:hover:border-brand-700 transition-colors"
               >
                 <span className="flex w-7 h-7 items-center justify-center rounded-lg bg-brand-100 dark:bg-brand-950/50 text-brand-600 dark:text-brand-400 text-xs font-bold">

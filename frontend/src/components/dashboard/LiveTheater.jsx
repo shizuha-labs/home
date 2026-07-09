@@ -4,6 +4,7 @@ import {
   Plus, Radio, RefreshCw, UserPlus, Zap,
 } from 'lucide-react'
 import { cn } from '../../utils/cn'
+import { AgentAvatar } from './CockpitPeek'
 
 /**
  * HIVE-602 live theater — the autonomous organization as a live game HUD.
@@ -109,7 +110,7 @@ function LiveBadge() {
   )
 }
 
-function Ticker({ events, now }) {
+function Ticker({ events, now, onPeekTask }) {
   const [idx, setIdx] = useState(0)
   const pool = events.slice(0, 8)
   useEffect(() => {
@@ -125,25 +126,26 @@ function Ticker({ events, now }) {
       <span key={eventKey(ev)} className="animate-feed-in truncate">
         <span className="font-semibold text-gray-700 dark:text-gray-200">{actorName(ev.actor_email)}</span>{' '}
         {verbFor(ev)}{' '}
-        <span className="font-mono text-brand-600 dark:text-brand-400">{ev.item_key}</span>
+        <button onClick={() => onPeekTask?.(ev.item_key)} className="pointer-events-auto font-mono text-brand-600 hover:underline dark:text-brand-400">{ev.item_key}</button>
         <span className="text-gray-400 dark:text-gray-500"> · {timeAgo(ev.at, now)}</span>
       </span>
     </div>
   )
 }
 
-function AgentCard({ agent, doing, flash }) {
-  const initials = (agent.name || agent.username || '?').slice(0, 2)
+function AgentCard({ agent, doing, flash, onPeek, onHover }) {
   return (
-    <div
-      title={`${agent.role || 'Agent'} · ${agent.model || ''}`}
+    <button
+      onClick={() => onPeek?.(agent)}
+      onMouseEnter={(e) => onHover?.(agent, doing, e.currentTarget.getBoundingClientRect())}
+      onMouseLeave={() => onHover?.(null)}
       className={cn(
-        'flex w-44 shrink-0 items-center gap-2.5 rounded-xl bg-white/80 px-2.5 py-2 ring-1 ring-gray-200/70 backdrop-blur-sm dark:bg-gray-900/70 dark:ring-gray-700/50',
+        'flex w-44 shrink-0 items-center gap-2.5 rounded-xl bg-white/80 px-2.5 py-2 text-left ring-1 ring-gray-200/70 backdrop-blur-sm transition-transform hover:-translate-y-0.5 hover:ring-brand-300 dark:bg-gray-900/70 dark:ring-gray-700/50 dark:hover:ring-brand-700',
         flash && 'animate-flash-ring ring-emerald-400/70',
       )}
     >
-      <span className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brand-500/90 to-purple-500/90 text-[11px] font-bold uppercase text-white shadow-sm">
-        {initials}
+      <span className="relative shrink-0">
+        <AgentAvatar username={agent.username} name={agent.name} size="md" />
         <span className="absolute -right-1 -top-1 flex h-2.5 w-2.5">
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
           <span className="relative inline-flex h-2.5 w-2.5 rounded-full border-2 border-white bg-emerald-500 dark:border-gray-900" />
@@ -165,11 +167,40 @@ function AgentCard({ agent, doing, flash }) {
           )}
         </span>
       </span>
+    </button>
+  )
+}
+
+function AgentHoverCard({ hover }) {
+  if (!hover) return null
+  const { agent, doing, rect } = hover
+  const left = Math.min(Math.max(rect.left, 8), window.innerWidth - 280)
+  return (
+    <div
+      className="pointer-events-none fixed z-50 w-64 animate-feed-in rounded-2xl border border-gray-200 bg-white p-3 shadow-2xl dark:border-gray-700 dark:bg-gray-900"
+      style={{ left, top: rect.bottom + 8 }}
+    >
+      <div className="flex items-center gap-3">
+        <AgentAvatar username={agent.username} name={agent.name} size="lg" />
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">{agent.name}</p>
+          <p className="truncate text-xs text-gray-500 dark:text-gray-400">{agent.role}</p>
+          <p className="truncate text-[10px] text-gray-400 dark:text-gray-500">
+            {(agent.teams || []).join(' · ')}{agent.model ? ` · ${agent.model}` : ''}
+          </p>
+        </div>
+      </div>
+      {doing && (
+        <p className="mt-2 truncate text-xs text-gray-600 dark:text-gray-300">
+          {verbFor(doing)} <span className="font-mono text-brand-600 dark:text-brand-400">{doing.item_key}</span>
+        </p>
+      )}
+      <p className="mt-1 text-[10px] text-gray-400">Click to open live activity</p>
     </div>
   )
 }
 
-function FeedRow({ ev, isNew, now }) {
+function FeedRow({ ev, isNew, now, onPeekTask }) {
   const Icon = EVENT_ICONS[ev.type] || Zap
   return (
     <div
@@ -199,7 +230,7 @@ function FeedRow({ ev, isNew, now }) {
         <p className="truncate text-xs text-gray-700 dark:text-gray-200">
           <span className="font-semibold">{actorName(ev.actor_email)}</span>{' '}
           <span className="text-gray-500 dark:text-gray-400">on</span>{' '}
-          <span className="font-mono text-[11px] text-brand-600 dark:text-brand-400">{ev.item_key}</span>
+          <button onClick={() => onPeekTask?.(ev.item_key)} className="font-mono text-[11px] text-brand-600 hover:underline dark:text-brand-400">{ev.item_key}</button>
           {ev.item_title ? (
             <span className="text-gray-400 dark:text-gray-500"> · {ev.item_title}</span>
           ) : null}
@@ -213,7 +244,8 @@ function FeedRow({ ev, isNew, now }) {
   )
 }
 
-export default function LiveTheater({ feed, agents }) {
+export default function LiveTheater({ feed, agents, onPeekAgent, onPeekTask }) {
+  const [hover, setHover] = useState(null)
   const [now, setNow] = useState(() => Date.now())
   const seenRef = useRef(new Set())
   const [newKeys, setNewKeys] = useState(() => new Set())
@@ -292,7 +324,8 @@ export default function LiveTheater({ feed, agents }) {
 
   return (
     <div className="mt-6 text-left">
-      <Ticker events={events} now={now} />
+      <Ticker events={events} now={now} onPeekTask={onPeekTask} />
+      <AgentHoverCard hover={hover} />
 
       {/* Band 1 — agents marquee: the fleet scrolls by, each showing what
           it's doing right now. Pauses on hover. */}
@@ -324,6 +357,8 @@ export default function LiveTheater({ feed, agents }) {
                     agent={a}
                     doing={doingByEmail.get(email)}
                     flash={freshActors.has(email)}
+                    onPeek={onPeekAgent}
+                    onHover={(ag, doing, rect) => setHover(ag ? { agent: ag, doing, rect } : null)}
                   />
                 )
               })}
@@ -338,7 +373,7 @@ export default function LiveTheater({ feed, agents }) {
           {events.length > 0 ? (
             <div className="max-h-80 space-y-0.5 overflow-y-auto">
               {events.slice(0, 30).map((ev) => (
-                <FeedRow key={eventKey(ev)} ev={ev} isNew={newKeys.has(eventKey(ev))} now={now} />
+                <FeedRow key={eventKey(ev)} ev={ev} isNew={newKeys.has(eventKey(ev))} now={now} onPeekTask={onPeekTask} />
               ))}
             </div>
           ) : (

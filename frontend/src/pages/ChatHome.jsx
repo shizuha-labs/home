@@ -5,6 +5,7 @@ import { ConnectChatProvider, ChatLayout, MessageList, MessageInput, Avatar, New
 import { SHIZUHA_APPS, useEnabledServices } from '@shizuha/ui'
 import CommandCenterDashboard from '../components/dashboard/CommandCenterDashboard'
 import LiveTheater from '../components/dashboard/LiveTheater'
+import CockpitPeek from '../components/dashboard/CockpitPeek'
 import CommandPalette from '../components/assistant/CommandPalette'
 import { useHomeSummary } from '../hooks/useHomeSummary'
 import { useHomeActivity } from '../hooks/useHomeActivity'
@@ -103,6 +104,18 @@ function ChatHomeInner() {
     agentsWidget.status === 'ok' || agentsWidget.status === 'stale'
       ? (agentsWidget.data || []).filter((a) => a.status === 'running')
       : []
+  const allAgents =
+    agentsWidget.status === 'ok' || agentsWidget.status === 'stale'
+      ? agentsWidget.data || [] : []
+  // HIVE-602 cockpit peeks: drill into agents/orgs/tasks without leaving home.
+  const [peekStack, setPeekStack] = useState([])
+  const pushPeek = (p) => setPeekStack((st) => [...st.slice(-4), p])
+  const peekAgent = (a) => a?.email && pushPeek({
+    type: 'agent', email: String(a.email).toLowerCase(), username: a.username,
+    name: a.name, role: a.role, teams: a.teams, model: a.model, status: a.status,
+  })
+  const peekTask = (key) => key && pushPeek({ type: 'task', itemKey: key })
+  const peekOrg = (o) => o?.id && pushPeek({ type: 'org', orgId: o.id, name: o.name })
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -548,7 +561,7 @@ function ChatHomeInner() {
 
           {/* HIVE-602: the live theater — agents visibly working, events
               streaming in, projects moving. The show. */}
-          <LiveTheater feed={feedWidget} agents={agentsWidget} />
+          <LiveTheater feed={feedWidget} agents={agentsWidget} onPeekAgent={peekAgent} onPeekTask={peekTask} />
 
 
           {/* Suggestion chips */}
@@ -570,7 +583,7 @@ function ChatHomeInner() {
               independently from the HIVE-375 aggregation API. Chat stays the heart
               above; this is the "everything at a glance" surface below it. */}
           <div className="mt-8">
-            <CommandCenterDashboard />
+            <CommandCenterDashboard onPeekOrg={peekOrg} />
           </div>
         </div>
       </div>
@@ -587,6 +600,16 @@ function ChatHomeInner() {
 
       {/* Apps drawer */}
       <AppsDrawer isOpen={showApps} onClose={() => setShowApps(false)} />
+
+      {peekStack.length > 0 && (
+        <CockpitPeek
+          stack={peekStack}
+          onPush={pushPeek}
+          onPop={() => setPeekStack((st) => st.slice(0, -1))}
+          onClose={() => setPeekStack([])}
+          agents={allAgents}
+        />
+      )}
 
       <CommandPalette
         isOpen={showCommandPalette}
