@@ -40,7 +40,7 @@ export default function ForgeSignupPage() {
       })
       const data = await r.json().catch(() => ({}))
       if (!r.ok) throw new Error(data.detail || 'Signup failed. Please try again.')
-      setState({ status: 'done', apiKey: data.api_key, free: data.free_per_day, email })
+      setState({ status: 'done', email })
     } catch (err) {
       setState({ status: 'error', message: String(err.message || err) })
     }
@@ -65,19 +65,15 @@ export default function ForgeSignupPage() {
             <div className="rounded-2xl border border-brand-600 bg-brand-50/50 dark:bg-brand-900/10 dark:border-brand-500 p-6 text-left space-y-4">
               <div className="flex items-center gap-2">
                 <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-brand-600 text-white text-sm font-bold">✓</span>
-                <h3 className="font-semibold text-gray-900 dark:text-gray-100">Key generated</h3>
+                <h3 className="font-semibold text-gray-900 dark:text-gray-100">Check your email</h3>
               </div>
               <p className="text-sm text-gray-600 dark:text-gray-300">
-                We also sent it to <strong>{state.email}</strong>. Keep it secret — pass it as the <code className="text-xs">X-API-Key</code> header.
+                We sent your API key to <strong>{state.email}</strong>. Keep it secret — pass it as the <code className="text-xs">X-API-Key</code> header in every request.
               </p>
               <div>
-                <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Your API key</p>
-                <CodeBlock>{state.apiKey}</CodeBlock>
-              </div>
-              <div>
-                <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Try it now</p>
+                <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Quick start</p>
                 <CodeBlock>{`curl -X POST https://shizuha.com/api/forge/generate \\
-  -H "X-API-Key: ${state.apiKey}" \\
+  -H "X-API-Key: YOUR_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{"prompt": "a red fox in snow, golden hour, photorealistic"}'`}</CodeBlock>
               </div>
