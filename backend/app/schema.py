@@ -1,4 +1,5 @@
-"""HIVE-375 versioned home-summary contract (HomeSummaryV1).
+"""HIVE-375 versioned home-summary contract (HomeSummaryV1) + HIVE-603
+activity stream contract (HomeActivityEventV1).
 
 Every widget carries its own `status` so the SPA renders shell+skeletons
 instantly and hydrates each independently; the envelope is ALWAYS returned
@@ -10,6 +11,7 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field
 
 SUMMARY_VERSION = 1
+ACTIVITY_VERSION = 1
 
 
 class WidgetStatus(str, Enum):
@@ -71,3 +73,42 @@ class HomeActivityV1(BaseModel):
     generated_at: str
     org_id: Optional[int] = None
     widgets: dict[str, Widget] = Field(default_factory=dict)
+
+
+# ---- HIVE-603 activity stream contract ---------------------------------------
+
+class ActivityActor(BaseModel):
+    kind: str = "system"  # agent|user|system
+    username: Optional[str] = None
+    display_name: Optional[str] = None
+    role: Optional[str] = None
+
+
+class ActivityTarget(BaseModel):
+    kind: str = "task"  # task|agent|conversation|project
+    key: Optional[str] = None
+    title: Optional[str] = None
+    href: Optional[str] = None
+
+
+class HomeActivityEventV1(BaseModel):
+    """Single activity event, matching the HLD contract §4."""
+    version: int = Field(default=ACTIVITY_VERSION)
+    id: str  # Redis Stream id
+    source: str  # pulse|hive|connect
+    type: str  # task.comment|task.transition|task.assignment|task.pr_link|agent.status|agent.task_focus|agent.message_summary
+    occurred_at: str
+    org_id: int
+    project_key: Optional[str] = None
+    actor: ActivityActor = Field(default_factory=ActivityActor)
+    target: ActivityTarget = Field(default_factory=ActivityTarget)
+    summary: str = ""
+    redaction: str = "none"  # none|metadata_only|suppressed
+    priority: str = "normal"  # normal|high|urgent
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ActivityRecentResponse(BaseModel):
+    events: list[HomeActivityEventV1] = Field(default_factory=list)
+    cursor_by_org: dict[str, str] = Field(default_factory=dict)
+    degraded_sources: list[str] = Field(default_factory=list)

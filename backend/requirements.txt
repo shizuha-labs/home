@@ -6,5 +6,8 @@ pyjwt>=2.8,<3
 # RS256/JWKS verification of shizuha-id user tokens (PyJWT's RSAAlgorithm
 # needs the cryptography backend; without it every RS256 token is rejected).
 cryptography>=42,<50
+# HIVE-603 Redis Streams for activity feed.
+redis[hiredis]>=5.1,<6
 # tests
 pytest>=8,<9
+pytest-asyncio>=0.24,<1

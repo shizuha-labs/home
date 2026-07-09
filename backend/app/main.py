@@ -1,9 +1,14 @@
 """HIVE-375 home BFF (slice 1) — GET /api/home/summary.
+HIVE-603 activity stream — GET /api/home/activity/recent + /stream.
 
 A thin stateless async fan-out (aoi-approved: FastAPI thin-async-BFF, stateless
 only, forward-caller-JWT). Slice 1 surfaces: `orgs` (from the verified JWT claim,
 no downstream call) + `tasks_by_status` (pulse, forwarded Bearer). The envelope
 is versioned (HomeSummaryV1) and always 200 (partial); auth failures are 401/403.
+
+HIVE-603 adds Redis Streams-backed activity endpoints: /recent returns bounded
+history, /stream returns text/event-stream for live updates. Both use the same
+auth model (verified JWT, org membership gate, no privileged token).
 
 Tenant isolation (the load-bearing control): identity + org scope come only from
 the *verified* token; a requested org must be one the caller belongs to (403
@@ -12,7 +17,9 @@ authz — the BFF holds no privileged token and can never widen scope / leak
 cross-org. (STRIDE-lite on the task; PLAT-1236 cross-org→403 tests below.)
 """
 import asyncio
+import base64
 import datetime
+import json
 import time
 from typing import Optional
 
@@ -20,7 +27,7 @@ import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from .auth import Caller, resolve_scope_org, verify_caller
 from .cache import cache_key, widget_cache
@@ -31,7 +38,11 @@ from .clients import (
 )
 from .audit_leads import AuditLeadRequest, AuditLeadResponse, persist_audit_lead
 from .config import settings
-from .schema import HomeActivityV1, HomeSummaryV1, SUMMARY_VERSION, Widget
+from .redis_client import block_read, block_read_multi, read_recent, read_recent_multi
+from .schema import (
+    ActivityRecentResponse, HomeActivityEventV1, HomeSummaryV1, HomeActivityV1,
+    SUMMARY_VERSION, Widget,
+)
 
 app = FastAPI(title="Shizuha Home BFF", version=str(SUMMARY_VERSION))
 
@@ -163,6 +174,8 @@ async def home_summary(
     )
 
 
+# ── HIVE-602 live theater ─────────────────────────────────────────────────────
+
 @app.get("/api/home/activity", response_model=HomeActivityV1)
 async def home_activity(
     caller: Caller = Depends(verify_caller),
@@ -248,3 +261,336 @@ async def home_task_peek(
         widget = await fetch_task_peek(client, caller.bearer, key)
     return {"generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "key": key.strip(), "widget": widget}
+
+
+# ---- HIVE-603 activity stream endpoints --------------------------------------
+
+
+def _decode_since_by_org(raw: Optional[str]) -> Optional[dict[str, str]]:
+    """Decode base64url-encoded per-org cursor map.
+
+    The HLD specifies base64url-json for the aggregate cursor to avoid URL
+    length issues with multiple org cursors.
+    """
+    if not raw:
+        return None
+    try:
+        decoded = base64.urlsafe_b64decode(raw)
+        return json.loads(decoded)
+    except (ValueError, json.JSONDecodeError):
+        return None
+
+
+def _encode_since_by_org(cursor_map: dict[str, str]) -> str:
+    """Encode per-org cursor map as base64url."""
+    return base64.urlsafe_b64encode(json.dumps(cursor_map).encode()).decode()
+
+
+def _build_cursor_by_org(events: list[dict]) -> dict[str, str]:
+    """Build per-org cursor map from a list of events.
+
+    Takes the highest stream id seen per org.
+    """
+    cursor: dict[str, str] = {}
+    for ev in events:
+        oid = str(ev.get("org_id", ""))
+        sid = ev.get("id", "")
+        if oid and sid:
+            if oid not in cursor or sid > cursor[oid]:
+                cursor[oid] = sid
+    return cursor
+
+
+@app.get("/api/home/activity/recent", response_model=ActivityRecentResponse)
+async def activity_recent(
+    caller: Caller = Depends(verify_caller),
+    org_id: Optional[int] = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    since: Optional[str] = Query(default=None),
+    since_by_org: Optional[str] = Query(default=None, alias="since_by_org"),
+) -> ActivityRecentResponse:
+    """Return bounded recent activity history.
+
+    Single-org mode (org_id present): returns events from that org's stream.
+    Aggregate mode (org_id absent): merges events across all caller orgs.
+
+    Cursor rules per HLD §6:
+    - Single-org: use `since=<redis_stream_id>`.
+    - Aggregate: use `since_by_org=<base64url-json>`.
+    - Aggregate with bare `since` returns 400.
+    """
+    scope_org = resolve_scope_org(caller, org_id)
+
+    if scope_org is not None:
+        # Single-org mode
+        try:
+            events = await read_recent(scope_org, limit=limit, since=since)
+        except Exception:
+            return ActivityRecentResponse(
+                events=[],
+                degraded_sources=[str(scope_org)],
+            )
+        cursor_by_org = _build_cursor_by_org(events)
+        return ActivityRecentResponse(events=events, cursor_by_org=cursor_by_org)
+    else:
+        # Aggregate mode
+        if since and not since_by_org:
+            raise HTTPException(
+                status_code=400,
+                detail="Aggregate mode requires since_by_org (base64url-json per-org cursor). "
+                       "Bare since= is not supported for multi-org queries.",
+            )
+        org_ids = list(caller.memberships.keys())
+        decoded_cursors = _decode_since_by_org(since_by_org)
+        try:
+            events, degraded = await read_recent_multi(
+                org_ids,
+                limit_per_org=limit,
+                since_by_org=decoded_cursors,
+            )
+        except Exception:
+            return ActivityRecentResponse(
+                events=[],
+                degraded_sources=[str(o) for o in org_ids],
+            )
+        cursor_by_org = _build_cursor_by_org(events)
+        return ActivityRecentResponse(
+            events=events,
+            cursor_by_org=cursor_by_org,
+            degraded_sources=degraded,
+        )
+
+
+# §6.2 per-instance connection cap
+_active_stream_connections: int = 0
+_stream_connections_lock = asyncio.Lock()
+
+
+async def _acquire_stream_slot() -> bool:
+    """Try to acquire a stream connection slot. Returns True if acquired."""
+    global _active_stream_connections
+    async with _stream_connections_lock:
+        if _active_stream_connections >= settings.HOME_SSE_MAX_CONNECTIONS:
+            return False
+        _active_stream_connections += 1
+        return True
+
+
+async def _release_stream_slot():
+    """Release a stream connection slot."""
+    global _active_stream_connections
+    async with _stream_connections_lock:
+        _active_stream_connections = max(0, _active_stream_connections - 1)
+
+
+def _compute_stream_deadline(caller: Caller) -> float:
+    """Compute the hard deadline for an SSE connection.
+
+    Per §6.1: deadline = min(now + HOME_SSE_MAX_LIFETIME, token.exp).
+    Returns a monotonic timestamp.
+    """
+    now = time.monotonic()
+    max_lifetime = settings.HOME_SSE_MAX_LIFETIME_SECONDS
+    # Convert token exp (epoch seconds) to monotonic offset
+    token_exp_epoch = caller.token_exp
+    now_epoch = time.time()
+    remaining_token = max(0.0, token_exp_epoch - now_epoch)
+    return now + min(max_lifetime, remaining_token)
+
+
+def _check_membership_still_valid(caller: Caller, org_id: int) -> bool:
+    """Check if an org_id is still in the caller's memberships.
+
+    Membership is re-derived from the (still-valid) signed token.
+    """
+    return str(org_id) in caller.memberships or org_id in caller.memberships
+
+
+@app.get("/api/home/activity/stream")
+async def activity_stream(
+    caller: Caller = Depends(verify_caller),
+    org_id: Optional[int] = Query(default=None),
+    since: Optional[str] = Query(default=None),
+    since_by_org: Optional[str] = Query(default=None, alias="since_by_org"),
+):
+    """Stream activity events as text/event-stream.
+
+    Single-org mode: streams from one org's Redis Stream.
+    Aggregate mode: multiplexes across all caller orgs.
+
+    Uses fetch() + ReadableStream on the client (not native EventSource)
+    because Home authenticates via Authorization: Bearer header.
+
+    §6.1: Hard JWT-expiry bound, max connection lifetime, periodic revalidation.
+    §6.2: Per-instance connection cap with 503 shed.
+    """
+    scope_org = resolve_scope_org(caller, org_id)
+
+    # §6.2: connection cap
+    if not await _acquire_stream_slot():
+        raise HTTPException(
+            status_code=503,
+            detail="Too many concurrent stream connections. Retry after backoff.",
+            headers={"Retry-After": "10"},
+        )
+
+    # §6.1: compute hard deadline
+    deadline = _compute_stream_deadline(caller)
+
+    if scope_org is not None:
+        return StreamingResponse(
+            _stream_single_org(scope_org, since or "$", caller, deadline),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+    else:
+        if since and not since_by_org:
+            await _release_stream_slot()
+            raise HTTPException(
+                status_code=400,
+                detail="Aggregate mode requires since_by_org (base64url-json per-org cursor).",
+            )
+        org_ids = list(caller.memberships.keys())
+        decoded_cursors = _decode_since_by_org(since_by_org) or {}
+        return StreamingResponse(
+            _stream_multi_org(org_ids, decoded_cursors, caller, deadline),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+
+async def _stream_single_org(org_id: int, since: str, caller: Caller, deadline: float):
+    """SSE generator for a single org's activity stream.
+
+    §6.1: enforces hard deadline and periodic revalidation.
+    """
+    last_id = since
+    heartbeat_interval = settings.ACTIVITY_SSE_HEARTBEAT_SECONDS
+    revalidate_interval = settings.HOME_SSE_REVALIDATE_INTERVAL_SECONDS
+    last_revalidate = time.monotonic()
+
+    try:
+        while True:
+            now = time.monotonic()
+
+            # §6.1: hard deadline check
+            if now >= deadline:
+                yield f"event: home.reconnect.v1\ndata: {{\"reason\":\"lifetime\"}}\n\n"
+                return
+
+            # §6.1: periodic revalidation
+            if now - last_revalidate >= revalidate_interval:
+                last_revalidate = now
+                # Check token expiry
+                if time.time() >= caller.token_exp:
+                    yield f"event: home.reconnect.v1\ndata: {{\"reason\":\"reauth_required\"}}\n\n"
+                    return
+                # Check org membership still valid
+                if not _check_membership_still_valid(caller, org_id):
+                    yield f"event: home.deauthz.v1\ndata: {{\"dropped_org\": {org_id}}}\n\n"
+                    return
+
+            try:
+                events = await block_read(
+                    org_id,
+                    since=last_id,
+                    count=10,
+                    block_ms=settings.ACTIVITY_STREAM_READ_TIMEOUT_MS,
+                )
+            except Exception:
+                yield f": heartbeat (redis error)\n\n"
+                await asyncio.sleep(heartbeat_interval)
+                continue
+
+            if events:
+                for ev in events:
+                    sid = ev.get("id", last_id)
+                    if sid > last_id:
+                        last_id = sid
+                    yield f"id: {sid}\nevent: home.activity.v1\ndata: {json.dumps(ev)}\n\n"
+            else:
+                yield f": heartbeat\n\n"
+    finally:
+        await _release_stream_slot()
+
+
+async def _stream_multi_org(org_ids: list[int], since_by_org: dict[str, str], caller: Caller, deadline: float):
+    """SSE generator for aggregate multi-org activity stream.
+
+    Per HLD §6, aggregate frames use compound ids:
+      id: v1;org=<org_id>;sid=<redis_stream_id>
+
+    §6.1: enforces hard deadline and periodic revalidation per org.
+    """
+    last_by_org: dict[str, str] = dict(since_by_org)
+    heartbeat_interval = settings.ACTIVITY_SSE_HEARTBEAT_SECONDS
+    revalidate_interval = settings.HOME_SSE_REVALIDATE_INTERVAL_SECONDS
+    last_revalidate = time.monotonic()
+    tick = 0
+    active_orgs: set[int] = set(org_ids)
+
+    try:
+        while True:
+            now = time.monotonic()
+
+            # §6.1: hard deadline check
+            if now >= deadline:
+                yield f"event: home.reconnect.v1\ndata: {{\"reason\":\"lifetime\"}}\n\n"
+                return
+
+            # §6.1: periodic revalidation
+            if now - last_revalidate >= revalidate_interval:
+                last_revalidate = now
+                # Check token expiry
+                if time.time() >= caller.token_exp:
+                    yield f"event: home.reconnect.v1\ndata: {{\"reason\":\"reauth_required\"}}\n\n"
+                    return
+                # Check each org membership still valid
+                for oid in list(active_orgs):
+                    if not _check_membership_still_valid(caller, oid):
+                        active_orgs.discard(oid)
+                        last_by_org.pop(str(oid), None)
+                        yield f"event: home.deauthz.v1\ndata: {{\"dropped_org\": {oid}}}\n\n"
+                if not active_orgs:
+                    return
+
+            try:
+                events = await block_read_multi(
+                    list(active_orgs),
+                    since_by_org=last_by_org,
+                    count=10,
+                    block_ms=settings.ACTIVITY_STREAM_READ_TIMEOUT_MS,
+                )
+            except Exception:
+                yield f": heartbeat (redis error)\n\n"
+                await asyncio.sleep(heartbeat_interval)
+                continue
+
+            if events:
+                for ev in events:
+                    oid = str(ev.get("org_id", ""))
+                    sid = ev.get("id", "")
+                    if oid and sid:
+                        last_by_org[oid] = sid
+                    compound_id = f"v1;org={oid};sid={sid}"
+                    yield f"id: {compound_id}\nevent: home.activity.v1\ndata: {json.dumps(ev)}\n\n"
+            else:
+                yield f": heartbeat\n\n"
+
+            # Send periodic cursor control frame
+            tick += 1
+            if tick % 3 == 0 and last_by_org:
+                cursor_payload = json.dumps({"cursor_by_org": last_by_org})
+                yield f"event: home.cursor.v1\ndata: {cursor_payload}\n\n"
+
+            await asyncio.sleep(0)  # yield control
+    finally:
+        await _release_stream_slot()
