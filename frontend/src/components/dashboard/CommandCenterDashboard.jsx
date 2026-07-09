@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import {
-  Building2, Bot, ListTodo, Wallet, Bell, Lock, AlertTriangle, ChevronRight, Plus,
+  Building2, ListTodo, Wallet, Bell, Lock, AlertTriangle, ChevronRight, Plus,
 } from 'lucide-react'
 import { cn } from '../../utils/cn'
 import { useHomeSummary } from '../../hooks/useHomeSummary'
@@ -108,7 +108,6 @@ export default function CommandCenterDashboard({ orgId }) {
   const { summary, widget } = useHomeSummary({ orgId })
 
   const orgs = Array.isArray(summary?.orgs) ? summary.orgs : null
-  const agent = widget('agent_activity')
   const tasks = widget('tasks_by_status')
   const money = widget('financial_snapshot')
   const alerts = widget('alerts')
@@ -147,22 +146,7 @@ export default function CommandCenterDashboard({ orgId }) {
       </div>
 
       {/* Widget grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        <WidgetShell title="Agent activity" icon={Bot} status={agent.status}>
-          <ByStatus status={agent.status} render={() => (
-            <div className="flex items-baseline gap-3">
-              <span className="text-2xl font-semibold text-gray-900 dark:text-gray-100">{num(agent.data?.active)}</span>
-              <span className="text-xs text-gray-500">working now</span>
-              {num(agent.data?.error) > 0 ? (
-                <span className="ml-auto text-xs font-medium text-red-500">{num(agent.data.error)} stuck</span>
-              ) : null}
-              {num(agent.data?.stopped) > 0 ? (
-                <span className="ml-auto text-xs font-medium text-gray-400">{num(agent.data.stopped)} stopped</span>
-              ) : null}
-            </div>
-          )} empty={<Muted>No agents yet.</Muted>} unauthorized="Fleet activity is not shared with you." />
-        </WidgetShell>
-
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         <WidgetShell
           title="Pending work"
           icon={ListTodo}
@@ -203,6 +187,7 @@ export default function CommandCenterDashboard({ orgId }) {
           }} empty={<Muted>Select an organization to view financials.</Muted>} />
         </WidgetShell>
 
+        {(alerts.status !== 'ok' || (Array.isArray(alerts.data) && alerts.data.length > 0)) && (
         <WidgetShell title="Attention" icon={Bell} status={alerts.status}>
           <ByStatus status={alerts.status} render={() => {
             const items = Array.isArray(alerts.data) ? alerts.data : []
@@ -219,6 +204,7 @@ export default function CommandCenterDashboard({ orgId }) {
             )
           }} empty={<Muted>All clear.</Muted>} />
         </WidgetShell>
+        )}
       </div>
     </div>
   )

@@ -18,9 +18,6 @@ const SUGGESTION_CHIPS = [
   { label: 'Check my financials', prompt: 'Give me an overview of my recent financial activity — revenue, expenses, and anything that needs attention.' },
   { label: 'Create a task', prompt: 'I need to create a new task. Help me set it up with the right priority and assignee.' },
   { label: 'Check my emails', prompt: 'Check my recent emails and summarize anything important or requiring a response.' },
-  { label: 'Draft a document', prompt: 'Help me draft a document. I\'ll tell you what it\'s about.' },
-  { label: 'HR overview', prompt: 'Give me an overview of the HR dashboard — leave requests, attendance, and any pending approvals.' },
-  { label: 'Inventory status', prompt: 'What\'s the current inventory status? Any low-stock alerts or pending movements?' },
 ]
 
 function getGreeting() {
@@ -555,13 +552,13 @@ function ChatHomeInner() {
 
 
           {/* Suggestion chips */}
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+          <div className="flex flex-wrap justify-center gap-2">
             {SUGGESTION_CHIPS.map((chip) => (
               <button
                 key={chip.label}
                 onClick={() => handleChipClick(chip.prompt)}
                 disabled={isSending}
-                className="px-4 py-3 text-left text-sm rounded-xl bg-white/60 dark:bg-gray-800/40 backdrop-blur-sm ring-1 ring-gray-200/60 dark:ring-gray-700/40 text-gray-600 dark:text-gray-400 hover:ring-brand-300 dark:hover:ring-brand-600 hover:text-brand-700 dark:hover:text-brand-300 hover:bg-white dark:hover:bg-gray-800/80 hover:shadow-lg hover:shadow-brand-500/5 transition-all disabled:opacity-50"
+                className="rounded-full px-3.5 py-1.5 text-xs bg-white/60 dark:bg-gray-800/40 backdrop-blur-sm ring-1 ring-gray-200/60 dark:ring-gray-700/40 text-gray-600 dark:text-gray-400 hover:ring-brand-300 dark:hover:ring-brand-600 hover:text-brand-700 dark:hover:text-brand-300 transition-all disabled:opacity-50"
               >
                 <span className="font-medium">{chip.label}</span>
               </button>
