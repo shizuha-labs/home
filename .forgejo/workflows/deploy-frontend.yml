@@ -153,10 +153,20 @@ jobs:
             exit 1
           }
 
-          kubectl set image -n shizuha deploy/shizuha-home-frontend frontend="localhost:30500/shizuha-home-frontend:${FTAG}"
-          kubectl rollout status -n shizuha deploy/shizuha-home-frontend --timeout=300s
-
-          LIVE="$(kubectl get deploy -n shizuha shizuha-home-frontend -o jsonpath='{.spec.template.spec.containers[0].image}')"
-          echo "Live frontend image: ${LIVE}"
-          echo "${LIVE}" | grep -q "${FTAG}" || { echo "::error::frontend image mismatch"; exit 1; }
+          # Re-assert loop: deploy-backend.yml (same push, separate concurrency group)
+          # snapshots the LIVE frontend tag for its `helm upgrade
+          # --set frontend.image.tag=...` — if it snapshots BEFORE we roll and
+          # applies DURING our rollout, it reverts us to the previous tag.
+          # helm never re-touches the FE after its one apply, so re-asserting
+          # converges; only a persistent fighter still fails the run.
+          for attempt in 1 2 3; do
+            kubectl set image -n shizuha deploy/shizuha-home-frontend frontend="localhost:30500/shizuha-home-frontend:${FTAG}"
+            kubectl rollout status -n shizuha deploy/shizuha-home-frontend --timeout=300s
+            LIVE="$(kubectl get deploy -n shizuha shizuha-home-frontend -o jsonpath='{.spec.template.spec.containers[0].image}')"
+            echo "Live frontend image (attempt ${attempt}): ${LIVE}"
+            if echo "${LIVE}" | grep -q "${FTAG}"; then break; fi
+            if [ "${attempt}" = 3 ]; then echo "::error::frontend image mismatch after ${attempt} attempts"; exit 1; fi
+            echo "Frontend image clobbered mid-rollout (likely concurrent backend helm apply) — re-asserting"
+            sleep 10
+          done
           kubectl get pods -n shizuha -l app.kubernetes.io/name=shizuha-home-frontend
