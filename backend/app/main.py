@@ -105,7 +105,13 @@ async def home_summary(
             fetch_org_refs(client, caller.bearer, caller.user_id, caller.email, caller.memberships),
             widget_cache.get_or_fetch(
                 cache_key("tasks_by_status", caller.user_id, scope_org),
-                lambda: fetch_tasks_by_status(client, caller.bearer, caller.email, scope_org),
+                # No selected org → aggregate work-in-flight across every org
+                # the token grants (HIVE-373: the command center shows the
+                # org's autonomous work, not just the caller's own queue).
+                lambda: fetch_tasks_by_status(
+                    client, caller.bearer, caller.email, scope_org,
+                    org_ids=sorted(caller.memberships.keys()),
+                ),
             ),
             fetch_agent_activity(client, caller.bearer, scope_org),
             widget_cache.get_or_fetch(

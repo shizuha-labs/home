@@ -59,7 +59,7 @@ def _stub_widgets(monkeypatch):
     """Stub fan-outs for auth/envelope tests (clients are tested
     separately below). Returns ok widgets so the envelope is well-formed."""
     widget_cache.clear()
-    async def _fake_tasks(_client, _bearer, _email, _org_id=None):
+    async def _fake_tasks(_client, _bearer, _email, _org_id=None, org_ids=None):
         from app.schema import Widget
         return Widget.ok_(data={"open": 3, "in_progress": 1, "in_review": 0, "blocked": 0, "awaiting_merge": 0})
     async def _fake_agents(_client, _bearer, _org_id=None):
@@ -186,6 +186,65 @@ def test_tasks_widget_unauthorized_on_403():
         async with _mock_client(handler) as c:
             return await clients.fetch_tasks_by_status(c, "t", "a@org1.example")
     assert _run(go()).status == "unauthorized"
+
+
+def test_tasks_widget_buckets_on_status_category_not_raw_slug():
+    """HIVE-373 "Pending work: all zeros" bug: Pulse status slugs are
+    workflow-customizable (new items default to 'pending'), so bucketing must
+    use the normalized status_category with slug pins for the stage buckets —
+    and count the org's work, not just tasks personally assigned to the caller."""
+    def handler(request):
+        assert "assignee_email" not in request.url.params
+        assert request.url.params.get("is_active") == "true"
+        assert request.url.params.get("mode") == "task"
+        return httpx.Response(200, json={"results": [
+            {"status": "pending", "status_category": "todo"},
+            {"status": "shaping", "status_category": "todo"},
+            {"status": "implementing", "status_category": "in_progress"},
+            {"status": "review", "status_category": "in_progress"},
+            {"status": "blocked", "status_category": "in_progress"},
+            {"status": "awaiting_merge", "status_category": "in_progress"},
+        ]})
+    async def go():
+        async with _mock_client(handler) as c:
+            return await clients.fetch_tasks_by_status(c, "caller-tok", "a@org1.example", 7)
+    w = _run(go())
+    assert w.status == "ok"
+    assert w.data == {"open": 2, "in_progress": 1, "in_review": 1,
+                      "blocked": 1, "awaiting_merge": 1}
+
+
+def test_tasks_widget_aggregates_across_member_orgs_when_unscoped():
+    seen = []
+    def handler(request):
+        seen.append(request.url.params.get("organization"))
+        return httpx.Response(200, json={"results": [
+            {"status": "pending", "status_category": "todo"},
+        ]})
+    async def go():
+        async with _mock_client(handler) as c:
+            return await clients.fetch_tasks_by_status(
+                c, "t", "a@org1.example", None, org_ids=[1, 2])
+    w = _run(go())
+    assert seen == ["1", "2"]
+    assert w.status == "ok"
+    assert w.data["open"] == 2
+
+
+def test_tasks_widget_skips_forbidden_org_and_counts_the_rest():
+    def handler(request):
+        if request.url.params.get("organization") == "1":
+            return httpx.Response(403, json={"detail": "forbidden"})
+        return httpx.Response(200, json={"results": [
+            {"status": "pending", "status_category": "todo"},
+        ]})
+    async def go():
+        async with _mock_client(handler) as c:
+            return await clients.fetch_tasks_by_status(
+                c, "t", "a@org1.example", None, org_ids=[1, 2])
+    w = _run(go())
+    assert w.status == "ok"
+    assert w.data["open"] == 1
 
 
 def test_org_refs_are_hydrated_from_admin_without_widening_memberships():

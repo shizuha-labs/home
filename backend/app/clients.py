@@ -106,42 +106,90 @@ async def fetch_org_refs(client: httpx.AsyncClient, bearer: str, user_id: int,
     ]
 
 
+def _task_bucket(item: dict) -> Optional[str]:
+    """Map an item to a display bucket via its NORMALIZED status_category,
+    with slug pins for the stage buckets the dashboard breaks out.
+
+    Pulse status slugs are workflow-customizable (new items even default to
+    'pending'), so a raw slug match against the five bucket literals silently
+    dropped almost everything — the HIVE-373 "Pending work: all zeros" bug.
+    """
+    slug = str((item or {}).get("status") or "").strip().lower()
+    cat = str((item or {}).get("status_category") or "").strip().lower()
+    if slug == "awaiting_merge":
+        return "awaiting_merge"
+    if slug in ("in_review", "review"):
+        return "in_review"
+    if slug == "blocked":
+        return "blocked"
+    if cat == "todo":
+        return "open"
+    if cat == "in_progress":
+        return "in_progress"
+    if not cat:
+        # Legacy rows whose slug has no Status table entry.
+        if slug in _TASK_BUCKETS:
+            return slug
+        if slug in ("open", "todo", "pending", "backlog", "ready", "new"):
+            return "open"
+    return None  # done / scheduled / unknown — not pending work
+
+
 async def fetch_tasks_by_status(client: httpx.AsyncClient, bearer: str,
                                 email: Optional[str],
-                                org_id: Optional[int] = None) -> Widget:
-    """Count the caller's assigned tasks by status via pulse, forwarding the
-    caller's Bearer. Pulse resolves the user from the token and applies its own
-    scoping — the BFF passes no privileged token and never widens scope."""
+                                org_id: Optional[int] = None,
+                                org_ids: Optional[list] = None) -> Widget:
+    """Count the org's ACTIVE (non-terminal) work in flight by stage via pulse,
+    forwarding the caller's Bearer. Pulse resolves the user from the token and
+    applies its own scoping — the BFF passes no privileged token and never
+    widens scope.
+
+    HIVE-373 operator follow-up (2026-07-10): this is the command center's
+    "work is happening" signal, so it counts ALL work the caller may see in
+    the scoped org(s) — agents do the work autonomously, so the previous
+    assignee_email=<caller> filter hid essentially everything. When no org is
+    selected, fan out across the caller's org memberships and sum.
+    """
     headers = _auth_headers(bearer)
-    params = {"limit": "200", **_scope_params(org_id)}
-    if email:
-        params["assignee_email"] = email
-    try:
-        resp = await client.get(
-            f"{settings.PULSE_API_URL}/api/items/",
-            headers=headers, params=params,
-            timeout=settings.SOURCE_TIMEOUT_SECONDS,
-        )
-    except (httpx.TimeoutException, httpx.TransportError) as exc:
-        logger.warning("tasks_by_status source failed: %s", type(exc).__name__)
-        return Widget.degraded_(data={b: None for b in _TASK_BUCKETS})
-    if resp.status_code == 403:
-        return Widget.unauthorized_()
-    if resp.status_code >= 400:
-        logger.warning("tasks_by_status source HTTP %s", resp.status_code)
-        return Widget.degraded_(data={b: None for b in _TASK_BUCKETS})
-    try:
-        payload = resp.json()
-    except ValueError:
-        return Widget.degraded_()
-    items = payload.get("results", payload) if isinstance(payload, dict) else payload
+    scopes = [org_id] if org_id is not None else list(org_ids or [])[:8]
+    if not scopes:
+        scopes = [None]  # org-less caller: personal member-visible items
+
     counts = {b: 0 for b in _TASK_BUCKETS}
     total = 0
-    for it in items or []:
-        st = str((it or {}).get("status", "")).lower()
-        if st in counts:
-            counts[st] += 1
-        total += 1
+    any_ok = False
+    any_forbidden = False
+    for scope in scopes:
+        params = {"limit": "200", "mode": "task", "is_active": "true",
+                  **_scope_params(scope)}
+        try:
+            resp = await client.get(
+                f"{settings.PULSE_API_URL}/api/items/",
+                headers=headers, params=params,
+                timeout=settings.SOURCE_TIMEOUT_SECONDS,
+            )
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            logger.warning("tasks_by_status source failed: %s", type(exc).__name__)
+            return Widget.degraded_(data={b: None for b in _TASK_BUCKETS})
+        if resp.status_code == 403:
+            any_forbidden = True
+            continue  # skip orgs the token can't read; count the rest
+        if resp.status_code >= 400:
+            logger.warning("tasks_by_status source HTTP %s", resp.status_code)
+            return Widget.degraded_(data={b: None for b in _TASK_BUCKETS})
+        try:
+            payload = resp.json()
+        except ValueError:
+            return Widget.degraded_()
+        items = payload.get("results", payload) if isinstance(payload, dict) else payload
+        any_ok = True
+        for it in items or []:
+            bucket = _task_bucket(it)
+            if bucket:
+                counts[bucket] += 1
+            total += 1
+    if not any_ok:
+        return Widget.unauthorized_() if any_forbidden else Widget.degraded_()
     if total == 0:
         return Widget.empty_()
     return Widget.ok_(data=counts)
