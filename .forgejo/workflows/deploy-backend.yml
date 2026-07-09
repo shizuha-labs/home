@@ -10,9 +10,10 @@ on:
   workflow_dispatch: {}
   push:
     branches: [main, master]
-    paths:
-      - 'backend/**'
-      - '.forgejo/workflows/deploy-backend.yml'
+    # Deploy-status is repo-SHA based: every mapped deployment for this repo
+    # must be stamped with the current commit. Rebuild the lightweight backend
+    # on all pushes so frontend/installer-only commits do not leave a permanent
+    # partial-lag row.
 concurrency:
   group: deploy-shizuha-home-backend-${{ github.ref }}
   cancel-in-progress: true
