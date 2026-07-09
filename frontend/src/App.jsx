@@ -71,7 +71,6 @@ export default function App() {
       <Route path="/forge" element={<ForgePage />} />
       <Route path="/forge/dashboard" element={<ForgeDashboardPage />} />
       <Route path="/forge/pricing" element={<ForgePricingPage />} />
-      <Route path="/forge/signup" element={<ForgePage />} />
       <Route path="/api" element={<ApiPage />} />
       <Route path="/hive" element={<HivePage />} />
       <Route path="/dojo" element={<DojoPage />} />
