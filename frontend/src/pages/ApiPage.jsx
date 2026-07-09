@@ -14,7 +14,7 @@ const CODE_SNIPPET = `curl https://shizuha.com/api/cortex/v1/chat/completions \\
   -H "Authorization: Bearer $SHIZUHA_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
-    "model": "Qwen3.6-27B-BF16",
+    "model": "DeepSeek-V4-Flash",
     "messages": [{"role": "user", "content": "Hello from Shizuha"}]
   }'`
 
