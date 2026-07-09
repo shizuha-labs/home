@@ -6,7 +6,8 @@
 #   1. FROM SOURCE — if this script is in a directory with cli/src/,
 #      it builds from source and installs locally. For developers.
 #
-#   2. FROM GITHUB — downloads a prebuilt binary for your platform.
+#   2. FROM BUILDS — downloads a prebuilt binary for your platform from
+#      https://shizuha.com/builds/releases/latest.json.
 #      For end users: curl -fsSL https://shizuha.com/install.sh | bash
 #
 set -euo pipefail
@@ -271,10 +272,17 @@ install_from_binary() {
     MANIFEST_URL="${BUILDS_URL}/latest.json"
     MANIFEST_FILE="$TMPDIR_DL/latest.json"
     if ! curl_shizuha -fsSL "$MANIFEST_URL" -o "$MANIFEST_FILE" 2>/dev/null; then
-      VERSION="$FALLBACK_VERSION"
-      DOWNLOAD_URL="${BUILDS_URL}/shizuha-${VERSION}-${TARGET}.tar.gz"
-      EXPECTED_SHA256=""
-      warn "Could not fetch latest.json — using fallback v${VERSION}"
+      if [ "${SHIZUHA_ALLOW_INSTALL_FALLBACK:-0}" = "1" ]; then
+        VERSION="$FALLBACK_VERSION"
+        DOWNLOAD_URL="${BUILDS_URL}/shizuha-${VERSION}-${TARGET}.tar.gz"
+        EXPECTED_SHA256=""
+        warn "Could not fetch latest.json — using explicit fallback v${VERSION}"
+      else
+        err "Could not fetch release manifest: $MANIFEST_URL"
+        err "Refusing to silently install fallback v${FALLBACK_VERSION}."
+        err "Set SHIZUHA_ALLOW_INSTALL_FALLBACK=1 only for emergency recovery."
+        exit 1
+      fi
     else
       # Parse per-platform URL and sha256.
       # Extract the block for this target, then grab url/sha256 from it.
@@ -288,10 +296,17 @@ install_from_binary() {
         VERSION=$(basename "$DOWNLOAD_URL" | sed -n "s/^shizuha-\\(.*\\)-${TARGET}\\.tar\\.gz$/\\1/p" || true)
       fi
       if [ -z "$VERSION" ] || [ -z "$DOWNLOAD_URL" ]; then
-        warn "Could not parse latest.json for platform ${TARGET} — using fallback v${FALLBACK_VERSION}"
-        VERSION="$FALLBACK_VERSION"
-        DOWNLOAD_URL="${BUILDS_URL}/shizuha-${VERSION}-${TARGET}.tar.gz"
-        EXPECTED_SHA256=""
+        if [ "${SHIZUHA_ALLOW_INSTALL_FALLBACK:-0}" = "1" ]; then
+          warn "Could not parse latest.json for platform ${TARGET} — using explicit fallback v${FALLBACK_VERSION}"
+          VERSION="$FALLBACK_VERSION"
+          DOWNLOAD_URL="${BUILDS_URL}/shizuha-${VERSION}-${TARGET}.tar.gz"
+          EXPECTED_SHA256=""
+        else
+          err "Could not parse latest.json for platform ${TARGET}: $MANIFEST_URL"
+          err "Refusing to silently install fallback v${FALLBACK_VERSION}."
+          err "Set SHIZUHA_ALLOW_INSTALL_FALLBACK=1 only for emergency recovery."
+          exit 1
+        fi
       else
         ok "Latest version: v${VERSION}"
       fi
@@ -346,7 +361,22 @@ install_from_binary() {
     EXTRACTED_DIR=$(find "$TMPDIR_DL" -maxdepth 1 -mindepth 1 -type d | head -1)
   fi
   if [ -z "$EXTRACTED_DIR" ] || [ ! -d "$EXTRACTED_DIR" ]; then
-    err "Archive format unexpected — no directory found after extraction"
+    # Last resort: flat binary in the archive root (no directory wrapper)
+    FLAT_BIN="$TMPDIR_DL/shizuha"
+    if [ -f "$FLAT_BIN" ]; then
+      chmod +x "$FLAT_BIN"
+      mkdir -p "$SHIZUHA_DIR/bin"
+      cp "$FLAT_BIN" "$SHIZUHA_DIR/bin/shizuha"
+      chmod +x "$SHIZUHA_DIR/bin/shizuha"
+      echo "$VERSION" > "$SHIZUHA_DIR/VERSION"
+      echo "binary" > "$SHIZUHA_DIR/INSTALL_MODE"
+      echo "${ACTUAL_SHA:-${EXPECTED_SHA256:-}}" > "$SHIZUHA_DIR/.installed-sha256"
+      rm -rf "$TMPDIR_DL"
+      trap - EXIT
+      ok "Installed flat binary to $SHIZUHA_DIR/bin/shizuha"
+      return 0
+    fi
+    err "Archive format unexpected — no directory or binary found after extraction"
     exit 1
   fi
 
@@ -354,9 +384,11 @@ install_from_binary() {
   mkdir -p "$SHIZUHA_DIR"
   ( cd "$EXTRACTED_DIR" && tar cf - . ) | ( cd "$SHIZUHA_DIR" && tar xf - )
 
-  # Store version
+  # Store version + artifact sha (read back by `shizuha update` to detect
+  # newer releases even when the semver string is unchanged).
   echo "$VERSION" > "$SHIZUHA_DIR/VERSION"
   echo "binary" > "$SHIZUHA_DIR/INSTALL_MODE"
+  echo "${ACTUAL_SHA:-${EXPECTED_SHA256:-}}" > "$SHIZUHA_DIR/.installed-sha256"
 
   rm -rf "$TMPDIR_DL"
   trap - EXIT
@@ -502,7 +534,7 @@ fi
 
 printf "  ${DIM}Commands:${RESET}\n"
 printf "     ${CYAN}shizuha${RESET}                        # Interactive TUI\n"
-printf "     ${CYAN}shizuha exec -p \"hello\" --model cortex/Qwen3.6-27B${RESET}  # Single prompt\n"
+printf "     ${CYAN}shizuha exec -p \"hello\" --model cortex/Qwen3.6-27B-NVFP4${RESET}  # Single prompt\n"
 printf "     ${CYAN}shizuha up${RESET}                      # Start daemon + dashboard\n"
 printf "     ${CYAN}shizuha down${RESET}                    # Stop daemon\n"
 printf "\n"
