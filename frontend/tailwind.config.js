@@ -16,9 +16,24 @@ export default {
           '60%': { opacity: '1' },
           '100%': { opacity: '1', transform: 'translateY(0)' },
         },
+        marquee: {
+          '0%': { transform: 'translateX(0)' },
+          '100%': { transform: 'translateX(-50%)' },
+        },
+        'flash-ring': {
+          '0%': { boxShadow: '0 0 0 0 rgba(52,211,153,0.7)' },
+          '100%': { boxShadow: '0 0 0 8px rgba(52,211,153,0)' },
+        },
+        'bar-grow': {
+          '0%': { transform: 'scaleX(0)' },
+          '100%': { transform: 'scaleX(1)' },
+        },
       },
       animation: {
         'feed-in': 'feed-in 0.5s ease-out',
+        marquee: 'marquee 45s linear infinite',
+        'flash-ring': 'flash-ring 1.2s ease-out',
+        'bar-grow': 'bar-grow 0.8s ease-out',
       },
       colors: {
         // Brand colors - consistent across light/dark

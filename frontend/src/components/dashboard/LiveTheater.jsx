@@ -1,21 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowRight, CheckCircle2, GitPullRequest, MessageSquare,
-  Plus, RefreshCw, UserPlus, Zap,
+  Plus, Radio, RefreshCw, UserPlus, Zap,
 } from 'lucide-react'
 import { cn } from '../../utils/cn'
 
 /**
- * HIVE-602 live theater — the autonomous organization, visibly working.
+ * HIVE-602 live theater — the autonomous organization as a live game HUD.
  *
- * Three moving bands fed by /api/home/activity (8s poll):
- *   1. Agents at work — every running agent as a live entity.
- *   2. Live feed — comments / transitions / assignments as they land,
- *      new events slide in.
- *   3. Projects moving — which projects the events are landing in.
- *
- * Everything here must MOVE: this page's screen recording is the product's
- * primary selling asset (operator directive 2026-07-10).
+ * Bands, all moving (operator directive 2026-07-10: this page's screen
+ * recording is the product's primary selling asset — nothing static):
+ *   0. Headline ticker — the latest event, cycling.
+ *   1. Agents marquee — every working agent scrolls by, each showing WHAT
+ *      it's doing right now (joined live from the feed); a fresh event
+ *      flashes its chip.
+ *   2. LIVE feed — comments / transitions / assignments sliding in.
+ *   3. Projects moving — animated relative-activity bars.
  */
 
 const EVENT_ICONS = {
@@ -53,6 +53,19 @@ function humanStatus(slug) {
   return String(slug || '').replace(/[_-]+/g, ' ')
 }
 
+function verbFor(ev) {
+  switch (ev?.type) {
+    case 'comment': return 'discussing'
+    case 'status_changed': return `moving to ${humanStatus(ev.new)}`
+    case 'assigned': return 'picking up'
+    case 'created': return 'filing'
+    case 'completed': return 'shipping'
+    case 'reopened': return 'reopening'
+    case 'pr_status_changed': return 'landing PR on'
+    default: return 'working'
+  }
+}
+
 function eventPhrase(ev) {
   switch (ev.type) {
     case 'comment':
@@ -80,31 +93,73 @@ function eventPhrase(ev) {
   }
 }
 
-function AgentChip({ agent }) {
+function LiveBadge() {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-red-500/10 px-2 py-0.5 ring-1 ring-red-500/30">
+      <span className="relative flex h-1.5 w-1.5">
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75" />
+        <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-red-500" />
+      </span>
+      <span className="text-[10px] font-bold tracking-widest text-red-500">LIVE</span>
+    </span>
+  )
+}
+
+function Ticker({ events, now }) {
+  const [idx, setIdx] = useState(0)
+  const pool = events.slice(0, 8)
+  useEffect(() => {
+    if (pool.length < 2) return undefined
+    const id = setInterval(() => setIdx((i) => (i + 1) % pool.length), 5000)
+    return () => clearInterval(id)
+  }, [pool.length])
+  const ev = pool[idx % Math.max(pool.length, 1)]
+  if (!ev) return null
+  return (
+    <div className="mb-3 flex items-center justify-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+      <LiveBadge />
+      <span key={eventKey(ev)} className="animate-feed-in truncate">
+        <span className="font-semibold text-gray-700 dark:text-gray-200">{actorName(ev.actor_email)}</span>{' '}
+        {verbFor(ev)}{' '}
+        <span className="font-mono text-brand-600 dark:text-brand-400">{ev.item_key}</span>
+        <span className="text-gray-400 dark:text-gray-500"> · {timeAgo(ev.at, now)}</span>
+      </span>
+    </div>
+  )
+}
+
+function AgentCard({ agent, doing, flash }) {
   const initials = (agent.name || agent.username || '?').slice(0, 2)
-  const working = agent.status === 'running'
   return (
     <div
       title={`${agent.role || 'Agent'} · ${agent.model || ''}`}
       className={cn(
-        'flex shrink-0 items-center gap-2 rounded-full py-1 pl-1 pr-3 ring-1 backdrop-blur-sm transition-all',
-        working
-          ? 'bg-white/80 ring-emerald-300/60 dark:bg-gray-900/70 dark:ring-emerald-700/50'
-          : 'bg-white/40 ring-gray-200/50 opacity-60 dark:bg-gray-900/40 dark:ring-gray-700/40',
+        'flex w-44 shrink-0 items-center gap-2.5 rounded-xl bg-white/80 px-2.5 py-2 ring-1 ring-gray-200/70 backdrop-blur-sm dark:bg-gray-900/70 dark:ring-gray-700/50',
+        flash && 'animate-flash-ring ring-emerald-400/70',
       )}
     >
-      <span className="relative flex h-6 w-6 items-center justify-center rounded-full bg-brand-100 text-[10px] font-bold uppercase text-brand-700 dark:bg-brand-900/60 dark:text-brand-300">
+      <span className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brand-500/90 to-purple-500/90 text-[11px] font-bold uppercase text-white shadow-sm">
         {initials}
-        {working && (
-          <span className="absolute -right-0.5 -top-0.5 flex h-2 w-2">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-          </span>
-        )}
+        <span className="absolute -right-1 -top-1 flex h-2.5 w-2.5">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+          <span className="relative inline-flex h-2.5 w-2.5 rounded-full border-2 border-white bg-emerald-500 dark:border-gray-900" />
+        </span>
       </span>
-      <span className="text-xs font-medium text-gray-700 dark:text-gray-200">{agent.name}</span>
-      <span className="hidden text-[10px] text-gray-400 dark:text-gray-500 sm:inline">
-        {(agent.teams || [])[0] || agent.role}
+      <span className="min-w-0">
+        <span className="block truncate text-xs font-semibold text-gray-800 dark:text-gray-100">
+          {agent.name}
+          <span className="ml-1 font-normal text-gray-400 dark:text-gray-500">{(agent.teams || [])[0]}</span>
+        </span>
+        <span className="block truncate text-[10px] text-gray-500 dark:text-gray-400">
+          {doing ? (
+            <>
+              {verbFor(doing)}{' '}
+              <span className="font-mono text-brand-600 dark:text-brand-400">{doing.item_key}</span>
+            </>
+          ) : (
+            <span className="italic">on the clock</span>
+          )}
+        </span>
       </span>
     </div>
   )
@@ -115,7 +170,12 @@ function FeedRow({ ev, isNew, now }) {
   return (
     <div
       className={cn(
-        'flex items-start gap-3 rounded-xl px-3 py-2 transition-colors hover:bg-white/70 dark:hover:bg-gray-800/50',
+        'flex items-start gap-3 rounded-xl border-l-2 px-3 py-2 transition-colors hover:bg-white/70 dark:hover:bg-gray-800/50',
+        ev.type === 'completed'
+          ? 'border-emerald-400/70'
+          : ev.type === 'comment'
+            ? 'border-brand-400/60'
+            : 'border-transparent',
         isNew && 'animate-feed-in',
       )}
     >
@@ -154,7 +214,6 @@ export default function LiveTheater({ feed, agents }) {
   const seenRef = useRef(new Set())
   const [newKeys, setNewKeys] = useState(() => new Set())
 
-  // Tick relative timestamps.
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 30000)
     return () => clearInterval(id)
@@ -169,7 +228,6 @@ export default function LiveTheater({ feed, agents }) {
     [agents],
   )
 
-  // Mark unseen events so they animate in exactly once.
   useEffect(() => {
     if (!events.length) return
     const seen = seenRef.current
@@ -192,6 +250,23 @@ export default function LiveTheater({ feed, agents }) {
   const hourAgo = now - 3600_000
   const eventsLastHour = events.filter((e) => new Date(e.at).getTime() >= hourAgo).length
 
+  // Join each working agent to its latest event → the "doing" line.
+  const doingByEmail = useMemo(() => {
+    const m = new Map()
+    for (const ev of events) {
+      const e = String(ev.actor_email || '').toLowerCase()
+      if (e && !m.has(e)) m.set(e, ev)
+    }
+    return m
+  }, [events])
+  const freshActors = useMemo(() => {
+    const s = new Set()
+    for (const ev of events) {
+      if (newKeys.has(eventKey(ev))) s.add(String(ev.actor_email || '').toLowerCase())
+    }
+    return s
+  }, [events, newKeys])
+
   const projects = useMemo(() => {
     const counts = new Map()
     for (const ev of events) {
@@ -200,13 +275,24 @@ export default function LiveTheater({ feed, agents }) {
     }
     return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6)
   }, [events])
+  const maxProject = projects.length ? projects[0][1] : 1
 
   if (!events.length && !working.length) return null
 
+  // Sort working agents: those with a live "doing" first.
+  const marqueeAgents = [...working].sort((a, b) => {
+    const da = doingByEmail.has(String(a.email).toLowerCase()) ? 0 : 1
+    const db = doingByEmail.has(String(b.email).toLowerCase()) ? 0 : 1
+    return da - db || String(a.name).localeCompare(String(b.name))
+  })
+
   return (
-    <div className="mt-8 text-left">
-      {/* Band 1 — agents at work */}
-      {working.length > 0 && (
+    <div className="mt-6 text-left">
+      <Ticker events={events} now={now} />
+
+      {/* Band 1 — agents marquee: the fleet scrolls by, each showing what
+          it's doing right now. Pauses on hover. */}
+      {marqueeAgents.length > 0 && (
         <div className="mb-4">
           <div className="mb-2 flex items-center gap-2">
             <span className="relative flex h-2 w-2">
@@ -214,7 +300,7 @@ export default function LiveTheater({ feed, agents }) {
               <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
             </span>
             <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-              {working.length} agents working now
+              {marqueeAgents.length} agents working now
             </span>
             {eventsLastHour > 0 && (
               <span className="text-xs text-gray-400 dark:text-gray-500">
@@ -222,25 +308,44 @@ export default function LiveTheater({ feed, agents }) {
               </span>
             )}
           </div>
-          <div className="flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {working.map((a) => (
-              <AgentChip key={a.email || a.username} agent={a} />
-            ))}
+          <div className="group relative overflow-hidden">
+            <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-8 bg-gradient-to-r from-white/80 to-transparent dark:from-gray-950/80" />
+            <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-8 bg-gradient-to-l from-white/80 to-transparent dark:from-gray-950/80" />
+            <div className="flex w-max animate-marquee gap-2 group-hover:[animation-play-state:paused]">
+              {[...marqueeAgents, ...marqueeAgents].map((a, i) => {
+                const email = String(a.email).toLowerCase()
+                return (
+                  <AgentCard
+                    key={`${email}-${i}`}
+                    agent={a}
+                    doing={doingByEmail.get(email)}
+                    flash={freshActors.has(email)}
+                  />
+                )
+              })}
+            </div>
           </div>
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_180px]">
+      <div className="grid gap-4 lg:grid-cols-[1fr_190px]">
         {/* Band 2 — the live feed */}
         <div className="rounded-2xl bg-white/60 p-2 ring-1 ring-gray-200/60 backdrop-blur-sm dark:bg-gray-900/50 dark:ring-gray-700/40">
-          <div className="max-h-80 space-y-0.5 overflow-y-auto">
-            {events.slice(0, 30).map((ev) => (
-              <FeedRow key={eventKey(ev)} ev={ev} isNew={newKeys.has(eventKey(ev))} now={now} />
-            ))}
-          </div>
+          {events.length > 0 ? (
+            <div className="max-h-80 space-y-0.5 overflow-y-auto">
+              {events.slice(0, 30).map((ev) => (
+                <FeedRow key={eventKey(ev)} ev={ev} isNew={newKeys.has(eventKey(ev))} now={now} />
+              ))}
+            </div>
+          ) : (
+            <div className="flex h-24 items-center justify-center gap-2 text-xs text-gray-400 dark:text-gray-500">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-brand-400" />
+              Tuning in — the first events land in seconds…
+            </div>
+          )}
         </div>
 
-        {/* Band 3 — projects moving */}
+        {/* Band 3 — projects moving, with relative-activity bars */}
         {projects.length > 0 && (
           <div className="hidden flex-col gap-2 lg:flex">
             <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
@@ -249,15 +354,24 @@ export default function LiveTheater({ feed, agents }) {
             {projects.map(([proj, count]) => (
               <div
                 key={proj}
-                className="flex items-center justify-between rounded-xl bg-white/60 px-3 py-2 ring-1 ring-gray-200/60 backdrop-blur-sm dark:bg-gray-900/50 dark:ring-gray-700/40"
+                className="rounded-xl bg-white/60 px-3 py-2 ring-1 ring-gray-200/60 backdrop-blur-sm dark:bg-gray-900/50 dark:ring-gray-700/40"
               >
-                <span className="font-mono text-xs font-semibold text-gray-700 dark:text-gray-200">{proj}</span>
-                <span
-                  key={`${proj}-${count}`}
-                  className="animate-feed-in rounded-full bg-brand-100 px-2 py-0.5 text-[10px] font-bold tabular-nums text-brand-700 dark:bg-brand-900/60 dark:text-brand-300"
-                >
-                  {count}
-                </span>
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-xs font-semibold text-gray-700 dark:text-gray-200">{proj}</span>
+                  <span
+                    key={`${proj}-${count}`}
+                    className="animate-feed-in text-[10px] font-bold tabular-nums text-brand-600 dark:text-brand-400"
+                  >
+                    {count}
+                  </span>
+                </div>
+                <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
+                  <div
+                    key={`${proj}-bar-${count}`}
+                    className="h-full origin-left animate-bar-grow rounded-full bg-gradient-to-r from-brand-500 to-purple-500"
+                    style={{ width: `${Math.max(12, Math.round((count / maxProject) * 100))}%` }}
+                  />
+                </div>
               </div>
             ))}
           </div>

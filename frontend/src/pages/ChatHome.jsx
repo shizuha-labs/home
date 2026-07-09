@@ -549,6 +549,11 @@ function ChatHomeInner() {
             </div>
           </div>
 
+          {/* HIVE-602: the live theater — agents visibly working, events
+              streaming in, projects moving. The show. */}
+          <LiveTheater feed={feedWidget} agents={agentsWidget} />
+
+
           {/* Suggestion chips */}
           <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
             {SUGGESTION_CHIPS.map((chip) => (
@@ -562,10 +567,6 @@ function ChatHomeInner() {
               </button>
             ))}
           </div>
-
-          {/* HIVE-602: the live theater — agents visibly working, events
-              streaming in, projects moving. The show. */}
-          <LiveTheater feed={feedWidget} agents={agentsWidget} />
 
           {/* HIVE-376: command-center dashboard — a concise, live, access-scoped
               view of the user's orgs / agents / work / money / alerts, hydrating
