@@ -187,7 +187,7 @@ export default function CommandCenterDashboard({ orgId }) {
           }} empty={<Muted>Select an organization to view financials.</Muted>} />
         </WidgetShell>
 
-        {(alerts.status !== 'ok' || (Array.isArray(alerts.data) && alerts.data.length > 0)) && (
+        {!(alerts.status === 'empty' || (alerts.status === 'ok' && (!Array.isArray(alerts.data) || alerts.data.length === 0))) && (
         <WidgetShell title="Attention" icon={Bell} status={alerts.status}>
           <ByStatus status={alerts.status} render={() => {
             const items = Array.isArray(alerts.data) ? alerts.data : []
