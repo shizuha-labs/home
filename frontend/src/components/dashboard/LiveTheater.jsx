@@ -49,6 +49,10 @@ function eventKey(ev) {
   return `${ev.at}|${ev.type}|${ev.item_key}|${ev.actor_email || ''}`
 }
 
+function cleanExcerpt(text) {
+  return String(text || '').replace(/[*_`#>]+/g, '').replace(/\s+/g, ' ').trim()
+}
+
 function humanStatus(slug) {
   return String(slug || '').replace(/[_-]+/g, ' ')
 }
@@ -69,7 +73,7 @@ function verbFor(ev) {
 function eventPhrase(ev) {
   switch (ev.type) {
     case 'comment':
-      return ev.excerpt || 'commented'
+      return cleanExcerpt(ev.excerpt) || 'commented'
     case 'status_changed':
       return (
         <span className="inline-flex items-center gap-1">
@@ -200,7 +204,7 @@ function FeedRow({ ev, isNew, now }) {
             <span className="text-gray-400 dark:text-gray-500"> · {ev.item_title}</span>
           ) : null}
         </p>
-        <p className="mt-0.5 line-clamp-2 text-xs text-gray-600 dark:text-gray-300">{eventPhrase(ev)}</p>
+        <p className="mt-0.5 line-clamp-2 break-words text-xs text-gray-600 dark:text-gray-300">{eventPhrase(ev)}</p>
       </div>
       <span className="mt-0.5 shrink-0 text-[10px] tabular-nums text-gray-400 dark:text-gray-500">
         {timeAgo(ev.at, now)}
@@ -328,9 +332,9 @@ export default function LiveTheater({ feed, agents }) {
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_190px]">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_190px]">
         {/* Band 2 — the live feed */}
-        <div className="rounded-2xl bg-white/60 p-2 ring-1 ring-gray-200/60 backdrop-blur-sm dark:bg-gray-900/50 dark:ring-gray-700/40">
+        <div className="min-w-0 overflow-hidden rounded-2xl bg-white/60 p-2 ring-1 ring-gray-200/60 backdrop-blur-sm dark:bg-gray-900/50 dark:ring-gray-700/40">
           {events.length > 0 ? (
             <div className="max-h-80 space-y-0.5 overflow-y-auto">
               {events.slice(0, 30).map((ev) => (
