@@ -90,6 +90,14 @@ async def create_audit_lead(payload: AuditLeadRequest, request: Request) -> Audi
     )
 
 
+def _first_org(caller: Caller) -> Optional[int]:
+    """Deterministic default org (lowest id) for widgets that need one."""
+    try:
+        return sorted(caller.memberships.keys())[0] if caller.memberships else None
+    except Exception:
+        return None
+
+
 @app.get("/api/home/summary", response_model=HomeSummaryV1)
 async def home_summary(
     caller: Caller = Depends(verify_caller),
@@ -120,8 +128,14 @@ async def home_summary(
                 lambda: fetch_alerts(client, caller.bearer, scope_org),
             ),
             widget_cache.get_or_fetch(
-                cache_key("financial_snapshot", caller.user_id, scope_org),
-                lambda: fetch_financial_snapshot(client, caller.bearer, scope_org),
+                # Books requires a concrete org; with none selected, default to
+                # the caller's first org so the panel is never a dead
+                # "select an organization" tile (HIVE-602: no inert panels).
+                cache_key("financial_snapshot", caller.user_id,
+                          scope_org if scope_org is not None else _first_org(caller)),
+                lambda: fetch_financial_snapshot(
+                    client, caller.bearer,
+                    scope_org if scope_org is not None else _first_org(caller)),
                 cache_fresh=False,
             ),
             widget_cache.get_or_fetch(
@@ -129,6 +143,11 @@ async def home_summary(
                 lambda: fetch_recent_conversations(client, caller.bearer, scope_org),
             ),
         )
+
+    # Tag auto-scoped financials with the org they describe so the UI can
+    # caption them (the caller didn't pick this org explicitly).
+    if scope_org is None and isinstance(financial_widget.data, dict):
+        financial_widget.data.setdefault("org_id", _first_org(caller))
 
     return HomeSummaryV1(
         generated_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),

@@ -187,14 +187,20 @@ export default function CommandCenterDashboard({ orgId }) {
           status={money.status}
           action={money.status === 'ok' ? <button onClick={() => navigate(DEEP_LINKS.books)} className="text-[11px] text-brand-500 hover:underline">Books</button> : null}
         >
-          <ByStatus status={money.status} unauthorized="Financials not shared with you." render={() => (
-            <div>
-              <div className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                {formatMoney(money.data?.cash, money.data?.currency)}
+          <ByStatus status={money.status} unauthorized="Financials not shared with you." render={() => {
+            const finOrg = money.data?.org_id != null
+              ? (orgs || []).find((o) => String(o.id) === String(money.data.org_id))
+              : null
+            return (
+              <div>
+                <div className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                  {formatMoney(money.data?.cash, money.data?.currency)}
+                </div>
+                <Muted>Net this period: {formatMoney(money.data?.period_net, money.data?.currency)}</Muted>
+                {finOrg?.name ? <Muted>{finOrg.name}</Muted> : null}
               </div>
-              <Muted>Net this period: {formatMoney(money.data?.period_net, money.data?.currency)}</Muted>
-            </div>
-          )} empty={<Muted>Select an organization to view financials.</Muted>} />
+            )
+          }} empty={<Muted>Select an organization to view financials.</Muted>} />
         </WidgetShell>
 
         <WidgetShell title="Attention" icon={Bell} status={alerts.status}>
