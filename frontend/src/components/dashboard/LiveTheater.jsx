@@ -315,21 +315,26 @@ export default function LiveTheater({ feed, agents, onPeekAgent, onPeekTask }) {
 
   if (!events.length && !working.length) return null
 
-  // Sort working agents: those with a live "doing" first.
-  const marqueeAgents = [...working].sort((a, b) => {
-    const da = doingByEmail.has(String(a.email).toLowerCase()) ? 0 : 1
-    const db = doingByEmail.has(String(b.email).toLowerCase()) ? 0 : 1
-    return da - db || String(a.name).localeCompare(String(b.name))
-  })
+  // The spotlight: only agents whose latest event is recent enough to matter,
+  // newest action first.
+  const spotlight = working
+    .filter((a) => doingByEmail.has(String(a.email).toLowerCase()))
+    .sort((a, b) => {
+      const ta = new Date(doingByEmail.get(String(a.email).toLowerCase())?.at || 0).getTime()
+      const tb = new Date(doingByEmail.get(String(b.email).toLowerCase())?.at || 0).getTime()
+      return tb - ta
+    })
 
   return (
     <div className="mt-6 text-left">
       <Ticker events={events} now={now} onPeekTask={onPeekTask} />
       <AgentHoverCard hover={hover} />
 
-      {/* Band 1 — agents marquee: the fleet scrolls by, each showing what
-          it's doing right now. Pauses on hover. */}
-      {marqueeAgents.length > 0 && (
+      {/* Band 1 — the spotlight: only agents with a LIVE recent event earn a
+          card (operator 2026-07-10: idle-but-running agents scrolling by is
+          bloat). Cards are ordered by their latest event and flash when their
+          agent acts; everyone else is just a count. */}
+      {working.length > 0 && (
         <div className="mb-4">
           <div className="mb-2 flex items-center gap-2">
             <span className="relative flex h-2 w-2">
@@ -337,23 +342,26 @@ export default function LiveTheater({ feed, agents, onPeekAgent, onPeekTask }) {
               <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
             </span>
             <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-              {marqueeAgents.length} agents working now
+              {spotlight.length > 0 ? `${spotlight.length} agents in the action` : `${working.length} agents on the clock`}
             </span>
             {eventsLastHour > 0 && (
               <span className="text-xs text-gray-400 dark:text-gray-500">
                 · {eventsLastHour} updates in the last hour
               </span>
             )}
+            {spotlight.length > 0 && working.length > spotlight.length && (
+              <span className="ml-auto text-[10px] text-gray-400 dark:text-gray-500">
+                +{working.length - spotlight.length} more on the clock
+              </span>
+            )}
           </div>
-          <div className="group relative overflow-hidden">
-            <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-8 bg-gradient-to-r from-white/80 to-transparent dark:from-gray-950/80" />
-            <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-8 bg-gradient-to-l from-white/80 to-transparent dark:from-gray-950/80" />
-            <div className="flex w-max animate-marquee gap-2 group-hover:[animation-play-state:paused]">
-              {[...marqueeAgents, ...marqueeAgents].map((a, i) => {
+          {spotlight.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {spotlight.slice(0, 10).map((a) => {
                 const email = String(a.email).toLowerCase()
                 return (
                   <AgentCard
-                    key={`${email}-${i}`}
+                    key={email}
                     agent={a}
                     doing={doingByEmail.get(email)}
                     flash={freshActors.has(email)}
@@ -363,7 +371,7 @@ export default function LiveTheater({ feed, agents, onPeekAgent, onPeekTask }) {
                 )
               })}
             </div>
-          </div>
+          )}
         </div>
       )}
 
