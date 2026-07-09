@@ -25,12 +25,13 @@ from fastapi.responses import JSONResponse
 from .auth import Caller, resolve_scope_org, verify_caller
 from .cache import cache_key, widget_cache
 from .clients import (
-    fetch_agent_activity, fetch_alerts, fetch_financial_snapshot,
-    fetch_org_refs, fetch_recent_conversations, fetch_tasks_by_status,
+    fetch_agent_activity, fetch_agents_live, fetch_alerts,
+    fetch_financial_snapshot, fetch_live_feed, fetch_org_refs,
+    fetch_recent_conversations, fetch_tasks_by_status,
 )
 from .audit_leads import AuditLeadRequest, AuditLeadResponse, persist_audit_lead
 from .config import settings
-from .schema import HomeSummaryV1, SUMMARY_VERSION
+from .schema import HomeActivityV1, HomeSummaryV1, SUMMARY_VERSION
 
 app = FastAPI(title="Shizuha Home BFF", version=str(SUMMARY_VERSION))
 
@@ -140,4 +141,49 @@ async def home_summary(
             "financial_snapshot": financial_widget,
             "recent_conversations": conversations_widget,
         },
+    )
+
+
+@app.get("/api/home/activity", response_model=HomeActivityV1)
+async def home_activity(
+    caller: Caller = Depends(verify_caller),
+    org_id: Optional[int] = Query(default=None),
+    since: Optional[str] = Query(default=None, max_length=40),
+) -> HomeActivityV1:
+    """HIVE-602 live theater: merged Pulse event feed + fleet-as-live-entities.
+
+    Polled fast (client ~8s) so it is deliberately NOT served from the fresh
+    widget cache — every call fetches live, but failures still fall back to
+    the stale cache so the theater degrades to recent history, never a blank.
+    Same tenant model as /summary: verified-token scope, forwarded Bearer.
+    """
+    scope_org = resolve_scope_org(caller, org_id)
+    feed_orgs = [scope_org] if scope_org is not None else sorted(caller.memberships.keys())
+
+    async with httpx.AsyncClient() as client:
+        if since:
+            # Delta polls bypass the cache both ways: a delta must not be
+            # served stale, and a tiny delta result must not poison the
+            # full-feed stale fallback.
+            feed_coro = fetch_live_feed(client, caller.bearer,
+                                        org_ids=feed_orgs, since=since)
+        else:
+            feed_coro = widget_cache.get_or_fetch(
+                cache_key("live_feed", caller.user_id, scope_org),
+                lambda: fetch_live_feed(client, caller.bearer, org_ids=feed_orgs),
+                cache_fresh=False,
+            )
+        feed_widget, agents_widget = await asyncio.gather(
+            feed_coro,
+            widget_cache.get_or_fetch(
+                cache_key("agents_live", caller.user_id, scope_org),
+                lambda: fetch_agents_live(client, caller.bearer),
+                cache_fresh=False,
+            ),
+        )
+
+    return HomeActivityV1(
+        generated_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        org_id=scope_org,
+        widgets={"feed": feed_widget, "agents": agents_widget},
     )

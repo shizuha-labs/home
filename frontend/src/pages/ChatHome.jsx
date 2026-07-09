@@ -4,8 +4,10 @@ import { useAuth } from '../contexts/AuthContext'
 import { ConnectChatProvider, ChatLayout, MessageList, MessageInput, Avatar, NewChatModal, useConnectChat } from '@shizuha/chat'
 import { SHIZUHA_APPS, useEnabledServices } from '@shizuha/ui'
 import CommandCenterDashboard from '../components/dashboard/CommandCenterDashboard'
+import LiveTheater from '../components/dashboard/LiveTheater'
 import CommandPalette from '../components/assistant/CommandPalette'
 import { useHomeSummary } from '../hooks/useHomeSummary'
+import { useHomeActivity } from '../hooks/useHomeActivity'
 import { getAccessToken, handleUnauthorized } from '../utils/auth'
 
 function getAuthToken() {
@@ -96,6 +98,14 @@ function ChatHomeInner() {
   const textareaRef = useRef(null)
   const { summary } = useHomeSummary()
   const orgs = Array.isArray(summary?.orgs) ? summary.orgs : null
+  // HIVE-602 live theater: fast-poll the org's activity so the home MOVES.
+  const { widget: activityWidget } = useHomeActivity()
+  const feedWidget = activityWidget('feed')
+  const agentsWidget = activityWidget('agents')
+  const liveAgents =
+    agentsWidget.status === 'ok' || agentsWidget.status === 'stale'
+      ? (agentsWidget.data || []).filter((a) => a.status === 'running')
+      : []
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -451,15 +461,16 @@ function ChatHomeInner() {
         </div>
       </div>
 
-      {/* Main — same visual language as Hero */}
-      <div className="flex-1 flex flex-col items-center justify-center relative overflow-hidden">
+      {/* Main — same visual language as Hero. Scrolls: the live theater below
+          grows with the org's activity (HIVE-602). */}
+      <div className="flex-1 flex flex-col items-center justify-start relative overflow-y-auto">
         {/* Background — matches gradient-hero-light exactly */}
         <div className="absolute inset-0 bg-gradient-to-br from-brand-50 via-white to-purple-50 dark:from-gray-900 dark:via-gray-950 dark:to-purple-950 pointer-events-none" />
         {/* Decorative orbs — same as Hero */}
         <div className="absolute top-20 left-10 w-72 h-72 bg-brand-400/20 rounded-full blur-3xl pointer-events-none" />
         <div className="absolute bottom-20 right-10 w-96 h-96 bg-purple-400/20 rounded-full blur-3xl pointer-events-none" />
 
-        <div className="relative z-10 w-full max-w-2xl px-6 pb-20">
+        <div className="relative z-10 w-full max-w-3xl px-6 pt-12 pb-20">
           {/* Brand — same treatment as Hero */}
           <div className="text-center mb-4">
             <h1 className="text-4xl md:text-5xl font-light tracking-tight">
@@ -468,20 +479,20 @@ function ChatHomeInner() {
             </h1>
           </div>
 
-          {/* Greeting — personalized */}
-          <p className="text-lg text-gray-600 dark:text-gray-400 text-center mb-3">
-            {getGreeting()}{firstName ? `, ${firstName}` : ''}. How can I help?
+          {/* Greeting — the org is WORKING; say so with live numbers, not
+              chatbot copy (operator directive 2026-07-10). */}
+          <p className="text-lg text-gray-600 dark:text-gray-400 text-center mb-2">
+            {getGreeting()}{firstName ? `, ${firstName}` : ''}.
           </p>
-
-          <div className="flex justify-center mb-6">
-            <button
-              onClick={() => setShowCommandPalette(true)}
-              className="inline-flex items-center gap-2 rounded-full border border-gray-200/70 bg-white/70 px-3 py-1.5 text-xs font-medium text-gray-500 shadow-sm backdrop-blur-sm transition-colors hover:border-brand-300 hover:text-brand-600 dark:border-gray-800/70 dark:bg-gray-900/50 dark:text-gray-400 dark:hover:border-brand-700 dark:hover:text-brand-300"
-            >
-              <span>Open command palette</span>
-              <kbd className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] dark:bg-gray-800">⌘K</kbd>
-            </button>
-          </div>
+          {liveAgents.length > 0 && (
+            <p className="flex items-center justify-center gap-2 text-sm text-gray-500 dark:text-gray-400 mb-6">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+              </span>
+              Your organization is working — {liveAgents.length} agents on the job right now.
+            </p>
+          )}
 
           {orgs && orgs.length === 0 && (
             <div className="mb-6 rounded-2xl border border-brand-200/70 bg-white/75 p-4 text-left shadow-lg shadow-brand-900/5 backdrop-blur-sm dark:border-brand-900/60 dark:bg-gray-900/60">
@@ -519,6 +530,13 @@ function ChatHomeInner() {
                   </span>
                 )}
                 <button
+                  onClick={() => setShowCommandPalette(true)}
+                  title="Open command palette"
+                  className="hidden sm:inline-flex items-center rounded-lg px-1.5 py-1 text-[10px] font-medium text-gray-400 ring-1 ring-gray-200 transition-colors hover:text-brand-600 hover:ring-brand-300 dark:text-gray-500 dark:ring-gray-700 dark:hover:text-brand-400"
+                >
+                  ⌘K
+                </button>
+                <button
                   onClick={handleSubmit}
                   disabled={!inputValue.trim() || isSending}
                   className="w-9 h-9 rounded-xl bg-brand-600 hover:bg-brand-700 text-white flex items-center justify-center disabled:opacity-25 disabled:cursor-not-allowed transition-colors shadow-sm"
@@ -545,18 +563,17 @@ function ChatHomeInner() {
             ))}
           </div>
 
+          {/* HIVE-602: the live theater — agents visibly working, events
+              streaming in, projects moving. The show. */}
+          <LiveTheater feed={feedWidget} agents={agentsWidget} />
+
           {/* HIVE-376: command-center dashboard — a concise, live, access-scoped
               view of the user's orgs / agents / work / money / alerts, hydrating
               independently from the HIVE-375 aggregation API. Chat stays the heart
               above; this is the "everything at a glance" surface below it. */}
-          <div className="mt-10">
+          <div className="mt-8">
             <CommandCenterDashboard />
           </div>
-
-          {/* Trust line — same as Hero */}
-          <p className="text-center text-xs text-gray-400 dark:text-gray-600 mt-8">
-            Self-hosted. Open MCP servers. Your data stays on your infrastructure.
-          </p>
         </div>
       </div>
 

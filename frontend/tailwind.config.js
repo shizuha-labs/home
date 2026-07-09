@@ -10,6 +10,16 @@ export default {
   darkMode: 'class',
   theme: {
     extend: {
+      keyframes: {
+        'feed-in': {
+          '0%': { opacity: '0', transform: 'translateY(-6px)' },
+          '60%': { opacity: '1' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+      },
+      animation: {
+        'feed-in': 'feed-in 0.5s ease-out',
+      },
       colors: {
         // Brand colors - consistent across light/dark
         brand: {

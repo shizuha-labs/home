@@ -247,6 +247,101 @@ async def fetch_agent_activity(client: httpx.AsyncClient, bearer: str,
     return Widget.ok_(data={"active": active, "error": error, "stopped": stopped, "total": total})
 
 
+async def fetch_live_feed(client: httpx.AsyncClient, bearer: str,
+                          org_ids: Optional[list] = None,
+                          since: Optional[str] = None,
+                          limit: int = 60) -> Widget:
+    """HIVE-602: merged newest-first event stream (Pulse activity + comments)
+    across the caller's orgs — the home theater's heartbeat. Fan out per org to
+    Pulse `/api/items/activity-feed/` (HIVE-603 endpoint), merge, cap."""
+    headers = _auth_headers(bearer)
+    scopes = list(org_ids or [])[:8] or [None]
+    events: list = []
+    any_ok = False
+    for scope in scopes:
+        params = {"limit": str(min(limit, 100)), **_scope_params(scope)}
+        if since:
+            params["since"] = since
+        try:
+            resp = await client.get(
+                f"{settings.PULSE_API_URL}/api/items/activity-feed/",
+                headers=headers, params=params,
+                timeout=settings.SOURCE_TIMEOUT_SECONDS,
+            )
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            logger.warning("live_feed source failed: %s", type(exc).__name__)
+            return Widget.degraded_()
+        if resp.status_code in (401, 403):
+            continue
+        if resp.status_code >= 400:
+            logger.warning("live_feed source HTTP %s", resp.status_code)
+            return Widget.degraded_()
+        try:
+            payload = resp.json()
+        except ValueError:
+            return Widget.degraded_()
+        any_ok = True
+        for ev in (payload.get("results") or []):
+            if isinstance(ev, dict):
+                ev["org_id"] = scope
+                events.append(ev)
+    if not any_ok:
+        return Widget.unauthorized_()
+    events.sort(key=lambda e: str(e.get("at") or ""), reverse=True)
+    events = events[:limit]
+    if not events:
+        return Widget.empty_()
+    return Widget.ok_(data=events)
+
+
+async def fetch_agents_live(client: httpx.AsyncClient, bearer: str) -> Widget:
+    """HIVE-602: the fleet as live entities for the agents-at-work strip —
+    name, role, teams, model, state, freshness. Same authz model as
+    fetch_agent_activity (forwarded bearer; 403 → unauthorized widget)."""
+    try:
+        resp = await client.get(
+            f"{settings.HIVE_API_URL}/v1/fleet/agents/",
+            headers=_auth_headers(bearer),
+            params={"page_size": "250"},
+            timeout=settings.SOURCE_TIMEOUT_SECONDS,
+        )
+    except (httpx.TimeoutException, httpx.TransportError) as exc:
+        logger.warning("agents_live source failed: %s", type(exc).__name__)
+        return Widget.degraded_()
+    if resp.status_code in (401, 403):
+        return Widget.unauthorized_()
+    if resp.status_code >= 400:
+        logger.warning("agents_live source HTTP %s", resp.status_code)
+        return Widget.degraded_()
+    try:
+        payload = resp.json()
+    except ValueError:
+        return Widget.degraded_()
+    rows = payload.get("results", payload.get("agents", payload)) if isinstance(payload, dict) else payload
+    agents = []
+    for a in rows or []:
+        if not isinstance(a, dict):
+            continue
+        status = _widget_count_status(a)
+        agents.append({
+            "name": a.get("display_name") or a.get("agent_username") or "",
+            "username": a.get("agent_username") or "",
+            "email": a.get("email") or "",
+            "role": a.get("role") or a.get("display_title") or "",
+            "teams": a.get("team_names") or [],
+            "model": a.get("effective_model") or a.get("model") or "",
+            "harness": a.get("runtime_harness") or "",
+            "status": status,
+            "enabled": a.get("enabled"),
+            "last_active_at": a.get("last_active_at"),
+        })
+    if not agents:
+        return Widget.empty_()
+    # Working agents first, then by name, so the strip leads with the action.
+    agents.sort(key=lambda x: (x["status"] != "running", x["name"].lower()))
+    return Widget.ok_(data=agents)
+
+
 async def fetch_alerts(client: httpx.AsyncClient, bearer: str,
                        org_id: Optional[int] = None) -> Widget:
     """Return a compact active-alert list for the home dashboard."""

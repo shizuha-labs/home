@@ -59,3 +59,15 @@ class HomeSummaryV1(BaseModel):
     org_id: Optional[int] = None
     orgs: list[OrgRef] = Field(default_factory=list)
     widgets: dict[str, Widget] = Field(default_factory=dict)
+
+
+class HomeActivityV1(BaseModel):
+    """HIVE-602 live-theater payload: the org's autonomous work, happening.
+
+    widgets.feed   — merged newest-first events (Pulse activity + comments)
+    widgets.agents — the fleet as live entities (who, role, model, state)
+    """
+    version: int = 1
+    generated_at: str
+    org_id: Optional[int] = None
+    widgets: dict[str, Widget] = Field(default_factory=dict)
