@@ -114,7 +114,7 @@ function ChatHomeInner() {
     type: 'agent', email: String(a.email).toLowerCase(), username: a.username,
     name: a.name, role: a.role, teams: a.teams, model: a.model, status: a.status,
   })
-  const peekTask = (key) => key && pushPeek({ type: 'task', itemKey: key })
+  const peekTask = (key, title) => key && pushPeek({ type: 'task', itemKey: key, itemTitle: title })
   const peekOrg = (o) => o?.id && pushPeek({ type: 'org', orgId: o.id, name: o.name })
 
   useEffect(() => {
@@ -595,6 +595,7 @@ function ChatHomeInner() {
           onPop={() => setPeekStack((st) => st.slice(0, -1))}
           onClose={() => setPeekStack([])}
           agents={allAgents}
+          feed={feedWidget.status === 'ok' || feedWidget.status === 'stale' ? feedWidget.data || [] : []}
         />
       )}
 

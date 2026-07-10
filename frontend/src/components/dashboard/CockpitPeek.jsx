@@ -118,10 +118,13 @@ function LoadingRows() {
   )
 }
 
-function AgentPeekBody({ peek, widget, onOpenTask }) {
+function AgentPeekBody({ peek, widget, localEvents, loading, onOpenTask }) {
   const data = widget?.data || {}
   const tasks = data.tasks || []
-  const events = data.events || []
+  // GAME PRINCIPLE (operator 2026-07-10): never wait to show what a player is
+  // doing. The cockpit already holds the live feed — render THAT instantly;
+  // the network fetch only deepens history/tasks in the background.
+  const events = (data.events && data.events.length ? data.events : localEvents) || []
   return (
     <>
       <div className="flex items-center gap-3">
@@ -140,6 +143,11 @@ function AgentPeekBody({ peek, widget, onOpenTask }) {
         )}
       </div>
 
+      {loading && tasks.length === 0 && (
+        <p className="mt-3 flex items-center gap-1.5 text-[10px] text-gray-400 dark:text-gray-500">
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-brand-400" /> syncing their desk…
+        </p>
+      )}
       {tasks.length > 0 && (
         <>
           <SectionTitle>On their desk</SectionTitle>
@@ -311,7 +319,7 @@ function TaskPeekBody({ widget, agents, onOpenAgent }) {
 
 const PEEK_ICONS = { agent: Bot, org: Building2, task: ListTodo }
 
-export default function CockpitPeek({ stack, onPush, onPop, onClose, agents }) {
+export default function CockpitPeek({ stack, onPush, onPop, onClose, agents, feed }) {
   const peek = stack[stack.length - 1]
   const { loading, widget } = usePeekData(peek)
   const openTask = useCallback((key) => key && onPush({ type: 'task', itemKey: key }), [onPush])
@@ -328,6 +336,10 @@ export default function CockpitPeek({ stack, onPush, onPop, onClose, agents }) {
   }, [onClose])
 
   if (!peek) return null
+  const feedEvents = Array.isArray(feed) ? feed : []
+  const localEvents = peek.type === 'agent'
+    ? feedEvents.filter((ev) => String(ev.actor_email || '').toLowerCase() === peek.email)
+    : []
   const Icon = PEEK_ICONS[peek.type] || Bot
   return (
     <div className="fixed inset-0 z-40">
@@ -349,15 +361,29 @@ export default function CockpitPeek({ stack, onPush, onPop, onClose, agents }) {
           </button>
         </header>
         <div className="flex-1 overflow-y-auto px-4 py-4">
-          {loading ? <LoadingRows /> : (
-            peek.type === 'agent'
-              ? <AgentPeekBody peek={peek} widget={widget} onOpenTask={openTask} />
-              : peek.type === 'org'
-                ? <OrgPeekBody peek={peek} widget={widget} agents={agents} onOpenAgent={openAgent} />
-                : <TaskPeekBody widget={widget} agents={agents} onOpenAgent={openAgent} />
+          {peek.type === 'agent' ? (
+            /* Instant render from client-held state; network deepens it. */
+            <AgentPeekBody peek={peek} widget={widget} localEvents={localEvents}
+                           loading={loading} onOpenTask={openTask} />
+          ) : peek.type === 'task' && loading && peek.itemTitle ? (
+            /* Task peek: show what we already know from the clicked row. */
+            <>
+              <p className="font-mono text-xs font-semibold text-brand-600 dark:text-brand-400">{peek.itemKey}</p>
+              <p className="mt-1 text-sm font-medium text-gray-900 dark:text-gray-100">{peek.itemTitle}</p>
+              <p className="mt-3 flex items-center gap-1.5 text-[10px] text-gray-400 dark:text-gray-500">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-brand-400" /> syncing activity…
+              </p>
+            </>
+          ) : loading ? <LoadingRows /> : (
+            peek.type === 'org'
+              ? <OrgPeekBody peek={peek} widget={widget} agents={agents} onOpenAgent={openAgent} />
+              : <TaskPeekBody widget={widget} agents={agents} onOpenAgent={openAgent} />
           )}
-          {!loading && widget?.status === 'degraded' && (
+          {!loading && widget?.status === 'degraded' && peek.type !== 'agent' && (
             <p className="mt-4 text-xs text-amber-500">Some details are temporarily unavailable.</p>
+          )}
+          {!loading && widget?.status === 'degraded' && peek.type === 'agent' && localEvents.length === 0 && (
+            <p className="mt-4 text-xs text-amber-500">Live history is temporarily unavailable.</p>
           )}
         </div>
       </aside>

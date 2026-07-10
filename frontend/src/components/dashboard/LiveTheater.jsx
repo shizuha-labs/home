@@ -126,7 +126,7 @@ function Ticker({ events, now, onPeekTask }) {
       <span key={eventKey(ev)} className="animate-feed-in truncate">
         <span className="font-semibold text-gray-700 dark:text-gray-200">{actorName(ev.actor_email)}</span>{' '}
         {verbFor(ev)}{' '}
-        <button onClick={() => onPeekTask?.(ev.item_key)} className="pointer-events-auto font-mono text-brand-600 hover:underline dark:text-brand-400">{ev.item_key}</button>
+        <button onClick={() => onPeekTask?.(ev.item_key, ev.item_title)} className="pointer-events-auto font-mono text-brand-600 hover:underline dark:text-brand-400">{ev.item_key}</button>
         <span className="text-gray-400 dark:text-gray-500"> · {timeAgo(ev.at, now)}</span>
       </span>
     </div>
@@ -230,7 +230,7 @@ function FeedRow({ ev, isNew, now, onPeekTask }) {
         <p className="truncate text-xs text-gray-700 dark:text-gray-200">
           <span className="font-semibold">{actorName(ev.actor_email)}</span>{' '}
           <span className="text-gray-500 dark:text-gray-400">on</span>{' '}
-          <button onClick={() => onPeekTask?.(ev.item_key)} className="font-mono text-[11px] text-brand-600 hover:underline dark:text-brand-400">{ev.item_key}</button>
+          <button onClick={() => onPeekTask?.(ev.item_key, ev.item_title)} className="font-mono text-[11px] text-brand-600 hover:underline dark:text-brand-400">{ev.item_key}</button>
           {ev.item_title ? (
             <span className="text-gray-400 dark:text-gray-500"> · {ev.item_title}</span>
           ) : null}
