@@ -11,7 +11,7 @@ vi.mock('../utils/auth', () => ({
   }),
 }))
 
-import { getAccessToken, handleUnauthorized } from '../utils/auth'
+import { getAccessToken } from '../utils/auth'
 
 // Helper: create a ReadableStream from chunks
 function createSSEStream(...events) {
@@ -21,6 +21,15 @@ function createSSEStream(...events) {
     start(controller) {
       chunks.forEach(c => controller.enqueue(c))
       controller.close()
+    },
+  })
+}
+
+// Helper: create a stream that stays open (never closes)
+function createOpenStream() {
+  return new ReadableStream({
+    start() {
+      // Never close — keeps the hook in streaming state
     },
   })
 }
@@ -56,10 +65,10 @@ describe('useHomeActivityStream', () => {
         status: 200,
         json: { events: recentEvents, cursor_by_org: { '1': '2' } },
       }))
-      // Stream attempt — clean EOF, will set error but events are loaded
+      // Stream stays open so hook doesn't enter backoff loop
       .mockResolvedValueOnce(mockResponse({
         status: 200,
-        body: createSSEStream(),
+        body: createOpenStream(),
       }))
 
     const { result, unmount } = renderHook(() => useHomeActivityStream({ orgId: '1' }))
@@ -68,45 +77,13 @@ describe('useHomeActivityStream', () => {
       expect(result.current.loading).toBe(false)
     })
 
-    // Events should be loaded from recent fetch
     expect(result.current.events).toEqual(recentEvents)
-    // Error is set because the stream closed with clean EOF
-    expect(result.current.error).toBeTruthy()
-    expect(result.current.stale).toBe(true)
     unmount()
   })
 
-  it('deduplicates events by (org_id, id)', async () => {
-    const recentEvents = [
-      { id: '1', org_id: 1, type: 'test', summary: 'event 1' },
-    ]
+  it('deduplicates duplicate SSE events by (org_id, id)', async () => {
+    const recentEvents = [{ id: '1', org_id: 1, type: 'test', summary: 'initial' }]
 
-    global.fetch = vi.fn()
-      .mockResolvedValueOnce(mockResponse({
-        status: 200,
-        json: { events: recentEvents, cursor_by_org: { '1': '1' } },
-      }))
-      .mockResolvedValueOnce(mockResponse({
-        status: 200,
-        body: createSSEStream(),
-      }))
-
-    const { result, unmount } = renderHook(() => useHomeActivityStream({ orgId: '1' }))
-
-    await waitFor(() => {
-      expect(result.current.loading).toBe(false)
-    })
-
-    expect(result.current.events).toHaveLength(1)
-    unmount()
-  })
-
-  it('applies backoff on clean EOF', async () => {
-    const recentEvents = [{ id: '1', org_id: 1, type: 'test', summary: 'event 1' }]
-
-    // First call: recent fetch succeeds
-    // Second call: stream opens, returns clean EOF (body with no events)
-    // Third call: stream opens again (reconnect after backoff)
     let callCount = 0
     global.fetch = vi.fn().mockImplementation(() => {
       callCount++
@@ -116,7 +93,44 @@ describe('useHomeActivityStream', () => {
           json: { events: recentEvents, cursor_by_org: { '1': '1' } },
         }))
       }
-      // Stream that immediately closes (clean EOF)
+      // Stream sends the SAME event twice then stays open
+      return Promise.resolve(mockResponse({
+        status: 200,
+        body: createSSEStream(
+          'id: v1;org=1;sid=2',
+          'event: home.activity.v1',
+          'data: {"id":"1","org_id":1,"type":"test","summary":"initial"}',
+          '',
+          'id: v1;org=1;sid=3',
+          'event: home.activity.v1',
+          'data: {"id":"1","org_id":1,"type":"test","summary":"initial"}',
+          '',
+        ),
+      }))
+    })
+
+    const { result, unmount } = renderHook(() => useHomeActivityStream({ orgId: '1' }))
+
+    await waitFor(() => {
+      // Should have only the initial event (duplicate SSE event is deduped)
+      expect(result.current.events.length).toBe(1)
+    })
+    unmount()
+  })
+
+  it('applies exponential backoff on clean EOF (no events received)', async () => {
+    vi.useFakeTimers()
+    const recentEvents = [{ id: '1', org_id: 1, type: 'test', summary: 'event 1' }]
+
+    let callCount = 0
+    global.fetch = vi.fn().mockImplementation(() => {
+      callCount++
+      if (callCount === 1) {
+        return Promise.resolve(mockResponse({
+          status: 200,
+          json: { events: recentEvents, cursor_by_org: { '1': '1' } },
+        }))
+      }
       return Promise.resolve(mockResponse({
         status: 200,
         body: createSSEStream(),
@@ -125,19 +139,31 @@ describe('useHomeActivityStream', () => {
 
     renderHook(() => useHomeActivityStream({ orgId: '1' }))
 
-    // Wait for initial fetch + first stream attempt
-    await vi.waitFor(() => {
-      expect(callCount).toBeGreaterThanOrEqual(2)
-    })
+    // Let initial render + fetch + first stream attempt complete
+    await act(async () => { vi.advanceTimersByTime(100) })
+    expect(callCount).toBeGreaterThanOrEqual(2)
 
-    // The stream should attempt to reconnect (callCount >= 3)
-    // but with backoff, so it won't be immediate
-    await vi.waitFor(() => {
-      expect(callCount).toBeGreaterThanOrEqual(3)
-    }, { timeout: 5000 })
+    // Advance 500ms — backoff is 1s base, so no reconnect yet
+    await act(async () => { vi.advanceTimersByTime(500) })
+    expect(callCount).toBe(2)
+
+    // Advance past 1s — first reconnect should fire
+    await act(async () => { vi.advanceTimersByTime(600) })
+    expect(callCount).toBeGreaterThanOrEqual(3)
+
+    // Second EOF: backoff should be 2s now
+    await act(async () => { vi.advanceTimersByTime(500) })
+    expect(callCount).toBe(3)
+
+    // Advance past 2s — second reconnect
+    await act(async () => { vi.advanceTimersByTime(1600) })
+    expect(callCount).toBeGreaterThanOrEqual(4)
+
+    vi.useRealTimers()
   })
 
   it('applies backoff on 401 and does not retry immediately', async () => {
+    vi.useFakeTimers()
     const recentEvents = [{ id: '1', org_id: 1, type: 'test', summary: 'event 1' }]
 
     let callCount = 0
@@ -149,26 +175,24 @@ describe('useHomeActivityStream', () => {
           json: { events: recentEvents, cursor_by_org: { '1': '1' } },
         }))
       }
-      // 401 on stream
       return Promise.resolve(mockResponse({ status: 401 }))
     })
 
     const { unmount } = renderHook(() => useHomeActivityStream({ orgId: '1' }))
 
-    await vi.waitFor(() => {
-      expect(callCount).toBeGreaterThanOrEqual(2)
-    })
+    await act(async () => { vi.advanceTimersByTime(100) })
+    expect(callCount).toBeGreaterThanOrEqual(2)
 
-    // Should not immediately reconnect (backoff)
+    // Should not reconnect within 500ms (backoff is 1s base)
     const countAfter401 = callCount
-    await new Promise(resolve => {
-      setTimeout(resolve, 200)
-    })
+    await act(async () => { vi.advanceTimersByTime(500) })
     expect(callCount).toBe(countAfter401)
     unmount()
+    vi.useRealTimers()
   })
 
-  it('falls back to polling /recent on 503', async () => {
+  it('falls back to polling /recent on 503 and reconnects', async () => {
+    vi.useFakeTimers()
     const recentEvents = [{ id: '1', org_id: 1, type: 'test', summary: 'event 1' }]
     const pollEvents = [{ id: '2', org_id: 1, type: 'test', summary: 'event 2' }]
 
@@ -181,11 +205,9 @@ describe('useHomeActivityStream', () => {
           json: { events: recentEvents, cursor_by_org: { '1': '1' } },
         }))
       }
-      // 503 on stream
       if (callCount === 2) {
         return Promise.resolve(mockResponse({ status: 503 }))
       }
-      // Poll /recent
       return Promise.resolve(mockResponse({
         status: 200,
         json: { events: pollEvents, cursor_by_org: { '1': '2' } },
@@ -194,13 +216,17 @@ describe('useHomeActivityStream', () => {
 
     const { result, unmount } = renderHook(() => useHomeActivityStream({ orgId: '1' }))
 
-    await waitFor(() => {
-      expect(result.current.degraded).toBe(true)
-    })
+    await act(async () => { vi.advanceTimersByTime(100) })
+    expect(result.current.degraded).toBe(true)
+
+    // Advance past 15s poll interval — should trigger /recent poll
+    await act(async () => { vi.advanceTimersByTime(16000) })
+    expect(callCount).toBeGreaterThanOrEqual(3)
     unmount()
+    vi.useRealTimers()
   })
 
-  it('parses SSE events from stream', async () => {
+  it('parses SSE events from stream and adds them to state', async () => {
     const recentEvents = [{ id: '0', org_id: 1, type: 'test', summary: 'initial' }]
 
     let callCount = 0
@@ -212,7 +238,6 @@ describe('useHomeActivityStream', () => {
           json: { events: recentEvents, cursor_by_org: { '1': '0' } },
         }))
       }
-      // Stream with one activity event then clean EOF
       return Promise.resolve(mockResponse({
         status: 200,
         body: createSSEStream(
@@ -227,9 +252,84 @@ describe('useHomeActivityStream', () => {
     const { result, unmount } = renderHook(() => useHomeActivityStream({ orgId: '1' }))
 
     await waitFor(() => {
-      expect(result.current.events.length).toBeGreaterThanOrEqual(1)
+      expect(result.current.events.length).toBe(2)
+      const liveEvent = result.current.events.find(e => e.id === '1')
+      expect(liveEvent).toBeTruthy()
+      expect(liveEvent.summary).toBe('live event')
     })
     unmount()
+  })
+
+  it('acquires fresh token on each reconnect attempt', async () => {
+    vi.useFakeTimers()
+    const recentEvents = [{ id: '1', org_id: 1, type: 'test', summary: 'event 1' }]
+
+    let callCount = 0
+    global.fetch = vi.fn().mockImplementation(() => {
+      callCount++
+      if (callCount === 1) {
+        return Promise.resolve(mockResponse({
+          status: 200,
+          json: { events: recentEvents, cursor_by_org: { '1': '1' } },
+        }))
+      }
+      return Promise.resolve(mockResponse({ status: 401 }))
+    })
+
+    renderHook(() => useHomeActivityStream({ orgId: '1' }))
+
+    await act(async () => { vi.advanceTimersByTime(100) })
+    expect(callCount).toBeGreaterThanOrEqual(2)
+
+    // getAccessToken was called at least once (for the stream attempt)
+    expect(getAccessToken).toHaveBeenCalled()
+
+    // Advance past backoff — should call getAccessToken again
+    await act(async () => { vi.advanceTimersByTime(2000) })
+    expect(callCount).toBeGreaterThanOrEqual(3)
+
+    // getAccessToken was called again for the new stream attempt
+    expect(getAccessToken).toHaveBeenCalledTimes(3)
+    vi.useRealTimers()
+  })
+
+  it('applies backoff on home.reconnect.v1 signal', async () => {
+    vi.useFakeTimers()
+    const recentEvents = [{ id: '1', org_id: 1, type: 'test', summary: 'event 1' }]
+
+    let callCount = 0
+    global.fetch = vi.fn().mockImplementation(() => {
+      callCount++
+      if (callCount === 1) {
+        return Promise.resolve(mockResponse({
+          status: 200,
+          json: { events: recentEvents, cursor_by_org: { '1': '1' } },
+        }))
+      }
+      return Promise.resolve(mockResponse({
+        status: 200,
+        body: createSSEStream(
+          'event: home.reconnect.v1',
+          'data: {"reason": "lifetime"}',
+          '',
+        ),
+      }))
+    })
+
+    renderHook(() => useHomeActivityStream({ orgId: '1' }))
+
+    await act(async () => { vi.advanceTimersByTime(100) })
+    expect(callCount).toBeGreaterThanOrEqual(2)
+
+    // Should not reconnect immediately (backoff)
+    const countAfterReconnect = callCount
+    await act(async () => { vi.advanceTimersByTime(500) })
+    expect(callCount).toBe(countAfterReconnect)
+
+    // Advance past 1s backoff — should reconnect
+    await act(async () => { vi.advanceTimersByTime(600) })
+    expect(callCount).toBeGreaterThanOrEqual(3)
+    vi.useRealTimers()
   })
 
   it('handles deauthz by removing org events', async () => {
@@ -247,7 +347,6 @@ describe('useHomeActivityStream', () => {
           json: { events: recentEvents, cursor_by_org: { '1': '1', '7': '2' } },
         }))
       }
-      // Stream with deauthz for org 7
       return Promise.resolve(mockResponse({
         status: 200,
         body: createSSEStream(
@@ -261,7 +360,6 @@ describe('useHomeActivityStream', () => {
     const { result, unmount } = renderHook(() => useHomeActivityStream({ orgId: undefined }))
 
     await waitFor(() => {
-      // After deauthz, org 7 events should be removed
       const orgIds = result.current.events.map(e => e.org_id)
       expect(orgIds).not.toContain(7)
     })
@@ -280,7 +378,7 @@ describe('useHomeActivityStream', () => {
       }))
       .mockResolvedValueOnce(mockResponse({
         status: 200,
-        body: createSSEStream(),
+        body: createOpenStream(),
       }))
 
     const { result, unmount } = renderHook(() => useHomeActivityStream({ orgId: '1', maxItems: 100 }))

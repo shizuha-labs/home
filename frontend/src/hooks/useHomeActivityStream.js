@@ -229,8 +229,10 @@ export function useHomeActivityStream({ orgId, maxItems = MAX_ITEMS } = {}) {
         throw new Error('No response body for stream')
       }
 
-      // Reset reconnect backoff on successful connection
-      reconnectAttemptRef.current = 0
+      // Reset reconnect backoff only after receiving a meaningful event
+      // (activity or cursor), not on HTTP 200 alone — an endpoint that
+      // accepts then immediately EOFs must still apply exponential backoff.
+      let receivedEvent = false
       setStale(false)
 
       await parseSSEStream(
@@ -244,6 +246,8 @@ export function useHomeActivityStream({ orgId, maxItems = MAX_ITEMS } = {}) {
           if (eventOrgId && eventId) {
             lastByOrgRef.current[eventOrgId] = eventId
           }
+
+          receivedEvent = true
 
           setEvents(prev => {
             // Deduplicate by (org_id, id)
@@ -263,6 +267,7 @@ export function useHomeActivityStream({ orgId, maxItems = MAX_ITEMS } = {}) {
         // onCursor: update per-org cursors from control frame
         (cursorByOrg) => {
           lastByOrgRef.current = { ...lastByOrgRef.current, ...cursorByOrg }
+          receivedEvent = true
         },
         // onReconnect: handle reconnect signal from server
         (reconnectData) => {
@@ -286,7 +291,11 @@ export function useHomeActivityStream({ orgId, maxItems = MAX_ITEMS } = {}) {
       )
 
       // parseSSEStream returned normally = clean EOF.
-      // Apply backoff rather than reconnecting immediately.
+      // Only reset backoff if we received a meaningful event during this
+      // connection (HLD §7: exponential backoff on immediate EOF).
+      if (receivedEvent) {
+        reconnectAttemptRef.current = 0
+      }
       throw new StreamClosedError('clean_eof')
     } catch (e) {
       if (e.name === 'AbortError') return
