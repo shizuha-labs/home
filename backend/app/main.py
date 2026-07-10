@@ -411,8 +411,16 @@ async def _bounded_stream(
     If the queue is full (client too slow), the inner generator blocks on
     ``put``; if it stays blocked past *write_timeout*, we disconnect the
     slow client by raising.
+
+    Slot ownership is aligned with the outer SSE response lifetime: the
+    inner generator's ``finally`` (which owns ``_release_stream_slot``)
+    runs when the producer finishes, but the wrapper stays alive until
+    all buffered items are drained. A separate ``producer_done`` event
+    ensures the wrapper terminates promptly even when the sentinel is
+    lost due to a full queue (KOT-82 / review P1).
     """
     queue: asyncio.Queue[Optional[str]] = asyncio.Queue(maxsize=max_buffer)
+    producer_done = asyncio.Event()
 
     async def _producer():
         try:
@@ -424,8 +432,11 @@ async def _bounded_stream(
             # Explicitly close the inner generator so its finally block
             # (which owns _release_stream_slot) runs immediately.
             await inner.aclose()
-            # Use put_nowait for the sentinel to avoid deadlock when
-            # the queue is full (the consumer is blocked on get).
+            # Signal completion so the consumer can terminate even if
+            # the sentinel below is lost to QueueFull.
+            producer_done.set()
+            # Best-effort sentinel: if the queue is full this is dropped,
+            # but producer_done covers that case.
             try:
                 queue.put_nowait(None)
             except asyncio.QueueFull:
@@ -434,10 +445,25 @@ async def _bounded_stream(
     task = asyncio.create_task(_producer())
     try:
         while True:
-            chunk = await asyncio.wait_for(queue.get(), timeout=write_timeout + 5)
-            if chunk is None:
-                return
-            yield chunk
+            try:
+                chunk = await asyncio.wait_for(queue.get(), timeout=write_timeout + 5)
+                if chunk is None:
+                    return
+                yield chunk
+            except asyncio.TimeoutError:
+                # Producer may have finished while we were blocked on get
+                # (e.g. sentinel was lost to QueueFull). Check the event
+                # and drain any remaining items before returning.
+                if producer_done.is_set():
+                    while True:
+                        try:
+                            chunk = queue.get_nowait()
+                            if chunk is None:
+                                return
+                            yield chunk
+                        except asyncio.QueueEmpty:
+                            return
+                raise RuntimeError("Slow client disconnected (write timeout)")
     except asyncio.TimeoutError:
         raise RuntimeError("Slow client disconnected (write timeout)")
     finally:
