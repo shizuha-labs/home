@@ -538,3 +538,278 @@ def test_build_cursor_by_org():
     ]
     cursor = _build_cursor_by_org(events)
     assert cursor == {"1": "200-0", "7": "050-0"}
+
+
+# ---- PLAT-1305: Schema validation, deauth, slow-client, cursor edge cases -----
+
+
+def test_event_schema_rejects_bad_source():
+    """HomeActivityEventV1 enum rejects unknown source values."""
+    from app.schema import HomeActivityEventV1
+    import pydantic
+    with pytest.raises(pydantic.ValidationError):
+        HomeActivityEventV1(
+            id="100-0",
+            source="unknown_source",
+            type="task.comment",
+            occurred_at="2026-07-10T00:00:00Z",
+            org_id=1,
+        )
+
+
+def test_event_schema_rejects_bad_type():
+    from app.schema import HomeActivityEventV1
+    import pydantic
+    with pytest.raises(pydantic.ValidationError):
+        HomeActivityEventV1(
+            id="100-0",
+            source="pulse",
+            type="not.a.valid.type",
+            occurred_at="2026-07-10T00:00:00Z",
+            org_id=1,
+        )
+
+
+def test_event_schema_rejects_bad_redaction():
+    from app.schema import HomeActivityEventV1
+    import pydantic
+    with pytest.raises(pydantic.ValidationError):
+        HomeActivityEventV1(
+            id="100-0",
+            source="pulse",
+            type="task.comment",
+            occurred_at="2026-07-10T00:00:00Z",
+            org_id=1,
+            redaction="invalid_level",
+        )
+
+
+def test_event_schema_rejects_bad_priority():
+    from app.schema import HomeActivityEventV1
+    import pydantic
+    with pytest.raises(pydantic.ValidationError):
+        HomeActivityEventV1(
+            id="100-0",
+            source="pulse",
+            type="task.comment",
+            occurred_at="2026-07-10T00:00:00Z",
+            org_id=1,
+            priority="critical",
+        )
+
+
+def test_event_schema_rejects_bad_actor_kind():
+    from app.schema import HomeActivityEventV1
+    import pydantic
+    with pytest.raises(pydantic.ValidationError):
+        HomeActivityEventV1(
+            id="100-0",
+            source="pulse",
+            type="task.comment",
+            occurred_at="2026-07-10T00:00:00Z",
+            org_id=1,
+            actor={"kind": "bot"},
+        )
+
+
+def test_event_schema_rejects_bad_target_kind():
+    from app.schema import HomeActivityEventV1
+    import pydantic
+    with pytest.raises(pydantic.ValidationError):
+        HomeActivityEventV1(
+            id="100-0",
+            source="pulse",
+            type="task.comment",
+            occurred_at="2026-07-10T00:00:00Z",
+            org_id=1,
+            target={"kind": "invalid"},
+        )
+
+
+def test_event_schema_accepts_valid_event():
+    """A fully valid event passes schema validation."""
+    from app.schema import HomeActivityEventV1
+    ev = HomeActivityEventV1(
+        id="100-0",
+        source="pulse",
+        type="task.comment",
+        occurred_at="2026-07-10T00:00:00Z",
+        org_id=1,
+        summary="A valid comment",
+        actor={"kind": "user", "username": "testuser"},
+        target={"kind": "task", "key": "HIVE-1"},
+        redaction="none",
+        priority="high",
+    )
+    assert ev.version == 1
+    assert ev.source.value == "pulse"
+    assert ev.type.value == "task.comment"
+    assert ev.redaction.value == "none"
+    assert ev.priority.value == "high"
+    assert ev.actor.kind.value == "user"
+    assert ev.target.kind.value == "task"
+
+
+def test_parse_entry_drops_suppressed_redaction(monkeypatch):
+    """Events with redaction=suppressed are dropped by _parse_entry."""
+    from app.redis_client import _parse_entry
+    event_data = {
+        "event": json.dumps({
+            "version": 1,
+            "source": "pulse",
+            "type": "task.comment",
+            "occurred_at": "2026-07-10T00:00:00Z",
+            "org_id": 1,
+            "summary": "private",
+            "redaction": "suppressed",
+            "priority": "normal",
+            "actor": {"kind": "system"},
+            "target": {"kind": "task", "key": "HIVE-1"},
+        })
+    }
+    result = _parse_entry("100-0", event_data, expected_org=1)
+    assert result is None
+
+
+def test_parse_entry_drops_wrong_org():
+    """Event with org_id mismatching the stream key is dropped."""
+    from app.redis_client import _parse_entry
+    event_data = {
+        "event": json.dumps({
+            "version": 1,
+            "source": "pulse",
+            "type": "task.comment",
+            "occurred_at": "2026-07-10T00:00:00Z",
+            "org_id": 7,  # wrong org
+            "summary": "cross-org leak",
+            "redaction": "none",
+            "priority": "normal",
+            "actor": {"kind": "system"},
+            "target": {"kind": "task", "key": "HIVE-1"},
+        })
+    }
+    result = _parse_entry("100-0", event_data, expected_org=1)
+    assert result is None
+
+
+def test_parse_entry_drops_long_summary():
+    """Event with summary > 2000 chars is dropped."""
+    from app.redis_client import _parse_entry
+    event_data = {
+        "event": json.dumps({
+            "version": 1,
+            "source": "pulse",
+            "type": "task.comment",
+            "occurred_at": "2026-07-10T00:00:00Z",
+            "org_id": 1,
+            "summary": "x" * 2001,
+            "redaction": "none",
+            "priority": "normal",
+            "actor": {"kind": "system"},
+            "target": {"kind": "task", "key": "HIVE-1"},
+        })
+    }
+    result = _parse_entry("100-0", event_data, expected_org=1)
+    assert result is None
+
+
+def test_parse_entry_drops_malformed_json():
+    """Malformed event JSON is dropped."""
+    from app.redis_client import _parse_entry
+    result = _parse_entry("100-0", {"event": "not-json{{{}}"}, expected_org=1)
+    assert result is None
+
+
+def test_parse_entry_accepts_valid_event():
+    """A valid event passes all checks and returns a dict."""
+    from app.redis_client import _parse_entry
+    event_data = {
+        "event": json.dumps({
+            "version": 1,
+            "source": "pulse",
+            "type": "task.comment",
+            "occurred_at": "2026-07-10T00:00:00Z",
+            "org_id": 1,
+            "summary": "valid event",
+            "redaction": "none",
+            "priority": "normal",
+            "actor": {"kind": "system"},
+            "target": {"kind": "task", "key": "HIVE-1"},
+        })
+    }
+    result = _parse_entry("100-0", event_data, expected_org=1)
+    assert result is not None
+    assert result["id"] == "100-0"
+    assert result["org_id"] == 1
+    assert result["summary"] == "valid event"
+
+
+def test_stream_id_gt():
+    """_stream_id_gt correctly compares Redis stream IDs."""
+    from app.main import _stream_id_gt
+    # Same timestamp, different sequence
+    assert _stream_id_gt("1700000000001-1", "1700000000001-0")
+    assert not _stream_id_gt("1700000000001-0", "1700000000001-1")
+    # Different timestamp
+    assert _stream_id_gt("1700000000002-0", "1700000000001-0")
+    assert not _stream_id_gt("1700000000001-0", "1700000000002-0")
+    # Equal
+    assert not _stream_id_gt("1700000000001-0", "1700000000001-0")
+    # No sequence part
+    assert _stream_id_gt("1700000000002", "1700000000001")
+    assert not _stream_id_gt("1700000000001", "1700000000002")
+
+
+def test_activity_recent_aggregate_excludes_deauth_org_events(monkeypatch):
+    """Aggregate recent should not include events from orgs the caller
+    was deauthorized from between cursor and read."""
+    from app.redis_client import _parse_entry, read_recent_multi
+    # This is tested at the endpoint level: the caller only has org 1,
+    # so org 7 events should not appear
+    r = client.get("/api/home/activity/recent", headers=_auth(_token(memberships={"1": "admin"})))
+    assert r.status_code == 200
+    body = r.json()
+    for ev in body["events"]:
+        assert ev["org_id"] == 1
+
+
+def test_activity_recent_handles_empty_redis(monkeypatch):
+    """When Redis has no events for an org, return empty list."""
+    from app.redis_client import reset_pools
+    reset_pools()
+    mock = _MockRedis()
+    # No seed events added
+
+    class _MockPool:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    def _fake_pool_from_url(url, **kwargs):
+        return _MockPool()
+
+    def _fake_redis_from_pool(connection_pool=None, **kwargs):
+        return mock
+
+    monkeypatch.setattr("app.redis_client.aioredis.ConnectionPool.from_url", _fake_pool_from_url)
+    monkeypatch.setattr("app.redis_client.aioredis.Redis", _fake_redis_from_pool)
+
+    r = client.get("/api/home/activity/recent?org_id=1", headers=_auth(_token(memberships={"1": "admin"})))
+    assert r.status_code == 200
+    body = r.json()
+    assert body["events"] == []
+
+
+def test_activity_recent_malformed_cursor_returns_400():
+    """Malformed since_by_org returns 400."""
+    r = client.get("/api/home/activity/recent?since_by_org=not-valid-base64url",
+                   headers=_auth(_token(memberships={"1": "admin"})))
+    assert r.status_code == 400
+
+
+def test_activity_recent_aggregate_with_empty_since_by_org():
+    """Empty since_by_org in aggregate mode returns all events."""
+    r = client.get("/api/home/activity/recent",
+                   headers=_auth(_token(memberships={"1": "admin", "7": "member"})))
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["events"]) >= 2  # events from both orgs

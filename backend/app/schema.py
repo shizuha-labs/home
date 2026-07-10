@@ -77,15 +77,56 @@ class HomeActivityV1(BaseModel):
 
 # ---- HIVE-603 activity stream contract ---------------------------------------
 
+class EventSource(str, Enum):
+    pulse = "pulse"
+    hive = "hive"
+    connect = "connect"
+
+
+class EventType(str, Enum):
+    task_comment = "task.comment"
+    task_transition = "task.transition"
+    task_assignment = "task.assignment"
+    task_pr_link = "task.pr_link"
+    agent_status = "agent.status"
+    agent_task_focus = "agent.task_focus"
+    agent_message_summary = "agent.message_summary"
+
+
+class RedactionLevel(str, Enum):
+    none = "none"
+    metadata_only = "metadata_only"
+    suppressed = "suppressed"
+
+
+class EventPriority(str, Enum):
+    normal = "normal"
+    high = "high"
+    urgent = "urgent"
+
+
+class ActorKind(str, Enum):
+    agent = "agent"
+    user = "user"
+    system = "system"
+
+
+class TargetKind(str, Enum):
+    task = "task"
+    agent = "agent"
+    conversation = "conversation"
+    project = "project"
+
+
 class ActivityActor(BaseModel):
-    kind: str = "system"  # agent|user|system
+    kind: ActorKind = ActorKind.system
     username: Optional[str] = None
     display_name: Optional[str] = None
     role: Optional[str] = None
 
 
 class ActivityTarget(BaseModel):
-    kind: str = "task"  # task|agent|conversation|project
+    kind: TargetKind = TargetKind.task
     key: Optional[str] = None
     title: Optional[str] = None
     href: Optional[str] = None
@@ -95,16 +136,16 @@ class HomeActivityEventV1(BaseModel):
     """Single activity event, matching the HLD contract §4."""
     version: int = Field(default=ACTIVITY_VERSION)
     id: str  # Redis Stream id
-    source: str  # pulse|hive|connect
-    type: str  # task.comment|task.transition|task.assignment|task.pr_link|agent.status|agent.task_focus|agent.message_summary
+    source: EventSource
+    type: EventType
     occurred_at: str
     org_id: int
     project_key: Optional[str] = None
     actor: ActivityActor = Field(default_factory=ActivityActor)
     target: ActivityTarget = Field(default_factory=ActivityTarget)
     summary: str = ""
-    redaction: str = "none"  # none|metadata_only|suppressed
-    priority: str = "normal"  # normal|high|urgent
+    redaction: RedactionLevel = RedactionLevel.none
+    priority: EventPriority = EventPriority.normal
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

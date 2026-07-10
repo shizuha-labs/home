@@ -21,7 +21,7 @@ import base64
 import datetime
 import json
 import time
-from typing import Optional
+from typing import AsyncGenerator, Optional
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
@@ -394,6 +394,51 @@ async def activity_recent(
 _active_stream_connections: int = 0
 _stream_connections_lock = asyncio.Lock()
 
+# Slow-client protection: max buffered writes per connection before disconnect.
+# When a client reads slower than this, we drop them rather than OOM the BFF.
+SLOW_CLIENT_MAX_BUFFER = 64  # events
+SLOW_CLIENT_WRITE_TIMEOUT = 30  # seconds
+
+
+async def _bounded_stream(
+    inner: AsyncGenerator[str, None],
+    max_buffer: int = SLOW_CLIENT_MAX_BUFFER,
+    write_timeout: float = SLOW_CLIENT_WRITE_TIMEOUT,
+) -> AsyncGenerator[str, None]:
+    """Wrap *inner* with a bounded queue and write timeout.
+
+    The inner generator writes into an ``asyncio.Queue(maxsize=max_buffer)``.
+    If the queue is full (client too slow), the inner generator blocks on
+    ``put``; if it stays blocked past *write_timeout*, we disconnect the
+    slow client by raising.
+    """
+    queue: asyncio.Queue[Optional[str]] = asyncio.Queue(maxsize=max_buffer)
+
+    async def _producer():
+        try:
+            async for chunk in inner:
+                await asyncio.wait_for(queue.put(chunk), timeout=write_timeout)
+        except asyncio.TimeoutError:
+            pass  # slow client — producer stops
+        finally:
+            await queue.put(None)  # sentinel
+
+    task = asyncio.create_task(_producer())
+    try:
+        while True:
+            chunk = await asyncio.wait_for(queue.get(), timeout=write_timeout + 5)
+            if chunk is None:
+                return
+            yield chunk
+    except asyncio.TimeoutError:
+        raise RuntimeError("Slow client disconnected (write timeout)")
+    finally:
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, RuntimeError):
+            pass
+
 
 async def _acquire_stream_slot() -> bool:
     """Try to acquire a stream connection slot. Returns True if acquired."""
@@ -492,7 +537,7 @@ async def activity_stream(
 
     if scope_org is not None:
         return StreamingResponse(
-            _stream_single_org(scope_org, since or "$", caller, deadline),
+            _bounded_stream(_stream_single_org(scope_org, since or "$", caller, deadline)),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -517,7 +562,7 @@ async def activity_stream(
             )
         decoded_cursors = decoded_cursors or {}
         return StreamingResponse(
-            _stream_multi_org(org_ids, decoded_cursors, caller, deadline),
+            _bounded_stream(_stream_multi_org(org_ids, decoded_cursors, caller, deadline)),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -665,6 +710,10 @@ async def _stream_multi_org(org_ids: list[int], since_by_org: dict[str, str], ca
             if events:
                 for ev in events:
                     oid = str(ev.get("org_id", ""))
+                    # Skip events from orgs that were deauthorized during
+                    # the blocking read (post-XREAD deauth guard).
+                    if oid and int(oid) not in active_orgs:
+                        continue
                     sid = ev.get("id", "")
                     if oid and sid:
                         if oid not in last_by_org or _stream_id_gt(sid, last_by_org[oid]):

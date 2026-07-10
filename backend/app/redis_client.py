@@ -323,26 +323,6 @@ def _parse_entry(stream_id: str, data: dict, expected_org: Optional[int] = None)
             )
             return None
 
-        # Enforce source/type allowlists
-        ALLOWED_SOURCES = {"pulse", "hive", "connect"}
-        ALLOWED_TYPES = {
-            "task.comment", "task.transition", "task.assignment",
-            "task.pr_link", "agent.status", "agent.task_focus",
-            "agent.message_summary",
-        }
-        if validated.source not in ALLOWED_SOURCES:
-            logger.warning(
-                "Dropping entry %s: disallowed source=%s",
-                stream_id, validated.source,
-            )
-            return None
-        if validated.type not in ALLOWED_TYPES:
-            logger.warning(
-                "Dropping entry %s: disallowed type=%s",
-                stream_id, validated.type,
-            )
-            return None
-
         return validated.model_dump()
     except (json.JSONDecodeError, TypeError) as exc:
         logger.warning("Failed to parse stream entry %s: %s", stream_id, exc)
