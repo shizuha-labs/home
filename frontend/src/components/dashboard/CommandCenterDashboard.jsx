@@ -120,48 +120,63 @@ export default function CommandCenterDashboard({ orgId, onPeekOrg }) {
     : null
   const alertItems = Array.isArray(alerts.data) ? alerts.data : []
 
-  // HIVE-602 bloat cut v2 (operator): the tile grid read as static filler
-  // next to the live theater — everything folds into ONE slim strip of live
-  // facts. Org chips still open the org peek; counts deep-link to Pulse/Books.
+  // HIVE-602: the status dock — one segmented glass bar (matching the theater
+  // panels) instead of loose text lines: org avatars (click = org peek),
+  // work-queue segment (→ Pulse), money segment (→ Books).
   return (
     <div className="w-full">
-      <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs text-gray-500 dark:text-gray-400">
-        {orgs && orgs.length === 0 && (
-          <button
-            onClick={() => navigate('/hive')}
-            className="flex items-center gap-2 rounded-xl border border-dashed border-brand-300 px-3 py-1.5 font-medium text-brand-600 hover:bg-brand-50 dark:border-brand-800 dark:text-brand-400 dark:hover:bg-brand-950/30"
-          >
-            <Plus className="h-3.5 w-3.5" /> Create your organization
-          </button>
-        )}
-        {(orgs || []).map((o) => (
-          <button
-            key={o.id}
-            title={`${orgName(o)} — peek teams & agents`}
-            onClick={() => (onPeekOrg ? onPeekOrg(o) : navigate(`/hive/agents?org=${encodeURIComponent(o.slug || o.id)}`))}
-            className="group flex items-center gap-1.5 rounded-full bg-white/60 px-2.5 py-1 ring-1 ring-gray-200/60 backdrop-blur-sm transition-colors hover:ring-brand-300 dark:bg-gray-900/50 dark:ring-gray-700/40 dark:hover:ring-brand-700"
-          >
-            <span className="flex h-4.5 w-5 items-center justify-center rounded-md bg-brand-100 text-[9px] font-bold text-brand-600 dark:bg-brand-950/60 dark:text-brand-400">
-              {orgName(o).slice(0, 1).toUpperCase()}
-            </span>
-            <span className="font-medium text-gray-700 group-hover:text-brand-700 dark:text-gray-200 dark:group-hover:text-brand-300">
-              {orgName(o)}
-            </span>
-          </button>
-        ))}
-        {tasks.status === 'ok' && (
-          <button onClick={() => navigate(DEEP_LINKS.pulse)} className="hover:text-brand-600 dark:hover:text-brand-400">
-            <b className="text-gray-800 dark:text-gray-100">{inFlight}</b> in flight
-            {blocked > 0 && <> · <b className="text-amber-600 dark:text-amber-400">{blocked}</b> blocked</>}
-          </button>
-        )}
-        {money.status === 'ok' && typeof money.data?.cash === 'number' && (
-          <button onClick={() => navigate(DEEP_LINKS.books)} className="hover:text-brand-600 dark:hover:text-brand-400">
-            <b className="text-gray-800 dark:text-gray-100">{formatMoney(money.data.cash, money.data.currency)}</b>
-            {typeof money.data?.period_net === 'number' && <> · net {formatMoney(money.data.period_net, money.data.currency)}</>}
-            {finOrg?.name ? <span className="text-gray-400 dark:text-gray-500"> ({finOrg.name})</span> : null}
-          </button>
-        )}
+      <div className="flex justify-center">
+        <div className="flex items-stretch divide-x divide-gray-200/60 rounded-2xl bg-white/60 px-1 py-1.5 ring-1 ring-gray-200/60 backdrop-blur-sm dark:divide-gray-700/40 dark:bg-gray-900/50 dark:ring-gray-700/40">
+          <div className="flex items-center gap-1.5 px-3">
+            {orgs === null ? (
+              <span className="h-8 w-24 animate-pulse rounded-lg bg-gray-200/70 dark:bg-gray-700/50" />
+            ) : orgs.length === 0 ? (
+              <button
+                onClick={() => navigate('/hive')}
+                className="flex items-center gap-1.5 text-xs font-medium text-brand-600 hover:underline dark:text-brand-400"
+              >
+                <Plus className="h-3.5 w-3.5" /> Create your organization
+              </button>
+            ) : (
+              orgs.map((o) => (
+                <button
+                  key={o.id}
+                  title={`${orgName(o)} — peek teams & agents`}
+                  onClick={() => (onPeekOrg ? onPeekOrg(o) : navigate(`/hive/agents?org=${encodeURIComponent(o.slug || o.id)}`))}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-brand-100 to-purple-100 text-xs font-bold text-brand-700 ring-1 ring-transparent transition-all hover:-translate-y-0.5 hover:ring-brand-400 dark:from-brand-950/70 dark:to-purple-950/70 dark:text-brand-300"
+                >
+                  {orgName(o).slice(0, 1).toUpperCase()}
+                </button>
+              ))
+            )}
+          </div>
+          {tasks.status === 'ok' && (
+            <button onClick={() => navigate(DEEP_LINKS.pulse)} className="group px-4 text-left">
+              <p className="text-sm font-semibold tabular-nums text-gray-800 dark:text-gray-100">
+                {inFlight} <span className="font-normal text-gray-500 dark:text-gray-400">in flight</span>
+                {blocked > 0 && (
+                  <> <span className="text-gray-300 dark:text-gray-600">·</span> <span className="text-amber-600 dark:text-amber-400">{blocked}</span> <span className="font-normal text-gray-500 dark:text-gray-400">blocked</span></>
+                )}
+              </p>
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 group-hover:text-brand-500 dark:text-gray-500">Work queue</p>
+            </button>
+          )}
+          {money.status === 'ok' && typeof money.data?.cash === 'number' && (
+            <button onClick={() => navigate(DEEP_LINKS.books)} className="group px-4 text-left">
+              <p className="text-sm font-semibold tabular-nums text-gray-800 dark:text-gray-100">
+                {formatMoney(money.data.cash, money.data.currency)}
+                {typeof money.data?.period_net === 'number' && (
+                  <span className={money.data.period_net < 0 ? 'font-normal text-red-500/80' : 'font-normal text-emerald-600'}>
+                    {' '}{money.data.period_net < 0 ? '▾' : '▴'} {formatMoney(Math.abs(money.data.period_net), money.data.currency)}
+                  </span>
+                )}
+              </p>
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 group-hover:text-brand-500 dark:text-gray-500">
+                {finOrg?.name || 'Books'}
+              </p>
+            </button>
+          )}
+        </div>
       </div>
       {(alerts.status !== 'empty' && alertItems.length > 0) && (
         <div className="mt-3 flex justify-center">

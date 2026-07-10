@@ -565,20 +565,6 @@ function ChatHomeInner() {
           <LiveTheater feed={feedWidget} agents={agentsWidget} onPeekAgent={peekAgent} onPeekTask={peekTask} />
 
 
-          {/* Suggestion chips */}
-          <div className="flex flex-wrap justify-center gap-2">
-            {SUGGESTION_CHIPS.map((chip) => (
-              <button
-                key={chip.label}
-                onClick={() => handleChipClick(chip.prompt)}
-                disabled={isSending}
-                className="rounded-full px-3.5 py-1.5 text-xs bg-white/60 dark:bg-gray-800/40 backdrop-blur-sm ring-1 ring-gray-200/60 dark:ring-gray-700/40 text-gray-600 dark:text-gray-400 hover:ring-brand-300 dark:hover:ring-brand-600 hover:text-brand-700 dark:hover:text-brand-300 transition-all disabled:opacity-50"
-              >
-                <span className="font-medium">{chip.label}</span>
-              </button>
-            ))}
-          </div>
-
           {/* HIVE-376: command-center dashboard — a concise, live, access-scoped
               view of the user's orgs / agents / work / money / alerts, hydrating
               independently from the HIVE-375 aggregation API. Chat stays the heart
