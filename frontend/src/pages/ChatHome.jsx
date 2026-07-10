@@ -473,12 +473,13 @@ function ChatHomeInner() {
 
       {/* Main — same visual language as Hero. Scrolls: the live theater below
           grows with the org's activity (HIVE-602). */}
-      <div className="flex-1 flex flex-col items-center justify-start relative overflow-y-auto">
-        {/* Background — matches gradient-hero-light exactly */}
-        <div className="absolute inset-0 bg-gradient-to-br from-brand-50 via-white to-purple-50 dark:from-gray-900 dark:via-gray-950 dark:to-purple-950 pointer-events-none" />
-        {/* Decorative orbs — same as Hero */}
+      <div className="flex-1 flex flex-col items-center justify-start relative overflow-y-auto bg-gradient-to-br from-brand-50 via-white to-purple-50 dark:from-gray-900 dark:via-gray-950 dark:to-purple-950">
+        {/* Background gradient lives ON the scroll container: as an absolute
+            inset-0 child it only covered the first viewport, so scrolling
+            revealed the bare page background (black in dark mode) below it
+            (operator 2026-07-10). Decorative orbs stay as top-area accents. */}
         <div className="absolute top-20 left-10 w-72 h-72 bg-brand-400/20 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute bottom-20 right-10 w-96 h-96 bg-purple-400/20 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute top-[520px] right-10 w-96 h-96 bg-purple-400/20 rounded-full blur-3xl pointer-events-none" />
 
         <div className="relative z-10 w-full max-w-3xl px-6 pt-12 pb-20">
           {/* Brand — same treatment as Hero */}
