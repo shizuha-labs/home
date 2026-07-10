@@ -195,9 +195,12 @@ async def home_activity(
         feed_widget, agents_widget = await asyncio.gather(
             feed_coro,
             widget_cache.get_or_fetch(
+                # 15s shared fresh-cache: agent state doesn't change per-second,
+                # and always-fetch at an 8s poll per viewer pushed ~335KB fleet
+                # reads onto hive continuously — enough to flap its (formerly
+                # 1s-timeout) readiness probe into a 502 outage (2026-07-10).
                 cache_key("agents_live", caller.user_id, scope_org),
                 lambda: fetch_agents_live(client, caller.bearer),
-                cache_fresh=False,
             ),
         )
 
