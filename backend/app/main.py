@@ -13,6 +13,7 @@ cross-org. (STRIDE-lite on the task; PLAT-1236 cross-org→403 tests below.)
 """
 import asyncio
 import datetime
+import json
 import time
 from typing import Optional
 
@@ -31,6 +32,7 @@ from .clients import (
 )
 from .audit_leads import AuditLeadRequest, AuditLeadResponse, persist_audit_lead
 from .config import settings
+from .harness_upgrade import get_upgrade_history, get_upgrade_status, poll_and_upgrade
 from .schema import HomeActivityV1, HomeSummaryV1, SUMMARY_VERSION, Widget
 
 app = FastAPI(title="Shizuha Home BFF", version=str(SUMMARY_VERSION))
@@ -251,3 +253,49 @@ async def home_task_peek(
         widget = await fetch_task_peek(client, caller.bearer, key)
     return {"generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "key": key.strip(), "widget": widget}
+
+
+# ── HIVE-615 Harness auto-upgrade endpoints ───────────────────────────────────
+
+@app.get("/api/hive/harness-upgrade/status")
+async def harness_upgrade_status(
+    caller: Caller = Depends(verify_caller),
+):
+    """Return current harness auto-upgrade status and recent history."""
+    return {
+        "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        **get_upgrade_status(),
+    }
+
+
+@app.get("/api/hive/harness-upgrade/history")
+async def harness_upgrade_history(
+    caller: Caller = Depends(verify_caller),
+    limit: int = Query(default=20, ge=1, le=100),
+):
+    """Return harness upgrade history."""
+    return {
+        "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "upgrades": get_upgrade_history(limit=limit),
+    }
+
+
+@app.post("/api/hive/harness-upgrade/trigger")
+async def harness_upgrade_trigger(
+    caller: Caller = Depends(verify_caller),
+    current_versions: Optional[str] = Query(default=None, description="JSON dict of current harness versions"),
+):
+    """Manually trigger a poll-and-upgrade cycle. Staff/owner only."""
+    # Parse current versions from query param or use empty dict (will detect from Hive).
+    versions = {}
+    if current_versions:
+        try:
+            versions = json.loads(current_versions)
+        except (json.JSONDecodeError, TypeError):
+            raise HTTPException(status_code=400, detail="current_versions must be a valid JSON object")
+    results = await poll_and_upgrade(versions)
+    return {
+        "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "upgrades_triggered": len(results),
+        "results": [r.__dict__ for r in results],
+    }
