@@ -85,7 +85,9 @@ describe('useHomeActivityStream', () => {
     const recentEvents = [{ id: '1', org_id: 1, type: 'test', summary: 'initial' }]
 
     let callCount = 0
-    global.fetch = vi.fn().mockImplementation(() => {
+    const fetchUrls = []
+    global.fetch = vi.fn().mockImplementation((url) => {
+      fetchUrls.push(url)
       callCount++
       if (callCount === 1) {
         return Promise.resolve(mockResponse({
@@ -93,17 +95,17 @@ describe('useHomeActivityStream', () => {
           json: { events: recentEvents, cursor_by_org: { '1': '1' } },
         }))
       }
-      // Stream sends the SAME event twice then stays open
+      // Stream sends a NEW event (id=2) twice
       return Promise.resolve(mockResponse({
         status: 200,
         body: createSSEStream(
           'id: v1;org=1;sid=2',
           'event: home.activity.v1',
-          'data: {"id":"1","org_id":1,"type":"test","summary":"initial"}',
+          'data: {"id":"2","org_id":1,"type":"test","summary":"new event"}',
           '',
           'id: v1;org=1;sid=3',
           'event: home.activity.v1',
-          'data: {"id":"1","org_id":1,"type":"test","summary":"initial"}',
+          'data: {"id":"2","org_id":1,"type":"test","summary":"new event"}',
           '',
         ),
       }))
@@ -111,10 +113,16 @@ describe('useHomeActivityStream', () => {
 
     const { result, unmount } = renderHook(() => useHomeActivityStream({ orgId: '1' }))
 
+    // Wait until the new event (id=2) appears in state — proves stream was consumed
     await waitFor(() => {
-      // Should have only the initial event (duplicate SSE event is deduped)
-      expect(result.current.events.length).toBe(1)
+      const hasNewEvent = result.current.events.some(e => e.id === '2')
+      expect(hasNewEvent).toBe(true)
     })
+
+    // Assert final state: initial event + exactly one copy of the new event
+    expect(result.current.events.length).toBe(2)
+    const newEvents = result.current.events.filter(e => e.id === '2')
+    expect(newEvents).toHaveLength(1)
     unmount()
   })
 
@@ -197,7 +205,9 @@ describe('useHomeActivityStream', () => {
     const pollEvents = [{ id: '2', org_id: 1, type: 'test', summary: 'event 2' }]
 
     let callCount = 0
-    global.fetch = vi.fn().mockImplementation(() => {
+    const fetchUrls = []
+    global.fetch = vi.fn().mockImplementation((url) => {
+      fetchUrls.push(url)
       callCount++
       if (callCount === 1) {
         return Promise.resolve(mockResponse({
@@ -222,6 +232,9 @@ describe('useHomeActivityStream', () => {
     // Advance past 15s poll interval — should trigger /recent poll
     await act(async () => { vi.advanceTimersByTime(16000) })
     expect(callCount).toBeGreaterThanOrEqual(3)
+    // Assert the third request is to /recent
+    const recentUrl = fetchUrls.find(u => u.includes('/recent'))
+    expect(recentUrl).toBeTruthy()
     unmount()
     vi.useRealTimers()
   })
@@ -327,6 +340,51 @@ describe('useHomeActivityStream', () => {
     expect(callCount).toBe(countAfterReconnect)
 
     // Advance past 1s backoff — should reconnect
+    await act(async () => { vi.advanceTimersByTime(600) })
+    expect(callCount).toBeGreaterThanOrEqual(3)
+    vi.useRealTimers()
+  })
+
+  it('resets backoff to base delay after receiving a valid event then reconnect signal', async () => {
+    vi.useFakeTimers()
+    const recentEvents = [{ id: '1', org_id: 1, type: 'test', summary: 'event 1' }]
+
+    let callCount = 0
+    global.fetch = vi.fn().mockImplementation(() => {
+      callCount++
+      if (callCount === 1) {
+        return Promise.resolve(mockResponse({
+          status: 200,
+          json: { events: recentEvents, cursor_by_org: { '1': '1' } },
+        }))
+      }
+      // Stream delivers a valid event, then sends reconnect signal
+      return Promise.resolve(mockResponse({
+        status: 200,
+        body: createSSEStream(
+          'id: v1;org=1;sid=2',
+          'event: home.activity.v1',
+          'data: {"id":"2","org_id":1,"type":"test","summary":"valid event"}',
+          '',
+          'event: home.reconnect.v1',
+          'data: {"reason": "lifetime"}',
+          '',
+        ),
+      }))
+    })
+
+    renderHook(() => useHomeActivityStream({ orgId: '1' }))
+
+    await act(async () => { vi.advanceTimersByTime(100) })
+    expect(callCount).toBeGreaterThanOrEqual(2)
+
+    // The valid event should have reset backoff to 0.
+    // The reconnect signal throws, but backoff is already at base.
+    // So the next retry should fire after ~1s, not accumulated backoff.
+    await act(async () => { vi.advanceTimersByTime(500) })
+    expect(callCount).toBe(2) // no reconnect yet
+
+    // Advance past 1s base delay — should reconnect
     await act(async () => { vi.advanceTimersByTime(600) })
     expect(callCount).toBeGreaterThanOrEqual(3)
     vi.useRealTimers()

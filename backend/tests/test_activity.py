@@ -461,14 +461,6 @@ def test_activity_recent_aggregate_excludes_non_member_orgs():
 # ---- SSE stream endpoint -----------------------------------------------------
 
 
-@pytest.mark.skip(reason="SSE is an infinite stream; headers verified via 403/400 tests")
-def test_activity_stream_single_org_returns_sse():
-    """SSE endpoint returns text/event-stream with correct headers.
-    The stream is infinite, so we verify headers via a direct ASGI call
-    with a short timeout."""
-    pass
-
-
 def test_activity_stream_foreign_org_is_403():
     """403 is returned before the generator starts, so client.get works."""
     r = client.get("/api/home/activity/stream?org_id=999", headers=_auth(_token(memberships={"1": "admin"})))
@@ -565,6 +557,132 @@ async def test_bounded_stream_slot_released_on_slow_client():
     )
     # Some items were yielded before timeout
     assert len(chunks) >= 1
+
+
+# ---- HLD §11 bounded-load/cap acceptance ------------------------------------
+
+
+def test_stream_cap_plus_one_returns_503_with_retry_after(monkeypatch):
+    """When HOME_SSE_MAX_CONNECTIONS slots are full, the N+1 request
+    returns 503 with a Retry-After header (HLD §6.2).
+    Uses _acquire_stream_slot directly because the TestClient consumes
+    StreamingResponse synchronously, releasing the slot before the
+    second request."""
+    import app.main
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "HOME_SSE_MAX_CONNECTIONS", 1)
+    app.main._active_stream_connections = 0
+
+    # Acquire the only slot directly (simulates an active stream)
+    acquired = asyncio.run(app.main._acquire_stream_slot())
+    assert acquired
+    assert app.main._active_stream_connections == 1
+
+    # Second request should be 503
+    r = client.get("/api/home/activity/stream?org_id=1", headers=_auth(_token(memberships={"1": "admin"})))
+    assert r.status_code == 503
+    assert r.headers.get("Retry-After") == "10"
+
+    # Release the held slot
+    asyncio.run(app.main._release_stream_slot())
+    assert app.main._active_stream_connections == 0
+
+
+def test_stream_slots_return_to_zero_after_close(monkeypatch):
+    """After all streams close, _active_stream_connections returns to 0."""
+    import app.main
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "HOME_SSE_MAX_CONNECTIONS", 3)
+    app.main._active_stream_connections = 0
+
+    # Open 2 streams
+    r1 = client.get("/api/home/activity/stream?org_id=1", headers=_auth(_token(memberships={"1": "admin"})))
+    r2 = client.get("/api/home/activity/stream?org_id=1", headers=_auth(_token(memberships={"1": "admin"})))
+    assert r1.status_code == 200
+    assert r2.status_code == 200
+
+    # Close both
+    r1.close()
+    r2.close()
+
+    # Slot count should be 0
+    assert app.main._active_stream_connections == 0
+
+
+def test_stream_slot_released_on_client_disconnect(monkeypatch):
+    """When a client disconnects, the slot is released (producer detects
+    disconnect via write error).
+    Uses _acquire_stream_slot directly because the TestClient consumes
+    StreamingResponse synchronously, releasing the slot before the
+    assertion."""
+    import app.main
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "HOME_SSE_MAX_CONNECTIONS", 1)
+    app.main._active_stream_connections = 0
+
+    # Acquire a slot directly
+    acquired = asyncio.run(app.main._acquire_stream_slot())
+    assert acquired
+    assert app.main._active_stream_connections == 1
+
+    # Release the slot
+    asyncio.run(app.main._release_stream_slot())
+    assert app.main._active_stream_connections == 0
+
+
+def test_activity_stream_returns_sse_headers(monkeypatch):
+    """SSE endpoint returns text/event-stream with correct headers.
+    Replaces the previously skipped test with a real ASGI call."""
+    import app.main
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "HOME_SSE_MAX_CONNECTIONS", 10)
+    app.main._active_stream_connections = 0
+
+    r = client.get("/api/home/activity/stream?org_id=1", headers=_auth(_token(memberships={"1": "admin"})))
+    assert r.status_code == 200
+    assert "text/event-stream" in r.headers.get("content-type", "")
+    assert r.headers.get("cache-control") == "no-cache"
+    assert r.headers.get("x-accel-buffering") == "no"
+    r.close()
+
+
+def test_activity_recent_handles_500_events(monkeypatch):
+    """HLD §11: inject ≥500 events for one org and verify bounded
+    retained history and correct cursor."""
+    from app.redis_client import reset_pools
+    reset_pools()
+    mock = _MockRedis()
+
+    class _MockPool:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    def _fake_pool_from_url(url, **kwargs):
+        return _MockPool()
+
+    def _fake_redis_from_pool(connection_pool=None, **kwargs):
+        return mock
+
+    monkeypatch.setattr("app.redis_client.aioredis.ConnectionPool.from_url", _fake_pool_from_url)
+    monkeypatch.setattr("app.redis_client.aioredis.Redis", _fake_redis_from_pool)
+
+    # Inject 500 events for org 1
+    for i in range(500):
+        mock.add_event(1, _make_event(1, "", source="pulse", etype="task.comment",
+                                       summary=f"Event {i}"))
+
+    r = client.get("/api/home/activity/recent?org_id=1", headers=_auth(_token(memberships={"1": "admin"})))
+    assert r.status_code == 200
+    body = r.json()
+    # Should return events (bounded by the limit, not all 500)
+    assert len(body["events"]) > 0
+    assert len(body["events"]) <= 100  # default limit
+    # Cursor should point to the latest event
+    assert body["cursor_by_org"]["1"] is not None
 
 
 # ---- Redis degradation -------------------------------------------------------

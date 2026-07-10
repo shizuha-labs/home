@@ -229,9 +229,12 @@ export function useHomeActivityStream({ orgId, maxItems = MAX_ITEMS } = {}) {
         throw new Error('No response body for stream')
       }
 
-      // Reset reconnect backoff only after receiving a meaningful event
+      // Reset reconnect backoff immediately on receiving a meaningful event
       // (activity or cursor), not on HTTP 200 alone — an endpoint that
       // accepts then immediately EOFs must still apply exponential backoff.
+      // Resetting inline (not after parseSSEStream returns) ensures that
+      // even if the stream later throws (reconnect signal, read error), the
+      // backoff is already at base delay for the next attempt.
       let receivedEvent = false
       setStale(false)
 
@@ -247,7 +250,13 @@ export function useHomeActivityStream({ orgId, maxItems = MAX_ITEMS } = {}) {
             lastByOrgRef.current[eventOrgId] = eventId
           }
 
-          receivedEvent = true
+          // Reset backoff immediately on receiving a meaningful event,
+          // so that even if the stream later throws (reconnect, read error),
+          // the next attempt starts at base delay.
+          if (!receivedEvent) {
+            receivedEvent = true
+            reconnectAttemptRef.current = 0
+          }
 
           setEvents(prev => {
             // Deduplicate by (org_id, id)
@@ -267,7 +276,11 @@ export function useHomeActivityStream({ orgId, maxItems = MAX_ITEMS } = {}) {
         // onCursor: update per-org cursors from control frame
         (cursorByOrg) => {
           lastByOrgRef.current = { ...lastByOrgRef.current, ...cursorByOrg }
-          receivedEvent = true
+          // Reset backoff immediately on receiving a cursor frame
+          if (!receivedEvent) {
+            receivedEvent = true
+            reconnectAttemptRef.current = 0
+          }
         },
         // onReconnect: handle reconnect signal from server
         (reconnectData) => {
@@ -291,11 +304,8 @@ export function useHomeActivityStream({ orgId, maxItems = MAX_ITEMS } = {}) {
       )
 
       // parseSSEStream returned normally = clean EOF.
-      // Only reset backoff if we received a meaningful event during this
-      // connection (HLD §7: exponential backoff on immediate EOF).
-      if (receivedEvent) {
-        reconnectAttemptRef.current = 0
-      }
+      // Backoff was already reset inline on the first meaningful event,
+      // so this is just a safety net for connections with no events.
       throw new StreamClosedError('clean_eof')
     } catch (e) {
       if (e.name === 'AbortError') return
