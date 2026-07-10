@@ -15,6 +15,9 @@ import { getAccessToken, handleUnauthorized } from '../utils/auth'
  *   - Reconnect from last per-org cursor
  *   - Degraded/stale state when Redis is down
  *   - Never blocks dashboard render
+ *   - All close paths (clean EOF, reconnect signal, 401) apply exponential
+ *     backoff and acquire a fresh token before reconnecting (HIVE-607 P2)
+ *   - 503 falls back to polling /recent (HLD §6.2)
  */
 
 const RECENT_ENDPOINT = '/api/home/activity/recent'
@@ -22,6 +25,19 @@ const STREAM_ENDPOINT = '/api/home/activity/stream'
 const MAX_ITEMS = 100
 const RECONNECT_BASE_MS = 1000
 const RECONNECT_MAX_MS = 30000
+const POLL_INTERVAL_MS = 15000
+
+/**
+ * Typed error for stream close paths that should trigger a backoff reconnect
+ * (clean EOF, reconnect signal, handled 401) rather than an immediate retry.
+ */
+class StreamClosedError extends Error {
+  constructor(reason) {
+    super(`Stream closed: ${reason}`)
+    this.name = 'StreamClosedError'
+    this.reason = reason
+  }
+}
 
 /**
  * @param {{ orgId?: string, maxItems?: number }} [opts]
@@ -140,7 +156,11 @@ export function useHomeActivityStream({ orgId, maxItems = MAX_ITEMS } = {}) {
               try {
                 const parsed = JSON.parse(currentData)
                 onReconnect(parsed)
-              } catch { /* skip malformed */ }
+              } catch (e) {
+                // Re-throw StreamClosedError from onReconnect callback
+                if (e instanceof StreamClosedError) throw e
+                /* skip malformed */
+              }
             } else if (currentEvent === 'home.deauthz.v1' && currentData) {
               try {
                 const parsed = JSON.parse(currentData)
@@ -180,14 +200,27 @@ export function useHomeActivityStream({ orgId, maxItems = MAX_ITEMS } = {}) {
         }
       }
 
+      // Acquire a fresh token for each reconnect attempt (HLD §7)
+      const token = getAccessToken()
+      if (!token) {
+        streamActiveRef.current = false
+        throw new StreamClosedError('no_token')
+      }
+
       const qs = buildQs({ since, sinceByOrg })
       const resp = await fetch(STREAM_ENDPOINT + qs, {
-        headers: { Authorization: `Bearer ${getAccessToken()}` },
+        headers: { Authorization: `Bearer ${token}` },
         signal,
       })
       if (handleUnauthorized(resp)) {
         streamActiveRef.current = false
-        return
+        // 401 is a handled close path — apply backoff, don't retry immediately
+        throw new StreamClosedError('unauthorized')
+      }
+      if (resp.status === 503) {
+        streamActiveRef.current = false
+        // 503: fall back to polling /recent (HLD §6.2)
+        throw new StreamClosedError('service_unavailable')
       }
       if (!resp.ok) {
         throw new Error(`activity stream ${resp.status}`)
@@ -233,8 +266,10 @@ export function useHomeActivityStream({ orgId, maxItems = MAX_ITEMS } = {}) {
         },
         // onReconnect: handle reconnect signal from server
         (reconnectData) => {
-          // Server wants us to reconnect (lifetime or reauth)
-          // The stream will close naturally; reconnect loop handles it
+          // Server wants us to reconnect (lifetime or reauth).
+          // The stream will close naturally; throw so the outer loop
+          // applies backoff and acquires a fresh token.
+          throw new StreamClosedError(reconnectData.reason || 'server_reconnect')
         },
         // onDeauthz: handle deauthorization for a specific org
         (deauthzData) => {
@@ -249,8 +284,14 @@ export function useHomeActivityStream({ orgId, maxItems = MAX_ITEMS } = {}) {
           }
         },
       )
+
+      // parseSSEStream returned normally = clean EOF.
+      // Apply backoff rather than reconnecting immediately.
+      throw new StreamClosedError('clean_eof')
     } catch (e) {
       if (e.name === 'AbortError') return
+      // Re-throw StreamClosedError so the outer loop applies backoff
+      if (e instanceof StreamClosedError) throw e
       throw e
     } finally {
       streamActiveRef.current = false
@@ -283,10 +324,40 @@ export function useHomeActivityStream({ orgId, maxItems = MAX_ITEMS } = {}) {
             await openStream(controller.signal)
           } catch (e) {
             if (cancelled) break
+
+            if (e instanceof StreamClosedError && e.reason === 'service_unavailable') {
+              // 503: fall back to polling /recent (HLD §6.2)
+              setStale(true)
+              setDegraded(true)
+              while (!cancelled) {
+                await new Promise(resolve => {
+                  const timer = setTimeout(resolve, POLL_INTERVAL_MS)
+                  controller.signal.addEventListener('abort', () => {
+                    clearTimeout(timer)
+                    resolve()
+                  }, { once: true })
+                })
+                if (cancelled) break
+                try {
+                  const pollEvents = await fetchRecent()
+                  if (cancelled) break
+                  if (pollEvents && pollEvents.length > 0) {
+                    setEvents(pollEvents)
+                  }
+                  // Try to re-establish stream on next poll cycle
+                  break
+                } catch {
+                  // Poll failed, keep polling
+                }
+              }
+              continue
+            }
+
             setError(e)
             setStale(true)
 
-            // Exponential backoff
+            // Exponential backoff for all close paths (clean EOF, 401,
+            // reconnect signal, network errors)
             const delay = Math.min(
               RECONNECT_BASE_MS * Math.pow(2, reconnectAttemptRef.current),
               RECONNECT_MAX_MS,
