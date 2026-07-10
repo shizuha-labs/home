@@ -413,11 +413,10 @@ async def _bounded_stream(
     slow client by raising.
 
     Slot ownership is aligned with the outer SSE response lifetime: the
-    inner generator's ``finally`` (which owns ``_release_stream_slot``)
-    runs when the producer finishes, but the wrapper stays alive until
-    all buffered items are drained. A separate ``producer_done`` event
-    ensures the wrapper terminates promptly even when the sentinel is
-    lost due to a full queue (KOT-82 / review P1).
+    stream slot is released in THIS generator's ``finally``, not the inner
+    generator's, so ``HOME_SSE_MAX_CONNECTIONS`` always bounds actual
+    persistent connections. A ``producer_done`` event ensures the wrapper
+    terminates promptly even when the sentinel is lost to ``QueueFull``.
     """
     queue: asyncio.Queue[Optional[str]] = asyncio.Queue(maxsize=max_buffer)
     producer_done = asyncio.Event()
@@ -429,8 +428,8 @@ async def _bounded_stream(
         except asyncio.TimeoutError:
             pass  # slow client — producer stops
         finally:
-            # Explicitly close the inner generator so its finally block
-            # (which owns _release_stream_slot) runs immediately.
+            # Close the inner generator (its finally still runs, but
+            # _release_stream_slot has been moved to the outer wrapper).
             await inner.aclose()
             # Signal completion so the consumer can terminate even if
             # the sentinel below is lost to QueueFull.
@@ -467,6 +466,9 @@ async def _bounded_stream(
     except asyncio.TimeoutError:
         raise RuntimeError("Slow client disconnected (write timeout)")
     finally:
+        # Release the stream slot exactly once, when the outer SSE
+        # response terminates — not when the inner generator closes.
+        await _release_stream_slot()
         task.cancel()
         try:
             await task
@@ -670,7 +672,7 @@ async def _stream_single_org(org_id: int, since: str, caller: Caller, deadline: 
             else:
                 yield f": heartbeat\n\n"
     finally:
-        await _release_stream_slot()
+        pass  # slot released by _bounded_stream wrapper
 
 
 async def _stream_multi_org(org_ids: list[int], since_by_org: dict[str, str], caller: Caller, deadline: float):
@@ -765,4 +767,4 @@ async def _stream_multi_org(org_ids: list[int], since_by_org: dict[str, str], ca
 
             await asyncio.sleep(0)  # yield control
     finally:
-        await _release_stream_slot()
+        pass  # slot released by _bounded_stream wrapper
