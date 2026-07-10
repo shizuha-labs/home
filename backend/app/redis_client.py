@@ -20,6 +20,7 @@ from typing import Optional
 import redis.asyncio as aioredis
 
 from .config import settings
+from .schema import HomeActivityEventV1
 
 logger = logging.getLogger("home_bff.redis_client")
 
@@ -299,7 +300,50 @@ def _parse_entry(stream_id: str, data: dict, expected_org: Optional[int] = None)
                 )
                 return None
 
-        return parsed
+        # Validate full HomeActivityEventV1 schema (P1 defense-in-depth)
+        try:
+            validated = HomeActivityEventV1(**parsed)
+        except Exception as exc:
+            logger.warning(
+                "Dropping entry %s: schema validation failed: %s",
+                stream_id, exc,
+            )
+            return None
+
+        # Drop suppressed/private content (HLD §4 redaction rule)
+        if validated.redaction == "suppressed":
+            logger.info("Dropping entry %s: redaction=suppressed", stream_id)
+            return None
+
+        # Enforce summary length cap
+        if len(validated.summary) > 2000:
+            logger.warning(
+                "Dropping entry %s: summary too long (%d chars)",
+                stream_id, len(validated.summary),
+            )
+            return None
+
+        # Enforce source/type allowlists
+        ALLOWED_SOURCES = {"pulse", "hive", "connect"}
+        ALLOWED_TYPES = {
+            "task.comment", "task.transition", "task.assignment",
+            "task.pr_link", "agent.status", "agent.task_focus",
+            "agent.message_summary",
+        }
+        if validated.source not in ALLOWED_SOURCES:
+            logger.warning(
+                "Dropping entry %s: disallowed source=%s",
+                stream_id, validated.source,
+            )
+            return None
+        if validated.type not in ALLOWED_TYPES:
+            logger.warning(
+                "Dropping entry %s: disallowed type=%s",
+                stream_id, validated.type,
+            )
+            return None
+
+        return validated.model_dump()
     except (json.JSONDecodeError, TypeError) as exc:
         logger.warning("Failed to parse stream entry %s: %s", stream_id, exc)
         return None

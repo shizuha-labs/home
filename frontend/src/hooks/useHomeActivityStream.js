@@ -52,10 +52,8 @@ export function useHomeActivityStream({ orgId, maxItems = MAX_ITEMS } = {}) {
     if (orgId) {
       params.set('org_id', orgId)
       if (since) {
+        // Single-org: send bare since=<redis_id> (HLD §6)
         params.set('since', since)
-      } else if (sinceByOrg) {
-        // Single-org reconnect: send since_by_org for the cursor
-        params.set('since_by_org', sinceByOrg)
       }
     } else if (sinceByOrg) {
       params.set('since_by_org', sinceByOrg)
@@ -170,21 +168,19 @@ export function useHomeActivityStream({ orgId, maxItems = MAX_ITEMS } = {}) {
 
     try {
       // Build cursor for reconnect
+      let since
       let sinceByOrg
       if (orgId) {
-        // Single-org: use the cursor for this org
-        const cursor = lastByOrgRef.current[orgId]
-        if (cursor) {
-          sinceByOrg = encodeCursorMap({ [orgId]: cursor })
-        }
+        // Single-org: use bare since=<redis_id> (HLD §6)
+        since = lastByOrgRef.current[orgId] || undefined
       } else {
-        // Aggregate: use full cursor map
+        // Aggregate: use since_by_org base64url-json
         if (Object.keys(lastByOrgRef.current).length > 0) {
           sinceByOrg = encodeCursorMap(lastByOrgRef.current)
         }
       }
 
-      const qs = buildQs({ sinceByOrg })
+      const qs = buildQs({ since, sinceByOrg })
       const resp = await fetch(STREAM_ENDPOINT + qs, {
         headers: { Authorization: `Bearer ${getAccessToken()}` },
         signal,
@@ -248,6 +244,8 @@ export function useHomeActivityStream({ orgId, maxItems = MAX_ITEMS } = {}) {
             const updated = { ...lastByOrgRef.current }
             delete updated[droppedOrg]
             lastByOrgRef.current = updated
+            // Remove already-rendered events for the dropped org (HLD §6)
+            setEvents(prev => prev.filter(e => String(e.org_id) !== droppedOrg))
           }
         },
       )

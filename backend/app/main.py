@@ -266,6 +266,22 @@ async def home_task_peek(
 # ---- HIVE-603 activity stream endpoints --------------------------------------
 
 
+def _stream_id_gt(a: str, b: str) -> bool:
+    """Compare two Redis Stream IDs numerically (not lexically).
+
+    Redis Stream IDs are ``<millisecondsTime>-<sequenceNumber>``.  Lexical
+    comparison fails for ``9-0`` vs ``10-0`` (``'9' > '10'`` lexically).
+    """
+    try:
+        a_ms, a_seq = a.split("-", 1)
+        b_ms, b_seq = b.split("-", 1)
+        a_key = (int(a_ms), int(a_seq))
+        b_key = (int(b_ms), int(b_seq))
+        return a_key > b_key
+    except (ValueError, AttributeError):
+        return a > b  # fallback to lexical
+
+
 def _decode_since_by_org(raw: Optional[str]) -> Optional[dict[str, str]]:
     """Decode base64url-encoded per-org cursor map.
 
@@ -304,7 +320,7 @@ def _build_cursor_by_org(events: list[dict]) -> dict[str, str]:
         oid = str(ev.get("org_id", ""))
         sid = ev.get("id", "")
         if oid and sid:
-            if oid not in cursor or sid > cursor[oid]:
+            if oid not in cursor or _stream_id_gt(sid, cursor[oid]):
                 cursor[oid] = sid
     return cursor
 
@@ -350,6 +366,11 @@ async def activity_recent(
             )
         org_ids = list(caller.memberships.keys())
         decoded_cursors = _decode_since_by_org(since_by_org)
+        if since_by_org and decoded_cursors is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Malformed since_by_org: expected base64url-encoded JSON cursor map.",
+            )
         try:
             events, degraded = await read_recent_multi(
                 org_ids,
@@ -420,7 +441,7 @@ async def _revalidate_membership(caller: Caller, org_id: int) -> bool:
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             resp = await client.get(
-                f"{settings.SHIZUHA_ID_URL}/api/users/me",
+                f"{settings.SHIZUHA_ID_URL}/api/oauth/userinfo",
                 headers={"Authorization": f"Bearer {caller.bearer}"},
             )
             if resp.status_code != 200:
@@ -429,8 +450,8 @@ async def _revalidate_membership(caller: Caller, org_id: int) -> bool:
             memberships = body.get("organization_memberships", {})
             return str(org_id) in memberships or org_id in memberships
     except Exception:
-        # On error, assume still valid (fail-open for availability)
-        return True
+        # On error, fail closed — don't deliver events when we can't verify
+        return False
 
 
 def _check_token_not_expired(caller: Caller) -> bool:
@@ -487,7 +508,14 @@ async def activity_stream(
                 detail="Aggregate mode requires since_by_org (base64url-json per-org cursor).",
             )
         org_ids = list(caller.memberships.keys())
-        decoded_cursors = _decode_since_by_org(since_by_org) or {}
+        decoded_cursors = _decode_since_by_org(since_by_org)
+        if since_by_org and decoded_cursors is None:
+            await _release_stream_slot()
+            raise HTTPException(
+                status_code=400,
+                detail="Malformed since_by_org: expected base64url-encoded JSON cursor map.",
+            )
+        decoded_cursors = decoded_cursors or {}
         return StreamingResponse(
             _stream_multi_org(org_ids, decoded_cursors, caller, deadline),
             media_type="text/event-stream",
@@ -549,10 +577,15 @@ async def _stream_single_org(org_id: int, since: str, caller: Caller, deadline: 
                 yield f"event: home.reconnect.v1\ndata: {{\"reason\":\"reauth_required\"}}\n\n"
                 return
 
+            # Pre-yield: revalidate membership after blocking await
+            if not await _revalidate_membership(caller, org_id):
+                yield f"event: home.deauthz.v1\ndata: {{\"dropped_org\": {org_id}}}\n\n"
+                return
+
             if events:
                 for ev in events:
                     sid = ev.get("id", last_id)
-                    if sid > last_id:
+                    if _stream_id_gt(sid, last_id):
                         last_id = sid
                     yield f"id: {sid}\nevent: home.activity.v1\ndata: {json.dumps(ev)}\n\n"
             else:
@@ -620,12 +653,22 @@ async def _stream_multi_org(org_ids: list[int], since_by_org: dict[str, str], ca
                 yield f"event: home.reconnect.v1\ndata: {{\"reason\":\"reauth_required\"}}\n\n"
                 return
 
+            # Pre-yield: revalidate membership after blocking await
+            for oid in list(active_orgs):
+                if not await _revalidate_membership(caller, oid):
+                    active_orgs.discard(oid)
+                    last_by_org.pop(str(oid), None)
+                    yield f"event: home.deauthz.v1\ndata: {{\"dropped_org\": {oid}}}\n\n"
+            if not active_orgs:
+                return
+
             if events:
                 for ev in events:
                     oid = str(ev.get("org_id", ""))
                     sid = ev.get("id", "")
                     if oid and sid:
-                        last_by_org[oid] = sid
+                        if oid not in last_by_org or _stream_id_gt(sid, last_by_org[oid]):
+                            last_by_org[oid] = sid
                     compound_id = f"v1;org={oid};sid={sid}"
                     yield f"id: {compound_id}\nevent: home.activity.v1\ndata: {json.dumps(ev)}\n\n"
             else:
