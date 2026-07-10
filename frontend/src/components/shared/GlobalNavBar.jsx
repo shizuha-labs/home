@@ -7,7 +7,9 @@ import { useAuth } from '../../contexts/AuthContext'
 
 const NAV_ITEMS = [
   { label: 'Dashboard', href: '/', icon: LayoutDashboard, surface: 'home' },
-  { label: 'Agents', href: '/hive', icon: Cpu, surface: 'hive' },
+  // Logged-in users clicking Agents expect THEIR agents, not the hive
+  // landing (operator 2026-07-10) — deep-link straight to the fleet list.
+  { label: 'Agents', href: '/hive/agents', icon: Cpu, surface: 'hive', match: '/hive' },
   { label: 'Work', href: '/pulse', icon: ListChecks, surface: 'pulse' },
   { label: 'Admin', href: '/admin', icon: Shield, surface: 'admin' },
 ]
@@ -19,7 +21,7 @@ export default function GlobalNavBar() {
   const location = useLocation()
 
   const currentSurface = NAV_ITEMS.find(
-    item => location.pathname === item.href || location.pathname.startsWith(item.href + '/')
+    item => location.pathname === item.href || location.pathname.startsWith((item.match || item.href) + '/') || location.pathname === item.match
   )?.surface || 'home'
 
   const handleLogout = () => {
