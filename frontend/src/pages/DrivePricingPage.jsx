@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { Check, HardDrive, ArrowRight, Cloud, Users, Building2, Sparkles } from 'lucide-react'
 import GlobalNavBar from '../components/shared/GlobalNavBar'
 import Footer from '../components/Footer'
@@ -17,8 +17,8 @@ const TIERS = [
       'File sharing with links',
       'Community support',
     ],
-    cta: 'Get started',
-    href: '#pricing',
+    cta: 'Join waitlist',
+    href: '/drive/waitlist',
   },
   {
     name: 'Pro',
@@ -35,7 +35,7 @@ const TIERS = [
       'Priority support',
     ],
     cta: 'Join waitlist',
-    href: '#waitlist',
+    href: '/drive/waitlist',
   },
   {
     name: 'Team',
@@ -51,7 +51,7 @@ const TIERS = [
       'Dedicated support',
     ],
     cta: 'Join waitlist',
-    href: '#waitlist',
+    href: '/drive/waitlist',
   },
   {
     name: 'Enterprise',
@@ -79,39 +79,12 @@ const FEATURES = [
 ]
 
 export default function DrivePricingPage() {
-  const [waitlistEmail, setWaitlistEmail] = useState('')
-  const [waitlistSubmitted, setWaitlistSubmitted] = useState(false)
-  const [waitlistError, setWaitlistError] = useState('')
-
   useEffect(() => {
     setPageMeta({
       title: 'Drive Pricing — Shizuha',
       description: 'Simple, transparent pricing for Shizuha Drive. Free tier available. Pro at ₹299/mo, Team at ₹799/mo, Enterprise custom.',
     })
   }, [])
-
-  const handleWaitlist = async (e) => {
-    e.preventDefault()
-    setWaitlistError('')
-    if (!waitlistEmail || !waitlistEmail.includes('@')) {
-      setWaitlistError('Please enter a valid email address.')
-      return
-    }
-    try {
-      const res = await fetch('/api/waitlist/drive', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: waitlistEmail }),
-      })
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
-        throw new Error(data.detail || data.message || 'Failed to join waitlist')
-      }
-      setWaitlistSubmitted(true)
-    } catch (err) {
-      setWaitlistError(err.message)
-    }
-  }
 
   return (
     <div className="min-h-screen bg-white dark:bg-gray-950">
@@ -237,35 +210,13 @@ export default function DrivePricingPage() {
           <p className="mt-2 text-gray-600 dark:text-gray-400">
             Join the waitlist and be the first to know when Shizuha Drive launches.
           </p>
-          {waitlistSubmitted ? (
-            <div className="mt-8 p-6 rounded-2xl bg-brand-50 dark:bg-brand-900/10 border border-brand-200 dark:border-brand-800">
-              <Check className="w-8 h-8 text-brand-600 mx-auto mb-2" />
-              <p className="text-lg font-semibold text-gray-900 dark:text-white">You're on the list!</p>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                We'll notify you at <strong>{waitlistEmail}</strong> when Drive is ready.
-              </p>
-            </div>
-          ) : (
-            <form onSubmit={handleWaitlist} className="mt-8 flex flex-col sm:flex-row gap-3 max-w-md mx-auto">
-              <input
-                type="email"
-                required
-                placeholder="you@example.com"
-                value={waitlistEmail}
-                onChange={(e) => setWaitlistEmail(e.target.value)}
-                className="flex-1 rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-2.5 text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500"
-              />
-              <button
-                type="submit"
-                className="rounded-xl bg-brand-600 hover:bg-brand-700 text-white px-6 py-2.5 text-sm font-semibold transition-colors whitespace-nowrap"
-              >
-                Join waitlist
-              </button>
-            </form>
-          )}
-          {waitlistError && (
-            <p className="mt-3 text-sm text-red-500">{waitlistError}</p>
-          )}
+          <a
+            href="/drive/waitlist"
+            className="mt-8 inline-flex items-center gap-2 rounded-xl bg-brand-600 hover:bg-brand-700 text-white px-6 py-3 text-sm font-semibold transition-colors"
+          >
+            Join the Drive waitlist
+            <ArrowRight className="w-4 h-4" />
+          </a>
         </div>
       </section>
 
