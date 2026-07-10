@@ -421,7 +421,15 @@ async def _bounded_stream(
         except asyncio.TimeoutError:
             pass  # slow client — producer stops
         finally:
-            await queue.put(None)  # sentinel
+            # Explicitly close the inner generator so its finally block
+            # (which owns _release_stream_slot) runs immediately.
+            await inner.aclose()
+            # Use put_nowait for the sentinel to avoid deadlock when
+            # the queue is full (the consumer is blocked on get).
+            try:
+                queue.put_nowait(None)
+            except asyncio.QueueFull:
+                pass
 
     task = asyncio.create_task(_producer())
     try:

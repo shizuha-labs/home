@@ -8,7 +8,7 @@ instantly and hydrates each independently; the envelope is ALWAYS returned
 from enum import Enum
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 SUMMARY_VERSION = 1
 ACTIVITY_VERSION = 1
@@ -133,7 +133,14 @@ class ActivityTarget(BaseModel):
 
 
 class HomeActivityEventV1(BaseModel):
-    """Single activity event, matching the HLD contract §4."""
+    """Single activity event, matching the HLD contract §4.
+
+    Enforces:
+    - ``version`` must be exactly 1 (no forward-compat for unknown schemas).
+    - Connect source events must be ``agent.message_summary`` with
+      ``redaction=metadata_only`` (HLD §5.3/8: Connect is metadata-only;
+      raw DM bodies are never emitted).
+    """
     version: int = Field(default=ACTIVITY_VERSION)
     id: str  # Redis Stream id
     source: EventSource
@@ -147,6 +154,25 @@ class HomeActivityEventV1(BaseModel):
     redaction: RedactionLevel = RedactionLevel.none
     priority: EventPriority = EventPriority.normal
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _enforce_contract(self) -> "HomeActivityEventV1":
+        # version must be exactly 1
+        if self.version != ACTIVITY_VERSION:
+            raise ValueError(
+                f"Unsupported event version {self.version}; expected {ACTIVITY_VERSION}"
+            )
+        # Connect is metadata-only: must be agent.message_summary + metadata_only
+        if self.source == EventSource.connect:
+            if self.type != EventType.agent_message_summary:
+                raise ValueError(
+                    f"Connect source requires type=agent.message_summary, got {self.type}"
+                )
+            if self.redaction != RedactionLevel.metadata_only:
+                raise ValueError(
+                    f"Connect source requires redaction=metadata_only, got {self.redaction}"
+                )
+        return self
 
 
 class ActivityRecentResponse(BaseModel):
