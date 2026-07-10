@@ -15,6 +15,14 @@ const escapeAttr = (value) =>
 
 const routes = [
   {
+    // /forge itself had NO shell — nginx's `try_files $uri/` hit the bare
+    // forge/ directory and returned 403 (operator 2026-07-10 tree audit).
+    output: 'forge/index.html',
+    title: 'Shizuha Forge — image generation API',
+    description:
+      'Generate images from one REST API call on self-hosted GPUs. 10 free images/day, then $0.02/image.',
+  },
+  {
     output: 'forge/pricing/index.html',
     title: 'Shizuha Forge API Pricing — 10 free images/day, then $0.02/image',
     description:
