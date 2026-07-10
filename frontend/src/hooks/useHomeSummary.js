@@ -88,11 +88,19 @@ export function useHomeSummary({ orgId, refreshMs = 30000 } = {}) {
   const widget = useCallback(
     (key) => {
       const w = summary?.widgets?.[key]
-      if (w && typeof w.status === 'string') return w
+      if (w && typeof w.status === 'string') {
+        // Keep locally useful data on a failed poll, but never present a prior
+        // success/empty snapshot as current. Recovery clears `error` and the
+        // next render returns the server's fresh status again.
+        if (error && (w.status === 'ok' || w.status === 'empty')) {
+          return { ...w, status: 'stale' }
+        }
+        return w
+      }
       if (loading) return { status: 'loading' }
       return { status: 'degraded' }
     },
-    [summary, loading],
+    [summary, loading, error],
   )
 
   return { summary, loading, error, widget, refresh: load }
