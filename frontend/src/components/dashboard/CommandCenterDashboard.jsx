@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import {
-  Building2, ListTodo, Wallet, Bell, Lock, AlertTriangle, ChevronRight, Plus,
+  Bell, Plus,
 } from 'lucide-react'
 import { cn } from '../../utils/cn'
 import { useHomeSummary } from '../../hooks/useHomeSummary'
@@ -112,102 +112,67 @@ export default function CommandCenterDashboard({ orgId, onPeekOrg }) {
   const money = widget('financial_snapshot')
   const alerts = widget('alerts')
 
+  const t = tasks.data || {}
+  const inFlight = (t.open || 0) + (t.in_progress || 0) + (t.in_review || 0) + (t.awaiting_merge || 0)
+  const blocked = t.blocked || 0
+  const finOrg = money.data?.org_id != null
+    ? (orgs || []).find((o) => String(o.id) === String(money.data.org_id))
+    : null
+  const alertItems = Array.isArray(alerts.data) ? alerts.data : []
+
+  // HIVE-602 bloat cut v2 (operator): the tile grid read as static filler
+  // next to the live theater — everything folds into ONE slim strip of live
+  // facts. Org chips still open the org peek; counts deep-link to Pulse/Books.
   return (
     <div className="w-full">
-      {/* My organizations */}
-      <div className="mb-3">
-        {orgs === null ? (
-          <div className="flex gap-2"><div className="h-16 w-40 rounded-2xl bg-gray-200/70 dark:bg-gray-700/50 animate-pulse" /><div className="h-16 w-40 rounded-2xl bg-gray-200/60 dark:bg-gray-700/40 animate-pulse" /></div>
-        ) : orgs.length === 0 ? (
+      <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs text-gray-500 dark:text-gray-400">
+        {orgs && orgs.length === 0 && (
           <button
             onClick={() => navigate('/hive')}
-            className="flex items-center gap-2 rounded-2xl border border-dashed border-brand-300 dark:border-brand-800 px-4 py-3 text-sm font-medium text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950/30 transition-colors"
+            className="flex items-center gap-2 rounded-xl border border-dashed border-brand-300 px-3 py-1.5 font-medium text-brand-600 hover:bg-brand-50 dark:border-brand-800 dark:text-brand-400 dark:hover:bg-brand-950/30"
           >
-            <Plus className="w-4 h-4" /> Create your organization
+            <Plus className="h-3.5 w-3.5" /> Create your organization
           </button>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            {orgs.map((o) => (
-              <button
-                key={o.id}
-                onClick={() => (onPeekOrg ? onPeekOrg(o) : navigate(`/hive/agents?org=${encodeURIComponent(o.slug || o.id)}`))}
-                className="group flex items-center gap-2 rounded-2xl border border-gray-200/70 dark:border-gray-800/70 bg-white/70 dark:bg-gray-900/50 px-4 py-2.5 hover:border-brand-300 dark:hover:border-brand-700 transition-colors"
-              >
-                <span className="flex w-7 h-7 items-center justify-center rounded-lg bg-brand-100 dark:bg-brand-950/50 text-brand-600 dark:text-brand-400 text-xs font-bold">
-                  {orgName(o).slice(0, 1).toUpperCase()}
-                </span>
-                <span className="text-sm font-medium text-gray-800 dark:text-gray-200">{orgName(o)}</span>
-                {o.role ? <span className="text-[10px] uppercase tracking-wide text-gray-400">{o.role}</span> : null}
-                <ChevronRight className="w-3.5 h-3.5 text-gray-300 group-hover:text-brand-400 transition-colors" />
-              </button>
+        )}
+        {(orgs || []).map((o) => (
+          <button
+            key={o.id}
+            title={`${orgName(o)} — peek teams & agents`}
+            onClick={() => (onPeekOrg ? onPeekOrg(o) : navigate(`/hive/agents?org=${encodeURIComponent(o.slug || o.id)}`))}
+            className="group flex items-center gap-1.5 rounded-full bg-white/60 px-2.5 py-1 ring-1 ring-gray-200/60 backdrop-blur-sm transition-colors hover:ring-brand-300 dark:bg-gray-900/50 dark:ring-gray-700/40 dark:hover:ring-brand-700"
+          >
+            <span className="flex h-4.5 w-5 items-center justify-center rounded-md bg-brand-100 text-[9px] font-bold text-brand-600 dark:bg-brand-950/60 dark:text-brand-400">
+              {orgName(o).slice(0, 1).toUpperCase()}
+            </span>
+            <span className="font-medium text-gray-700 group-hover:text-brand-700 dark:text-gray-200 dark:group-hover:text-brand-300">
+              {orgName(o)}
+            </span>
+          </button>
+        ))}
+        {tasks.status === 'ok' && (
+          <button onClick={() => navigate(DEEP_LINKS.pulse)} className="hover:text-brand-600 dark:hover:text-brand-400">
+            <b className="text-gray-800 dark:text-gray-100">{inFlight}</b> in flight
+            {blocked > 0 && <> · <b className="text-amber-600 dark:text-amber-400">{blocked}</b> blocked</>}
+          </button>
+        )}
+        {money.status === 'ok' && typeof money.data?.cash === 'number' && (
+          <button onClick={() => navigate(DEEP_LINKS.books)} className="hover:text-brand-600 dark:hover:text-brand-400">
+            <b className="text-gray-800 dark:text-gray-100">{formatMoney(money.data.cash, money.data.currency)}</b>
+            {typeof money.data?.period_net === 'number' && <> · net {formatMoney(money.data.period_net, money.data.currency)}</>}
+            {finOrg?.name ? <span className="text-gray-400 dark:text-gray-500"> ({finOrg.name})</span> : null}
+          </button>
+        )}
+      </div>
+      {(alerts.status !== 'empty' && alertItems.length > 0) && (
+        <div className="mt-3 flex justify-center">
+          <div className="flex items-center gap-2 rounded-xl bg-amber-50 px-3 py-1.5 text-xs text-amber-700 ring-1 ring-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:ring-amber-900">
+            <Bell className="h-3.5 w-3.5" />
+            {alertItems.slice(0, 2).map((a, i) => (
+              <span key={i} className="truncate">{a.summary}</span>
             ))}
           </div>
-        )}
-      </div>
-
-      {/* Widget grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        <WidgetShell
-          title="Pending work"
-          icon={ListTodo}
-          status={tasks.status}
-          action={<button onClick={() => navigate(DEEP_LINKS.pulse)} className="text-[11px] text-brand-500 hover:underline">Open</button>}
-        >
-          <ByStatus status={tasks.status} render={() => (
-            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
-              {/* Buckets match the HIVE-375 BFF _TASK_BUCKETS (incl. awaiting_merge). */}
-              {['open', 'in_progress', 'in_review', 'blocked', 'awaiting_merge'].map((k) => (
-                <span key={k} className="text-gray-600 dark:text-gray-300">
-                  <b className="text-gray-900 dark:text-gray-100">{num(tasks.data?.[k])}</b> {k.replace(/_/g, ' ')}
-                </span>
-              ))}
-            </div>
-          )} empty={<Muted>Nothing pending on you.</Muted>} />
-        </WidgetShell>
-
-        <WidgetShell
-          title="Financials"
-          icon={Wallet}
-          status={money.status}
-          action={money.status === 'ok' ? <button onClick={() => navigate(DEEP_LINKS.books)} className="text-[11px] text-brand-500 hover:underline">Books</button> : null}
-        >
-          <ByStatus status={money.status} unauthorized="Financials not shared with you." render={() => {
-            const finOrg = money.data?.org_id != null
-              ? (orgs || []).find((o) => String(o.id) === String(money.data.org_id))
-              : null
-            return (
-              <div>
-                <div className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                  {formatMoney(money.data?.cash, money.data?.currency)}
-                </div>
-                <Muted>Net this period: {formatMoney(money.data?.period_net, money.data?.currency)}</Muted>
-                {finOrg?.name ? <Muted>{finOrg.name}</Muted> : null}
-              </div>
-            )
-          }} empty={<Muted>Select an organization to view financials.</Muted>} />
-        </WidgetShell>
-
-        {!(alerts.status === 'empty' || (alerts.status === 'ok' && (!Array.isArray(alerts.data) || alerts.data.length === 0))) && (
-        <WidgetShell title="Attention" icon={Bell} status={alerts.status}>
-          <ByStatus status={alerts.status} render={() => {
-            const items = Array.isArray(alerts.data) ? alerts.data : []
-            if (items.length === 0) return <Muted>All clear.</Muted>
-            return (
-              <ul className="space-y-1">
-                {items.slice(0, 3).map((a, i) => (
-                  <li key={i} className="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300">
-                    <span className={cn('w-1.5 h-1.5 rounded-full', a.sev === 'high' ? 'bg-red-500' : 'bg-amber-400')} />
-                    <span className="truncate">{a.summary}</span>
-                  </li>
-                ))}
-              </ul>
-            )
-          }} empty={<Muted>All clear.</Muted>} />
-        </WidgetShell>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   )
 }
-
-export { CommandCenterDashboard, WidgetShell, ByStatus }
