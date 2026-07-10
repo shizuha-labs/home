@@ -314,7 +314,11 @@ export function useHomeActivityStream({ orgId, maxItems = MAX_ITEMS } = {}) {
         if (cancelled) return
 
         if (recentEvents && recentEvents.length > 0) {
-          setEvents(recentEvents)
+          // Cap recent events at maxItems
+          const capped = recentEvents.length > maxItems
+            ? recentEvents.slice(recentEvents.length - maxItems)
+            : recentEvents
+          setEvents(capped)
         }
         setLoading(false)
 
