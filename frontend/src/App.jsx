@@ -14,6 +14,7 @@ import ResearchPage from './pages/ResearchPage'
 import ResearchOrderPage from './pages/ResearchOrderPage'
 import DojoPage from './pages/DojoPage'
 import AutonomousOrgPage from './pages/AutonomousOrgPage'
+import DrivePricingPage from './pages/DrivePricingPage'
 
 function LoadingSpinner() {
   return (
@@ -76,6 +77,7 @@ export default function App() {
       <Route path="/autonomous-org" element={<AutonomousOrgPage />} />
       <Route path="/research" element={<ResearchPage />} />
       <Route path="/research/order" element={<ResearchOrderPage />} />
+      <Route path="/drive/pricing" element={<DrivePricingPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
