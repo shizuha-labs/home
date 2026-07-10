@@ -481,6 +481,92 @@ def test_activity_stream_aggregate_rejects_bare_since():
     assert r.status_code == 400
 
 
+# ---- Slot lifecycle regression (HIVE-607 P1) ---------------------------------
+
+
+@pytest.mark.asyncio
+async def test_bounded_stream_slot_lifecycle():
+    """Slot is released only when _bounded_stream terminates, not when the
+    inner generator closes. A slow-client timeout must not leave an open
+    wrapper uncounted."""
+    import app.main
+    from app.main import _bounded_stream, _acquire_stream_slot
+
+    # Reset slot count
+    app.main._active_stream_connections = 0
+
+    # Acquire a slot (as stream_activity does)
+    acquired = await _acquire_stream_slot()
+    assert acquired
+    assert app.main._active_stream_connections == 1
+
+    # Inner generator that yields two items then completes
+    async def _inner():
+        try:
+            yield "data: one\n\n"
+            yield "data: two\n\n"
+        finally:
+            # Slot should NOT be released here — the outer wrapper owns it
+            pass
+
+    # Collect all yielded chunks from _bounded_stream
+    chunks = []
+    async for chunk in _bounded_stream(_inner(), max_buffer=1, write_timeout=0.01):
+        chunks.append(chunk)
+
+    # After the wrapper terminates, the slot should be released
+    assert app.main._active_stream_connections == 0, (
+        f"Slot should be 0 after wrapper termination, got {app.main._active_stream_connections}"
+    )
+    assert chunks == ["data: one\n\n", "data: two\n\n"]
+
+
+@pytest.mark.asyncio
+async def test_bounded_stream_slot_released_on_slow_client():
+    """When the producer times out (slow client), the slot is released only
+    after the wrapper terminates — not when the inner generator closes.
+    The producer_done event lets the wrapper drain and terminate cleanly
+    without raising."""
+    import app.main
+    from app.main import _bounded_stream, _acquire_stream_slot
+
+    # Reset slot count
+    app.main._active_stream_connections = 0
+
+    acquired = await _acquire_stream_slot()
+    assert acquired
+    assert app.main._active_stream_connections == 1
+
+    # Inner generator that yields many items to fill the queue faster
+    # than the consumer can drain.
+    inner_closed = False
+
+    async def _inner():
+        nonlocal inner_closed
+        try:
+            for i in range(100):
+                yield f"data: item{i}\n\n"
+        finally:
+            inner_closed = True
+
+    chunks = []
+    # Consumer is slow: sleep before each iteration so the queue fills up
+    # and the producer times out on put.
+    async for chunk in _bounded_stream(_inner(), max_buffer=4, write_timeout=0.01):
+        chunks.append(chunk)
+        await asyncio.sleep(0.05)  # slow consumer — queue fills up
+
+    # Inner generator was closed by the producer's finally
+    assert inner_closed, "Inner generator should have been closed on timeout"
+
+    # Slot should be released after wrapper termination
+    assert app.main._active_stream_connections == 0, (
+        f"Slot should be 0 after wrapper termination, got {app.main._active_stream_connections}"
+    )
+    # Some items were yielded before timeout
+    assert len(chunks) >= 1
+
+
 # ---- Redis degradation -------------------------------------------------------
 
 
