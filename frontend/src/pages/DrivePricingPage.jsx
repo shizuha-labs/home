@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { Check, HardDrive, ArrowRight, Cloud, Users, Building2, Sparkles } from 'lucide-react'
+import { Check, HardDrive, ArrowRight, Cloud, Users, Building2 } from 'lucide-react'
 import GlobalNavBar from '../components/shared/GlobalNavBar'
 import Footer from '../components/Footer'
 import { setPageMeta } from '../utils/pageMeta'
@@ -12,10 +12,7 @@ const TIERS = [
     icon: Cloud,
     features: [
       '5 GB storage',
-      'Basic file management',
-      'Web upload & download',
-      'File sharing with links',
-      'Community support',
+      'Basic Drive features',
     ],
     cta: 'Join waitlist',
     href: '/drive/waitlist',
@@ -23,16 +20,12 @@ const TIERS = [
   {
     name: 'Pro',
     price: '₹299',
-    sub: '/month, GST included',
+    sub: '/month',
     icon: HardDrive,
     highlight: true,
     features: [
       '50 GB storage',
-      'Advanced file management',
-      'Version history (30 days)',
-      'Folder sharing & permissions',
-      'Full-text search',
-      'Priority support',
+      'GST-compliant billing',
     ],
     cta: 'Join waitlist',
     href: '/drive/waitlist',
@@ -40,15 +33,13 @@ const TIERS = [
   {
     name: 'Team',
     price: '₹799',
-    sub: '/month, GST included',
+    sub: '/month',
     icon: Users,
     features: [
       '200 GB shared storage',
-      'Team workspaces',
-      'Granular access controls',
-      'Agent integration — agents read & write files',
-      'Audit logs',
-      'Dedicated support',
+      'Team sharing',
+      'Agent integration',
+      'GST-compliant billing',
     ],
     cta: 'Join waitlist',
     href: '/drive/waitlist',
@@ -59,23 +50,14 @@ const TIERS = [
     sub: 'Tailored to your org',
     icon: Building2,
     features: [
-      'Custom storage limits',
-      'Custom pricing & SLA',
-      'On-premise / VPC deployment',
-      'SSO & SCIM provisioning',
-      'Data residency controls',
-      '24/7 dedicated support',
+      'Custom storage',
+      'Custom pricing',
+      'Service-level agreement (SLA)',
+      'Dedicated support',
     ],
     cta: 'Contact us',
     href: 'mailto:sales@shizuha.com',
   },
-]
-
-const FEATURES = [
-  { icon: Cloud, title: 'Secure cloud storage', desc: 'AES-256 encrypted at rest, TLS in transit. Your files, your control.' },
-  { icon: Users, title: 'Team collaboration', desc: 'Shared workspaces, granular permissions, and real-time sync across devices.' },
-  { icon: Sparkles, title: 'AI-powered', desc: 'Agents can read, write, and organize files — automate document workflows end-to-end.' },
-  { icon: ArrowRight, title: 'Seamless integration', desc: 'Works with Shizuha Wiki, Pulse, and Connect. One platform, one login.' },
 ]
 
 export default function DrivePricingPage() {
@@ -101,8 +83,8 @@ export default function DrivePricingPage() {
             Simple pricing for your files
           </h1>
           <p className="mt-4 text-lg text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
-            Secure cloud storage that works with your autonomous workforce.
-            Start free, upgrade when you need more.
+            Storage plans for individuals, teams, and organizations.
+            Start free and upgrade when you need more space.
           </p>
         </div>
       </section>
@@ -169,31 +151,6 @@ export default function DrivePricingPage() {
                   >
                     {tier.cta}
                   </a>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      </section>
-
-      {/* Features grid */}
-      <section className="py-16 px-4 sm:px-6 lg:px-8 bg-gray-50 dark:bg-gray-900/50">
-        <div className="max-w-5xl mx-auto">
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-white text-center mb-12">
-            Why Shizuha Drive?
-          </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-            {FEATURES.map((feat) => {
-              const Icon = feat.icon
-              return (
-                <div key={feat.title} className="flex gap-4 p-4">
-                  <div className="w-10 h-10 rounded-xl bg-brand-100 dark:bg-brand-900/20 flex items-center justify-center shrink-0">
-                    <Icon className="w-5 h-5 text-brand-600 dark:text-brand-400" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-gray-900 dark:text-white">{feat.title}</h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{feat.desc}</p>
-                  </div>
                 </div>
               )
             })}
