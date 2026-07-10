@@ -337,7 +337,9 @@ def _stub_jwks(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _stub_redis(monkeypatch):
-    """Replace redis.asyncio.from_url with a mock that returns _MockRedis."""
+    """Replace redis.asyncio with a mock that returns _MockRedis."""
+    from app.redis_client import reset_pools
+    reset_pools()
     mock = _MockRedis()
 
     # Add some seed events
@@ -345,10 +347,19 @@ def _stub_redis(monkeypatch):
     mock.add_event(1, _make_event(1, "", source="pulse", etype="task.transition", summary="HIVE-1 moved to in_progress"))
     mock.add_event(7, _make_event(7, "", source="hive", etype="agent.status", summary="Agent nagi is running"))
 
-    def _fake_from_url(url, **kwargs):
+    class _MockPool:
+        """Mock connection pool that returns the mock Redis instance."""
+        def __init__(self, *args, **kwargs):
+            pass
+
+    def _fake_pool_from_url(url, **kwargs):
+        return _MockPool()
+
+    def _fake_redis_from_pool(connection_pool=None, **kwargs):
         return mock
 
-    monkeypatch.setattr("app.redis_client.aioredis.from_url", _fake_from_url)
+    monkeypatch.setattr("app.redis_client.aioredis.ConnectionPool.from_url", _fake_pool_from_url)
+    monkeypatch.setattr("app.redis_client.aioredis.Redis", _fake_redis_from_pool)
     # Shorten SSE read timeout so stream tests don't block for 30s
     monkeypatch.setattr(settings, "ACTIVITY_STREAM_READ_TIMEOUT_MS", 100)
     return mock
@@ -475,11 +486,13 @@ def test_activity_stream_aggregate_rejects_bare_since():
 
 def test_activity_recent_degrades_on_redis_failure(monkeypatch):
     """When Redis is down, /recent returns empty events with degraded_sources."""
+    from app.redis_client import reset_pools
+    reset_pools()
 
-    def _broken_from_url(url, **kwargs):
+    def _broken_pool_from_url(url, **kwargs):
         raise ConnectionError("Redis is down")
 
-    monkeypatch.setattr("app.redis_client.aioredis.from_url", _broken_from_url)
+    monkeypatch.setattr("app.redis_client.aioredis.ConnectionPool.from_url", _broken_pool_from_url)
 
     r = client.get("/api/home/activity/recent?org_id=1", headers=_auth(_token(memberships={"1": "admin"})))
     assert r.status_code == 200

@@ -51,7 +51,12 @@ export function useHomeActivityStream({ orgId, maxItems = MAX_ITEMS } = {}) {
     const params = new URLSearchParams()
     if (orgId) {
       params.set('org_id', orgId)
-      if (since) params.set('since', since)
+      if (since) {
+        params.set('since', since)
+      } else if (sinceByOrg) {
+        // Single-org reconnect: send since_by_org for the cursor
+        params.set('since_by_org', sinceByOrg)
+      }
     } else if (sinceByOrg) {
       params.set('since_by_org', sinceByOrg)
     }
@@ -59,11 +64,13 @@ export function useHomeActivityStream({ orgId, maxItems = MAX_ITEMS } = {}) {
     return qs ? `?${qs}` : ''
   }, [orgId])
 
-  // Encode per-org cursor map as base64url
+  // Encode per-org cursor map as base64url WITH padding
   const encodeCursorMap = useCallback((cursorMap) => {
     try {
       const json = JSON.stringify(cursorMap)
-      return btoa(json).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+      let encoded = btoa(json).replace(/\+/g, '-').replace(/\//g, '_')
+      // Preserve padding — backend decode expects it
+      return encoded
     } catch {
       return ''
     }
@@ -93,7 +100,7 @@ export function useHomeActivityStream({ orgId, maxItems = MAX_ITEMS } = {}) {
   }, [buildQs])
 
   // Parse SSE stream from a ReadableStream
-  const parseSSEStream = useCallback(async (response, onEvent, onCursor) => {
+  const parseSSEStream = useCallback(async (response, onEvent, onCursor, onReconnect, onDeauthz) => {
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
@@ -131,6 +138,16 @@ export function useHomeActivityStream({ orgId, maxItems = MAX_ITEMS } = {}) {
                   onCursor(parsed.cursor_by_org)
                 }
               } catch { /* skip malformed */ }
+            } else if (currentEvent === 'home.reconnect.v1' && currentData) {
+              try {
+                const parsed = JSON.parse(currentData)
+                onReconnect(parsed)
+              } catch { /* skip malformed */ }
+            } else if (currentEvent === 'home.deauthz.v1' && currentData) {
+              try {
+                const parsed = JSON.parse(currentData)
+                onDeauthz(parsed)
+              } catch { /* skip malformed */ }
             }
             // Heartbeat comments (line starting with ":") are ignored
             currentEvent = ''
@@ -147,7 +164,7 @@ export function useHomeActivityStream({ orgId, maxItems = MAX_ITEMS } = {}) {
   }, [])
 
   // Open SSE stream
-  const openStream = useCallback(async () => {
+  const openStream = useCallback(async (signal) => {
     if (streamActiveRef.current) return
     streamActiveRef.current = true
 
@@ -170,6 +187,7 @@ export function useHomeActivityStream({ orgId, maxItems = MAX_ITEMS } = {}) {
       const qs = buildQs({ sinceByOrg })
       const resp = await fetch(STREAM_ENDPOINT + qs, {
         headers: { Authorization: `Bearer ${getAccessToken()}` },
+        signal,
       })
       if (handleUnauthorized(resp)) {
         streamActiveRef.current = false
@@ -217,6 +235,21 @@ export function useHomeActivityStream({ orgId, maxItems = MAX_ITEMS } = {}) {
         (cursorByOrg) => {
           lastByOrgRef.current = { ...lastByOrgRef.current, ...cursorByOrg }
         },
+        // onReconnect: handle reconnect signal from server
+        (reconnectData) => {
+          // Server wants us to reconnect (lifetime or reauth)
+          // The stream will close naturally; reconnect loop handles it
+        },
+        // onDeauthz: handle deauthorization for a specific org
+        (deauthzData) => {
+          const droppedOrg = String(deauthzData.dropped_org || '')
+          if (droppedOrg) {
+            // Remove the dropped org from our cursor map
+            const updated = { ...lastByOrgRef.current }
+            delete updated[droppedOrg]
+            lastByOrgRef.current = updated
+          }
+        },
       )
     } catch (e) {
       if (e.name === 'AbortError') return
@@ -249,7 +282,7 @@ export function useHomeActivityStream({ orgId, maxItems = MAX_ITEMS } = {}) {
         // 2. Open SSE stream with reconnect loop
         while (!cancelled) {
           try {
-            await openStream()
+            await openStream(controller.signal)
           } catch (e) {
             if (cancelled) break
             setError(e)
@@ -261,7 +294,15 @@ export function useHomeActivityStream({ orgId, maxItems = MAX_ITEMS } = {}) {
               RECONNECT_MAX_MS,
             )
             reconnectAttemptRef.current++
-            await new Promise(resolve => setTimeout(resolve, delay))
+            await new Promise(resolve => {
+              if (cancelled) return
+              const timer = setTimeout(resolve, delay)
+              // Clean up timer on unmount
+              controller.signal.addEventListener('abort', () => {
+                clearTimeout(timer)
+                resolve()
+              }, { once: true })
+            })
           }
         }
       } catch (e) {

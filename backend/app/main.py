@@ -271,11 +271,19 @@ def _decode_since_by_org(raw: Optional[str]) -> Optional[dict[str, str]]:
 
     The HLD specifies base64url-json for the aggregate cursor to avoid URL
     length issues with multiple org cursors.
+
+    Accepts both padded and unpadded base64url (restores padding if needed).
+    Returns None on malformed input (400, not silent reset).
     """
     if not raw:
         return None
     try:
-        decoded = base64.urlsafe_b64decode(raw)
+        # Restore padding if stripped
+        padded = raw
+        missing_padding = len(padded) % 4
+        if missing_padding:
+            padded += "=" * (4 - missing_padding)
+        decoded = base64.urlsafe_b64decode(padded)
         return json.loads(decoded)
     except (ValueError, json.JSONDecodeError):
         return None
@@ -398,12 +406,36 @@ def _compute_stream_deadline(caller: Caller) -> float:
     return now + min(max_lifetime, remaining_token)
 
 
-def _check_membership_still_valid(caller: Caller, org_id: int) -> bool:
-    """Check if an org_id is still in the caller's memberships.
+async def _revalidate_membership(caller: Caller, org_id: int) -> bool:
+    """Revalidate that the caller still belongs to the given org.
 
-    Membership is re-derived from the (still-valid) signed token.
+    Because the JWT is immutable, we call the id service's user-info endpoint
+    with the caller's own Bearer to detect membership revocation since the
+    token was issued.  This is called periodically (every revalidation
+    interval), not on every event.
+
+    Returns True if the caller is still a member.
     """
-    return str(org_id) in caller.memberships or org_id in caller.memberships
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(
+                f"{settings.SHIZUHA_ID_URL}/api/users/me",
+                headers={"Authorization": f"Bearer {caller.bearer}"},
+            )
+            if resp.status_code != 200:
+                return False
+            body = resp.json()
+            memberships = body.get("organization_memberships", {})
+            return str(org_id) in memberships or org_id in memberships
+    except Exception:
+        # On error, assume still valid (fail-open for availability)
+        return True
+
+
+def _check_token_not_expired(caller: Caller) -> bool:
+    """Cheap check: has the JWT expired since we last checked?"""
+    return time.time() < caller.token_exp
 
 
 @app.get("/api/home/activity/stream")
@@ -470,7 +502,8 @@ async def activity_stream(
 async def _stream_single_org(org_id: int, since: str, caller: Caller, deadline: float):
     """SSE generator for a single org's activity stream.
 
-    §6.1: enforces hard deadline and periodic revalidation.
+    §6.1: enforces hard deadline, pre-yield expiry check, and periodic
+    live membership revalidation via the id service.
     """
     last_id = since
     heartbeat_interval = settings.ACTIVITY_SSE_HEARTBEAT_SECONDS
@@ -489,12 +522,12 @@ async def _stream_single_org(org_id: int, since: str, caller: Caller, deadline: 
             # §6.1: periodic revalidation
             if now - last_revalidate >= revalidate_interval:
                 last_revalidate = now
-                # Check token expiry
-                if time.time() >= caller.token_exp:
+                # Check token expiry (cheap, no network)
+                if not _check_token_not_expired(caller):
                     yield f"event: home.reconnect.v1\ndata: {{\"reason\":\"reauth_required\"}}\n\n"
                     return
-                # Check org membership still valid
-                if not _check_membership_still_valid(caller, org_id):
+                # Live membership revalidation via id service
+                if not await _revalidate_membership(caller, org_id):
                     yield f"event: home.deauthz.v1\ndata: {{\"dropped_org\": {org_id}}}\n\n"
                     return
 
@@ -509,6 +542,12 @@ async def _stream_single_org(org_id: int, since: str, caller: Caller, deadline: 
                 yield f": heartbeat (redis error)\n\n"
                 await asyncio.sleep(heartbeat_interval)
                 continue
+
+            # Pre-yield: recheck expiry after await (token may have expired
+            # while XREAD was blocked)
+            if not _check_token_not_expired(caller):
+                yield f"event: home.reconnect.v1\ndata: {{\"reason\":\"reauth_required\"}}\n\n"
+                return
 
             if events:
                 for ev in events:
@@ -528,7 +567,8 @@ async def _stream_multi_org(org_ids: list[int], since_by_org: dict[str, str], ca
     Per HLD §6, aggregate frames use compound ids:
       id: v1;org=<org_id>;sid=<redis_stream_id>
 
-    §6.1: enforces hard deadline and periodic revalidation per org.
+    §6.1: enforces hard deadline, pre-yield expiry check, and periodic
+    live membership revalidation per org via the id service.
     """
     last_by_org: dict[str, str] = dict(since_by_org)
     heartbeat_interval = settings.ACTIVITY_SSE_HEARTBEAT_SECONDS
@@ -549,13 +589,13 @@ async def _stream_multi_org(org_ids: list[int], since_by_org: dict[str, str], ca
             # §6.1: periodic revalidation
             if now - last_revalidate >= revalidate_interval:
                 last_revalidate = now
-                # Check token expiry
-                if time.time() >= caller.token_exp:
+                # Check token expiry (cheap, no network)
+                if not _check_token_not_expired(caller):
                     yield f"event: home.reconnect.v1\ndata: {{\"reason\":\"reauth_required\"}}\n\n"
                     return
-                # Check each org membership still valid
+                # Live membership revalidation per org via id service
                 for oid in list(active_orgs):
-                    if not _check_membership_still_valid(caller, oid):
+                    if not await _revalidate_membership(caller, oid):
                         active_orgs.discard(oid)
                         last_by_org.pop(str(oid), None)
                         yield f"event: home.deauthz.v1\ndata: {{\"dropped_org\": {oid}}}\n\n"
@@ -573,6 +613,12 @@ async def _stream_multi_org(org_ids: list[int], since_by_org: dict[str, str], ca
                 yield f": heartbeat (redis error)\n\n"
                 await asyncio.sleep(heartbeat_interval)
                 continue
+
+            # Pre-yield: recheck expiry after await (token may have expired
+            # while XREAD was blocked)
+            if not _check_token_not_expired(caller):
+                yield f"event: home.reconnect.v1\ndata: {{\"reason\":\"reauth_required\"}}\n\n"
+                return
 
             if events:
                 for ev in events:
