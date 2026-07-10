@@ -489,25 +489,31 @@ async def fetch_agent_peek(client: httpx.AsyncClient, bearer: str,
     email = (email or "").strip().lower()
     if not email:
         return Widget.empty_()
-    try:
-        tasks_resp, feed_resp = await asyncio.gather(
-            client.get(f"{settings.PULSE_API_URL}/api/items/",
-                       headers=headers,
-                       params={"limit": "10", "mode": "task", "is_active": "true",
-                               "assignee_email": email},
-                       timeout=settings.SOURCE_TIMEOUT_SECONDS),
-            client.get(f"{settings.PULSE_API_URL}/api/items/activity-feed/",
-                       headers=headers,
-                       params={"limit": "20", "actor": email},
-                       timeout=settings.SOURCE_TIMEOUT_SECONDS),
-        )
-    except (httpx.TimeoutException, httpx.TransportError) as exc:
-        logger.warning("agent_peek source failed: %s", type(exc).__name__)
+    # The assignee-tasks query is Pulse's slowest read (~2.5s of permission
+    # scoping); give this drawer fetch a wider budget than the default source
+    # timeout (nginx caps /api/home/ at 5s total) and degrade PARTIALLY — one
+    # slow source must not blank the other.
+    tasks_resp, feed_resp = await asyncio.gather(
+        client.get(f"{settings.PULSE_API_URL}/api/items/",
+                   headers=headers,
+                   params={"limit": "10", "mode": "task", "is_active": "true",
+                           "assignee_email": email},
+                   timeout=4.0),
+        client.get(f"{settings.PULSE_API_URL}/api/items/activity-feed/",
+                   headers=headers,
+                   params={"limit": "20", "actor": email},
+                   timeout=settings.SOURCE_TIMEOUT_SECONDS),
+        return_exceptions=True,
+    )
+    if isinstance(tasks_resp, BaseException) and isinstance(feed_resp, BaseException):
+        logger.warning("agent_peek both sources failed: %s / %s",
+                       type(tasks_resp).__name__, type(feed_resp).__name__)
         return Widget.degraded_()
-    if tasks_resp.status_code in (401, 403) and feed_resp.status_code in (401, 403):
+    if (not isinstance(tasks_resp, BaseException) and tasks_resp.status_code in (401, 403)
+            and not isinstance(feed_resp, BaseException) and feed_resp.status_code in (401, 403)):
         return Widget.unauthorized_()
     tasks = []
-    if tasks_resp.status_code < 400:
+    if not isinstance(tasks_resp, BaseException) and tasks_resp.status_code < 400:
         try:
             payload = tasks_resp.json()
             rows = payload.get("results", payload) if isinstance(payload, dict) else payload
@@ -522,7 +528,7 @@ async def fetch_agent_peek(client: httpx.AsyncClient, bearer: str,
         except ValueError:
             pass
     events = []
-    if feed_resp.status_code < 400:
+    if not isinstance(feed_resp, BaseException) and feed_resp.status_code < 400:
         try:
             events = (feed_resp.json() or {}).get("results") or []
         except ValueError:
