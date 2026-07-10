@@ -393,7 +393,7 @@ export function useHomeActivityStream({ orgId, maxItems = MAX_ITEMS } = {}) {
       controller.abort()
       streamActiveRef.current = false
     }
-  }, [fetchRecent, openStream])
+  }, [fetchRecent, openStream, maxItems])
 
   return { events, loading, error, degraded, stale }
 }

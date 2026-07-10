@@ -161,7 +161,9 @@ describe('useHomeActivityStream', () => {
 
     // Should not immediately reconnect (backoff)
     const countAfter401 = callCount
-    await new Promise(resolve => setTimeout(resolve, 200))
+    await new Promise(resolve => {
+      setTimeout(resolve, 200)
+    })
     expect(callCount).toBe(countAfter401)
     unmount()
   })
