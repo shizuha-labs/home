@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shizuha Roast — Artisan Coffee</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; color: #2c1810; line-height: 1.6; }
+    .hero {
+      background: linear-gradient(135deg, #2c1810 0%, #4a2c1a 50%, #6b3a2a 100%);
+      color: #f5e6d3; padding: 6rem 2rem; text-align: center;
+    }
+    .hero h1 { font-size: 3.5rem; margin-bottom: 0.5rem; letter-spacing: 2px; }
+    .hero p { font-size: 1.3rem; opacity: 0.9; max-width: 600px; margin: 0 auto; }
+    .container { max-width: 1000px; margin: 0 auto; padding: 3rem 2rem; }
+    .section-title { font-size: 2rem; color: #2c1810; margin-bottom: 2rem; text-align: center; }
+    .menu-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 2rem; }
+    .menu-item {
+      background: #fdf6f0; border-radius: 12px; padding: 1.5rem;
+      box-shadow: 0 2px 8px rgba(44,24,16,0.1); transition: transform 0.2s;
+    }
+    .menu-item:hover { transform: translateY(-4px); }
+    .menu-item h3 { font-size: 1.3rem; color: #4a2c1a; margin-bottom: 0.3rem; }
+    .menu-item .price { font-size: 1.1rem; color: #8b5e3c; font-weight: 600; margin-bottom: 0.5rem; }
+    .menu-item p { color: #6b5a4a; font-size: 0.95rem; }
+    .form-group { margin-bottom: 1.5rem; }
+    .form-group label { display: block; margin-bottom: 0.5rem; font-weight: 600; color: #4a2c1a; }
+    .form-group input, .form-group textarea {
+      width: 100%; padding: 0.8rem; border: 2px solid #d4b8a0; border-radius: 8px;
+      font-size: 1rem; font-family: inherit; transition: border-color 0.2s;
+    }
+    .form-group input:focus, .form-group textarea:focus { outline: none; border-color: #8b5e3c; }
+    .form-group textarea { min-height: 120px; resize: vertical; }
+    .btn {
+      background: #4a2c1a; color: #f5e6d3; border: none; padding: 1rem 2.5rem;
+      font-size: 1.1rem; border-radius: 8px; cursor: pointer; transition: background 0.2s;
+    }
+    .btn:hover { background: #2c1810; }
+    .footer { background: #2c1810; color: #d4b8a0; text-align: center; padding: 2rem; margin-top: 3rem; }
+    .footer a { color: #f5e6d3; }
+    @media (max-width: 600px) {
+      .hero h1 { font-size: 2.5rem; }
+      .hero { padding: 4rem 1.5rem; }
+    }
+  </style>
+</head>
+<body>
+  <section class="hero">
+    <h1>☕ Shizuha Roast</h1>
+    <p>Hand-roasted, ethically sourced — every cup tells a story.</p>
+  </section>
+
+  <div class="container">
+    <h2 class="section-title">Our Menu</h2>
+    <div class="menu-grid">
+      <div class="menu-item">
+        <h3>Pour-Over Single Origin</h3>
+        <div class="price">₹250</div>
+        <p>Ethiopian Yirgacheffe — floral, bright, with notes of bergamot and honey. Brewed to order on a Hario V60.</p>
+      </div>
+      <div class="menu-item">
+        <h3>Classic Espresso</h3>
+        <div class="price">₹180</div>
+        <p>Our house blend of Arabica beans from Karnataka. Rich crema, chocolate undertones, smooth finish.</p>
+      </div>
+      <div class="menu-item">
+        <h3>Cold Brew Tonic</h3>
+        <div class="price">₹220</div>
+        <p>12-hour steeped cold brew over ice, topped with artisanal tonic water and a twist of orange. Refreshingly crisp.</p>
+      </div>
+      <div class="menu-item">
+        <h3>Matcha Latte</h3>
+        <div class="price">₹280</div>
+        <p>Ceremonial-grade matcha whisked with steamed oat milk. Earthy, creamy, and vibrant green.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="container" style="background:#fdf6f0; border-radius:12px;">
+    <h2 class="section-title">Get in Touch</h2>
+    <form onsubmit="alert('Thanks for reaching out! We\'ll get back to you soon.'); return false;">
+      <div class="form-group">
+        <label for="name">Name</label>
+        <input type="text" id="name" name="name" required placeholder="Your name">
+      </div>
+      <div class="form-group">
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" required placeholder="you@example.com">
+      </div>
+      <div class="form-group">
+        <label for="message">Message</label>
+        <textarea id="message" name="message" required placeholder="Tell us what's on your mind..."></textarea>
+      </div>
+      <button type="submit" class="btn">Send Message</button>
+    </form>
+  </div>
+
+  <footer class="footer">
+    <p>📍 123 Brewers Lane, Indiranagar, Bangalore</p>
+    <p>📞 <a href="tel:+918080123456">+91 8080 123 456</a></p>
+    <p>🕐 Mon–Sat 7:00 AM – 9:00 PM · Sun 8:00 AM – 6:00 PM</p>
+    <p style="margin-top:1rem; font-size:0.85rem;">© 2026 Shizuha Roast. Crafted with care.</p>
+  </footer>
+</body>
+</html>
