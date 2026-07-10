@@ -55,6 +55,7 @@ ARG FRONTEND_PATH=home
 
 # Copy custom nginx config (nginx.prod.conf is at shizuha-home root, not frontend/)
 COPY ${FRONTEND_PATH}/nginx.prod.conf /etc/nginx/conf.d/default.conf
+RUN nginx -t
 
 # Copy built static files
 COPY --from=builder /app/dist /usr/share/nginx/html
