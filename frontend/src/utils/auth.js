@@ -49,6 +49,50 @@ export function expireSessionAndRedirect() {
   redirectToLogin()
 }
 
+export function getRefreshToken() {
+  try {
+    return localStorage.getItem(REFRESH_TOKEN_KEY) || ''
+  } catch {
+    return ''
+  }
+}
+
+let refreshInFlight = null
+
+/**
+ * Silent session refresh against shizuha-id. Besides extending expiry, the
+ * refresh endpoint RECOMPUTES enabled_services — so services granted after
+ * login (e.g. connect for the personal agent) reach this session without a
+ * manual re-login. Without this, a stale token shows "Restricted" forever.
+ * Returns true when a fresh token pair was stored.
+ */
+export async function refreshSession() {
+  const refresh = getRefreshToken()
+  if (!refresh) return false
+  if (refreshInFlight) return refreshInFlight
+  refreshInFlight = (async () => {
+    try {
+      const res = await fetch('/id/api/auth/refresh/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh }),
+      })
+      if (!res.ok) return false
+      const data = await res.json()
+      if (!data?.access) return false
+      localStorage.setItem(ACCESS_TOKEN_KEY, data.access)
+      if (data.refresh) localStorage.setItem(REFRESH_TOKEN_KEY, data.refresh)
+      window.dispatchEvent(new Event('shizuha-auth-refreshed'))
+      return true
+    } catch {
+      return false
+    } finally {
+      refreshInFlight = null
+    }
+  })()
+  return refreshInFlight
+}
+
 export function handleUnauthorized(response) {
   if (response?.status === 401) {
     expireSessionAndRedirect()

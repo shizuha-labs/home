@@ -5,6 +5,7 @@ import {
   clearAuthStorage,
   expireSessionAndRedirect,
   isAccessTokenExpired,
+  refreshSession,
 } from '../utils/auth'
 
 const AuthContext = createContext(null)
@@ -21,15 +22,23 @@ export function AuthProvider({ children }) {
 
   // Initialize auth state from localStorage
   useEffect(() => {
-    const initAuth = () => {
+    const initAuth = async () => {
       const accessToken = localStorage.getItem(ACCESS_TOKEN_KEY)
       const storedUser = localStorage.getItem(USER_KEY)
 
       if (accessToken && isAccessTokenExpired(accessToken)) {
-        expireSessionAndRedirect()
-        setUser(null)
-        setIsAuthenticated(false)
-      } else if (accessToken && storedUser) {
+        // Try a silent refresh before nuking the session — a valid refresh
+        // token means the user never has to see the login page.
+        const refreshed = await refreshSession()
+        if (!refreshed) {
+          expireSessionAndRedirect()
+          setUser(null)
+          setIsAuthenticated(false)
+          setIsLoading(false)
+          return
+        }
+      }
+      if ((localStorage.getItem(ACCESS_TOKEN_KEY) || accessToken) && storedUser) {
         try {
           const userData = JSON.parse(storedUser)
           setUser(userData)
@@ -47,6 +56,16 @@ export function AuthProvider({ children }) {
     }
 
     initAuth()
+  }, [])
+
+  // Silent claim refresh: on load + every 10 minutes. The id refresh endpoint
+  // recomputes enabled_services, so services granted AFTER login (connect,
+  // hive, ...) reach an already-open session — no manual re-login, no
+  // permanent "Restricted" chips from a stale token.
+  useEffect(() => {
+    refreshSession()
+    const t = setInterval(() => refreshSession(), 10 * 60 * 1000)
+    return () => clearInterval(t)
   }, [])
 
   // Listen for storage events (cross-tab sync)
