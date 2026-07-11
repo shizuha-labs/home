@@ -666,7 +666,7 @@ async def test_concurrent_stream_cap_sheds_n_plus_one_and_cleans_up(monkeypatch)
     monkeypatch.setattr(settings, "ACTIVITY_STREAM_READ_TIMEOUT_MS", 5000)
     monkeypatch.setattr(settings, "ACTIVITY_SSE_HEARTBEAT_SECONDS", 1)
     monkeypatch.setattr(settings, "HOME_SSE_REVALIDATE_INTERVAL_SECONDS", 3600)
-    monkeypatch.setattr(settings, "HOME_SSE_MAX_LIFETIME_SECONDS", 1)
+    monkeypatch.setattr(settings, "HOME_SSE_MAX_LIFETIME_SECONDS", 3600)  # long lifetime — we disconnect explicitly
     main_module._active_stream_connections = 0
 
     # Mock block_read to return empty (stream stays open yielding heartbeats)
@@ -707,25 +707,27 @@ async def test_concurrent_stream_cap_sheds_n_plus_one_and_cleans_up(monkeypatch)
 
     tok = _token(memberships={"1": "admin"})
 
-    async def _run_stream() -> int:
-        """Run a single stream request via raw ASGI and return the status code.
-        Blocks on an asyncio.Event().wait() for the second receive() call,
-        which never resolves — the stream runs until its lifetime expires."""
-        status_code = [None]
+    async def _run_stream() -> dict:
+        """Run a single stream request via raw ASGI and return status + headers.
+        The stream stays open until the caller sets the disconnect event."""
+        result = {"status": None, "headers": {}}
         received_request = False
-        forever = asyncio.Event()
+        disconnect = asyncio.Event()
 
         async def receive():
             nonlocal received_request
             if not received_request:
                 received_request = True
                 return {"type": "http.request", "body": b"", "more_body": False}
-            await forever.wait()
+            await disconnect.wait()
             return {"type": "http.disconnect"}
 
         async def send(message):
             if message["type"] == "http.response.start":
-                status_code[0] = message["status"]
+                result["status"] = message["status"]
+                # Capture headers as a dict
+                for key, val in message.get("headers", []):
+                    result["headers"][key.decode()] = val.decode()
 
         scope = {
             "type": "http",
@@ -742,7 +744,7 @@ async def test_concurrent_stream_cap_sheds_n_plus_one_and_cleans_up(monkeypatch)
             "asgi": {"version": "3.0"},
         }
         await main_module.app(scope, receive, send)
-        return status_code[0]
+        return result
 
     # Open N=3 concurrent streams as background tasks.
     s1 = asyncio.create_task(_run_stream())
@@ -762,26 +764,33 @@ async def test_concurrent_stream_cap_sheds_n_plus_one_and_cleans_up(monkeypatch)
 
     # N+1 request should be 503 with Retry-After
     n1 = asyncio.create_task(_run_stream())
-    n1_status = await asyncio.wait_for(n1, timeout=5)
-    assert n1_status == 503, f"N+1 request should be 503, got {n1_status}"
+    n1_result = await asyncio.wait_for(n1, timeout=5)
+    assert n1_result["status"] == 503, f"N+1 request should be 503, got {n1_result['status']}"
+    assert n1_result["headers"].get("retry-after") == "10", (
+        f"N+1 should have Retry-After: 10, got {n1_result['headers'].get('retry-after')}"
+    )
 
     # Slot count should still be 3
     assert main_module._active_stream_connections == 3, (
         f"Expected 3 active slots after 503, got {main_module._active_stream_connections}"
     )
 
-    # Wait for all 3 stream tasks to complete naturally (1s lifetime)
+    # Explicitly disconnect all 3 held streams by cancelling their tasks
+    s1.cancel()
+    s2.cancel()
+    s3.cancel()
     await asyncio.wait_for(asyncio.gather(s1, s2, s3, return_exceptions=True), timeout=5)
 
-    # Slot count should return to 0
+    # Slot count should return to 0 after all streams are disconnected
     assert main_module._active_stream_connections == 0, (
-        f"Expected 0 active slots after expiry, got {main_module._active_stream_connections}"
+        f"Expected 0 active slots after disconnect, got {main_module._active_stream_connections}"
     )
 
 
 def test_activity_recent_handles_500_events(monkeypatch):
     """HLD §11: inject ≥500 events for one org and verify bounded
-    retained history and correct cursor."""
+    retained history and correct cursor. Also proves bounded server cost:
+    the server only reads `limit` entries from Redis, not all 500."""
     from app.redis_client import reset_pools
     reset_pools()
     mock = _MockRedis()
@@ -799,6 +808,19 @@ def test_activity_recent_handles_500_events(monkeypatch):
     monkeypatch.setattr("app.redis_client.aioredis.ConnectionPool.from_url", _fake_pool_from_url)
     monkeypatch.setattr("app.redis_client.aioredis.Redis", _fake_redis_from_pool)
 
+    # Track how many entries are accessed via xrevrange
+    original_xrevrange = mock.xrevrange
+    xrevrange_call_count = [0]
+    xrevrange_returned_count = [0]
+
+    async def tracking_xrevrange(name, max="+", min="-", count=None):
+        xrevrange_call_count[0] += 1
+        result = await original_xrevrange(name, max, min, count)
+        xrevrange_returned_count[0] += len(result)
+        return result
+
+    mock.xrevrange = tracking_xrevrange
+
     # Inject 500 events for org 1
     for i in range(500):
         mock.add_event(1, _make_event(1, "", source="pulse", etype="task.comment",
@@ -812,6 +834,19 @@ def test_activity_recent_handles_500_events(monkeypatch):
     assert len(body["events"]) <= 100  # default limit
     # Cursor should point to the latest event
     assert body["cursor_by_org"]["1"] is not None
+
+    # Prove bounded server cost: xrevrange was called with count=50 (default limit)
+    # and returned at most 50 entries, not all 500
+    assert xrevrange_call_count[0] == 1, (
+        f"Expected 1 xrevrange call, got {xrevrange_call_count[0]}"
+    )
+    assert xrevrange_returned_count[0] <= 100, (
+        f"xrevrange returned {xrevrange_returned_count[0]} entries, expected ≤100"
+    )
+    assert xrevrange_returned_count[0] < 500, (
+        f"xrevrange returned {xrevrange_returned_count[0]} entries — "
+        f"should be bounded by limit, not all 500"
+    )
 
 
 # ---- Redis degradation -------------------------------------------------------

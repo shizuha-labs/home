@@ -34,6 +34,19 @@ function createOpenStream() {
   })
 }
 
+// Helper: create a stream that emits events then throws (simulating read/network error)
+function createThrowingStream(...events) {
+  const encoder = new TextEncoder()
+  const chunks = events.map(e => encoder.encode(e + '\n'))
+  return new ReadableStream({
+    start(controller) {
+      chunks.forEach(c => controller.enqueue(c))
+      // After emitting all events, throw an error to simulate a read/network failure
+      controller.error(new Error('simulated read error'))
+    },
+  })
+}
+
 // Helper: create a mock Response
 function mockResponse({ status = 200, body, json } = {}) {
   return {
@@ -440,7 +453,7 @@ describe('useHomeActivityStream', () => {
       // (simulating a read/network error mid-stream)
       return Promise.resolve(mockResponse({
         status: 200,
-        body: createSSEStream(
+        body: createThrowingStream(
           'id: v1;org=1;sid=2',
           'event: home.activity.v1',
           'data: {"id":"2","org_id":1,"type":"test","summary":"valid event"}',
@@ -466,8 +479,8 @@ describe('useHomeActivityStream', () => {
     await act(async () => { vi.advanceTimersByTime(3600) })
     expect(callCount).toBeGreaterThanOrEqual(5)
 
-    // 4th stream delivers a valid event then clean EOF (no throw).
-    // Backoff should be reset to base (1s).
+    // 4th stream delivers a valid event then throws (read/network error).
+    // Backoff should be reset to base (1s) because the event was received.
     await act(async () => { vi.advanceTimersByTime(500) })
     const countAfterEvent = callCount
     expect(callCount).toBe(countAfterEvent)
