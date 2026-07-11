@@ -7,6 +7,8 @@ import CommandCenterDashboard from '../components/dashboard/CommandCenterDashboa
 import LiveTheater from '../components/dashboard/LiveTheater'
 import CockpitPeek from '../components/dashboard/CockpitPeek'
 import CommandPalette from '../components/assistant/CommandPalette'
+import MiniShizuhaChat from '../components/assistant/MiniShizuhaChat'
+import { useVoiceInput, speakText } from '../hooks/useVoice'
 import { useHomeSummary } from '../hooks/useHomeSummary'
 import { useHomeActivity } from '../hooks/useHomeActivity'
 import { getAccessToken, handleUnauthorized } from '../utils/auth'
@@ -89,6 +91,12 @@ function ChatHomeInner() {
 
   const [inputValue, setInputValue] = useState('')
   const [isSending, setIsSending] = useState(false)
+  // Inline mini-chat (operator 2026-07-11): chat with Shizuha while STAYING on
+  // the home page. When set, the Shizuha conversation is ACTIVE in the provider
+  // (messages stream in) but we render a rolling strip instead of navigating.
+  const [miniConvId, setMiniConvId] = useState(null)
+  const [speakReplies, setSpeakReplies] = useState(() => localStorage.getItem('shizuha_speak_replies') === '1')
+  const lastSpokenIdRef = useRef(null)
   const [showApps, setShowApps] = useState(false)
   const [showNewChat, setShowNewChat] = useState(false)
   const [showCommandPalette, setShowCommandPalette] = useState(false)
@@ -145,14 +153,16 @@ function ChatHomeInner() {
     })()
   }, [])
 
-  // Sync URL param to active conversation
+  // Sync URL param to active conversation. The mini chat activates the
+  // Shizuha conversation WITHOUT a /c/:id URL — don't clear it here.
   useEffect(() => {
     if (urlConversationId && urlConversationId !== activeConversationId) {
+      setMiniConvId(null)
       setActiveConversation(urlConversationId)
-    } else if (!urlConversationId && activeConversationId) {
+    } else if (!urlConversationId && activeConversationId && activeConversationId !== miniConvId) {
       setActiveConversation(null)
     }
-  }, [activeConversationId, setActiveConversation, urlConversationId])
+  }, [activeConversationId, miniConvId, setActiveConversation, urlConversationId])
 
   // Send pending message from home input after conversation loads
   useEffect(() => {
@@ -177,6 +187,11 @@ function ChatHomeInner() {
     if (!message.trim() || isSending) return
     setIsSending(true)
     try {
+      // Mini chat already live: just send on the active conversation.
+      if (miniConvId && activeConversationId === miniConvId) {
+        sendMessage(message)
+        return
+      }
       let shizuhaConv = conversations.find(c =>
         c.participants?.some(p => p.user_name === 'Shizuha' || p.agent_role)
       )
@@ -195,18 +210,66 @@ function ChatHomeInner() {
         }
       }
       if (shizuhaConv) {
-        // Store pending message so the chat view sends it after mounting
+        // Store pending message; the existing pending-message effect sends it
+        // once the conversation is active + connected (works without navigating).
         sessionStorage.setItem('shizuha_pending_message', JSON.stringify({
           conversationId: shizuhaConv.id,
           content: message,
         }))
+        // Operator 2026-07-11: STAY on the home page — open the inline mini
+        // chat instead of navigating to the full /c/:id view.
+        setMiniConvId(shizuhaConv.id)
         setActiveConversation(shizuhaConv.id)
-        navigate(`/c/${shizuhaConv.id}`)
       }
     } finally {
       setIsSending(false)
     }
-  }, [conversations, createDirectConversation, navigate, setActiveConversation, isSending])
+  }, [activeConversationId, conversations, createDirectConversation, isSending, miniConvId, sendMessage, setActiveConversation])
+
+  const closeMiniChat = useCallback(() => {
+    setMiniConvId(null)
+    setActiveConversation(null)
+  }, [setActiveConversation])
+
+  const openFullFromMini = useCallback(() => {
+    if (!miniConvId) return
+    const id = miniConvId
+    setMiniConvId(null)
+    navigate(`/c/${id}`)
+  }, [miniConvId, navigate])
+
+  // Voice replies: speak Shizuha's newest message when enabled (mini mode only).
+  useEffect(() => {
+    if (!speakReplies || !miniConvId || activeConversationId !== miniConvId) return
+    const list = Array.isArray(messages) ? messages : []
+    const last = list[list.length - 1]
+    if (!last || last.sender_id === user?.id) return
+    const key = last.id || last.client_message_id
+    if (!key || lastSpokenIdRef.current === key) return
+    lastSpokenIdRef.current = key
+    speakText(last.content)
+  }, [messages, speakReplies, miniConvId, activeConversationId, user?.id])
+
+  const toggleSpeakReplies = useCallback(() => {
+    setSpeakReplies((v) => {
+      const next = !v
+      localStorage.setItem('shizuha_speak_replies', next ? '1' : '0')
+      if (!next) speakText.stop?.()
+      return next
+    })
+  }, [])
+
+  // Voice input: hold-to-talk / tap-to-toggle mic. Transcript lands in the
+  // input box so the user can review before sending (or auto-send on final).
+  const { micState, micSupported, toggleMic } = useVoiceInput({
+    onTranscript: (text, { final }) => {
+      setInputValue(text)
+      if (final && text.trim()) {
+        sendToShizuha(text)
+        setInputValue('')
+      }
+    },
+  })
 
   const handleSubmit = useCallback(() => {
     if (inputValue.trim()) {
@@ -256,8 +319,10 @@ function ChatHomeInner() {
 
   const firstName = user?.first_name || user?.username || ''
 
-  // Active conversation: show chat in the same branded shell
-  if (activeConversationId) {
+  // Active conversation VIA URL: show the full chat in the same branded shell.
+  // (A mini-chat activation keeps activeConversationId set WITHOUT a URL — the
+  // home layout below renders the inline strip instead.)
+  if (activeConversationId && urlConversationId) {
     const activeConv = conversations.find(c => c.id === activeConversationId)
     const activeName = (() => {
       if (!activeConv) return 'Chat'
@@ -547,6 +612,23 @@ function ChatHomeInner() {
                 >
                   ⌘K
                 </button>
+                {micSupported && (
+                  <button
+                    onClick={toggleMic}
+                    title={micState === 'listening' ? 'Stop listening' : micState === 'transcribing' ? 'Transcribing…' : 'Speak to Shizuha'}
+                    className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors shadow-sm ${
+                      micState === 'listening'
+                        ? 'bg-red-500 text-white animate-pulse'
+                        : micState === 'transcribing'
+                          ? 'bg-amber-400 text-white'
+                          : 'bg-gray-100 text-gray-500 hover:bg-brand-50 hover:text-brand-600 dark:bg-gray-800 dark:text-gray-400 dark:hover:text-brand-400'
+                    }`}
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+                    </svg>
+                  </button>
+                )}
                 <button
                   onClick={handleSubmit}
                   disabled={!inputValue.trim() || isSending}
@@ -558,6 +640,21 @@ function ChatHomeInner() {
                 </button>
               </div>
             </div>
+
+            {/* Inline mini chat (operator 2026-07-11): rolling 2-3 line strip —
+                talk with Shizuha without leaving the home page. */}
+            {miniConvId && activeConversationId === miniConvId && (
+              <MiniShizuhaChat
+                messages={messages}
+                typingUsers={typingUsers}
+                currentUserId={user?.id}
+                isLoading={isLoadingMessages}
+                onOpenFull={openFullFromMini}
+                onClose={closeMiniChat}
+                speakEnabled={speakReplies}
+                onToggleSpeak={toggleSpeakReplies}
+              />
+            )}
           </div>
 
           {/* HIVE-602: the live theater — agents visibly working, events
