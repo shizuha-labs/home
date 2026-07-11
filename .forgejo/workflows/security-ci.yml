@@ -18,7 +18,13 @@ concurrency:
 
 jobs:
   sast-sca:
-    runs-on: ubuntu-latest
+    # PLAT-4255: prove both independent runner/storage failure domains on every
+    # security-ci run. Finding writes are idempotent Pulse upserts.
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [security-ci-amd64, security-ci-arm64]
+    runs-on: ${{ matrix.runner }}
     # ORIG-71: a hung scan must FAIL FAST and free its runner slot instead of
     # pinning it for an hour (jobs 2616/2633 froze mid-scan with ~75-line logs
     # and starved 9+ waiting jobs). Normal green runs finish well under 15 min.
@@ -104,8 +110,13 @@ jobs:
       - name: Run OSV dependency scan
         run: |
           set +e
+          case "$(uname -m)" in
+            x86_64|amd64) OSV_ARCH=amd64 ;;
+            aarch64|arm64) OSV_ARCH=arm64 ;;
+            *) echo "unsupported security-ci architecture: $(uname -m)" >&2; exit 1 ;;
+          esac
           timeout -k 30 180 curl -sfL --max-time 150 -o /usr/local/bin/osv-scanner \
-            "https://github.com/google/osv-scanner/releases/latest/download/osv-scanner_linux_amd64" \
+            "https://github.com/google/osv-scanner/releases/latest/download/osv-scanner_linux_${OSV_ARCH}" \
             && chmod +x /usr/local/bin/osv-scanner
           timeout -k 30 600 osv-scanner -r --format=json --output=osv.json .
           rc=$?
@@ -124,7 +135,12 @@ jobs:
           # the empty-JSON fallback below keeps CI green (findings are tracked,
           # not gated).
           TRIVY_VERSION=0.72.0
-          asset="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          case "$(uname -m)" in
+            x86_64|amd64) TRIVY_ARCH=64bit ;;
+            aarch64|arm64) TRIVY_ARCH=ARM64 ;;
+            *) echo "unsupported security-ci architecture: $(uname -m)" >&2; exit 1 ;;
+          esac
+          asset="trivy_${TRIVY_VERSION}_Linux-${TRIVY_ARCH}.tar.gz"
           base="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}"
           ( set -e
             cd /tmp
