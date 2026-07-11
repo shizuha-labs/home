@@ -197,16 +197,19 @@ function ChatHomeInner() {
       )
       if (!shizuhaConv) {
         const token = getAuthToken()
-        const searchResp = await fetch(`/connect/api/search/people/?q=shizuha`, {
-          headers: { Authorization: `Bearer ${token}` },
+        // HIVE-620/624: every user has their OWN personal "Shizuha" agent — a real
+        // k3s fleet agent (SCLI) owned by them, isolated to their org. Get-or-create
+        // it and DM its Connect user directly (it's a member of the user's personal
+        // org, so the shared-org gate passes with no tenancy exemption).
+        const ensureResp = await fetch('/hive/api/v1/personal-agent', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         })
-        if (handleUnauthorized(searchResp)) return
-        if (searchResp.ok) {
-          const data = await searchResp.json()
-          const users = Array.isArray(data) ? data : (data.results || data.people || [])
-          const shizuhaUser = users.find(u => u.username === 'shizuha')
-          if (shizuhaUser) {
-            shizuhaConv = await createDirectConversation(shizuhaUser.id)
+        if (handleUnauthorized(ensureResp)) return
+        if (ensureResp.ok) {
+          const agent = await ensureResp.json()
+          if (agent.agent_user_id) {
+            shizuhaConv = await createDirectConversation(agent.agent_user_id)
           }
         }
       }
