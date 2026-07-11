@@ -34,6 +34,11 @@ class Settings:
     # tenant-isolation control: each service applies its own authz).
     PULSE_API_URL: str = os.environ.get("PULSE_API_URL", "http://shizuha-pulse:8002").rstrip("/")
     ADMIN_API_URL: str = os.environ.get("ADMIN_API_URL", "http://shizuha-admin:8003/api").rstrip("/")
+    # Service token for admin's internal control-plane endpoints (org-name
+    # hydration). Optional today (admin's compat branch accepts the named
+    # service while ADMIN_INTERNAL_SERVICE_TOKEN_ENFORCE is off); wire it before
+    # that enforce flip so org labels don't regress to "Organization <id>".
+    ADMIN_INTERNAL_SERVICE_TOKEN: str = os.environ.get("ADMIN_INTERNAL_SERVICE_TOKEN", "")
     HIVE_API_URL: str = os.environ.get(
         "HIVE_API_URL",
         "http://hive.shizuha-hive.svc.cluster.local:8030/hive/api",

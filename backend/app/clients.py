@@ -67,9 +67,21 @@ async def fetch_org_refs(client: httpx.AsyncClient, bearer: str, user_id: int,
     if not memberships:
         return []
     try:
+        # This admin endpoint is on the INTERNAL control plane: it authorizes a
+        # service identity and EXPLICITLY REJECTS a forwarded user bearer (a
+        # tenant JWT is never a substitute for service auth there). Authorization
+        # here already comes from the verified JWT membership claim above — admin
+        # is only a best-effort name source — so call it as the shizuha-home
+        # service (+ service token when configured; the compat branch accepts the
+        # named service today) instead of forwarding the caller's bearer, which
+        # would 403 and leave every org labelled "Organization <id>".
+        svc_headers = {"X-Internal-Service": "shizuha-home"}
+        svc_token = getattr(settings, "ADMIN_INTERNAL_SERVICE_TOKEN", "") or ""
+        if svc_token:
+            svc_headers["X-Internal-Service-Token"] = svc_token
         resp = await client.get(
             f"{settings.ADMIN_API_URL}/internal/users/{user_id}/organizations/",
-            headers=_auth_headers(bearer),
+            headers=svc_headers,
             params={"email": email} if email else {},
             timeout=settings.SOURCE_TIMEOUT_SECONDS,
         )
