@@ -201,7 +201,7 @@ function ChatHomeInner() {
         // k3s fleet agent (SCLI) owned by them, isolated to their org. Get-or-create
         // it and DM its Connect user directly (it's a member of the user's personal
         // org, so the shared-org gate passes with no tenancy exemption).
-        const ensureResp = await fetch('/hive/api/v1/personal-agent', {
+        const ensureResp = await fetch('/hive/api/v1/fleet/personal-agent', {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         })
