@@ -5,9 +5,13 @@ set -euo pipefail
 NAMESPACE="${1:?usage: monotonic-release-guard.sh <namespace> <deployment> <run-sha>}"
 DEPLOYMENT="${2:?usage: monotonic-release-guard.sh <namespace> <deployment> <run-sha>}"
 RUN_SHA="${3:?usage: monotonic-release-guard.sh <namespace> <deployment> <run-sha>}"
-RECORDED="$(kubectl get deploy -n "${NAMESPACE}" "${DEPLOYMENT}" -o jsonpath='{.metadata.annotations.shizuha\.io/last-successful-sha}' 2>/dev/null || true)"
+if ! RELEASE_STATE="$(kubectl get deploy -n "${NAMESPACE}" "${DEPLOYMENT}" \
+  -o jsonpath='{.metadata.annotations.shizuha\.io/last-successful-sha}{"|"}{.spec.template.spec.containers[0].image}')"; then
+  echo "::error::MONOTONIC GUARD — cannot read live Deployment ${NAMESPACE}/${DEPLOYMENT}; refusing to mutate live state"
+  exit 2
+fi
+IFS='|' read -r RECORDED LIVE_IMAGE <<< "${RELEASE_STATE}"
 if [ -z "${RECORDED}" ]; then
-  LIVE_IMAGE="$(kubectl get deploy -n "${NAMESPACE}" "${DEPLOYMENT}" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)"
   RECORDED="$(printf '%s\n' "${LIVE_IMAGE}" | sed -nE 's/.*[-:_/]([0-9a-fA-F]{7,40})([-.]|$)/\1/p' | head -1)"
 fi
 if [ -z "${RECORDED}" ]; then
