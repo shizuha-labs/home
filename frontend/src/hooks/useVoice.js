@@ -138,9 +138,11 @@ export function useVoiceInput({ onTranscript } = {}) {
 
 let currentAudio = null
 
-/** Speak `text` aloud — self-hosted TTS when available, speechSynthesis otherwise. */
+/** Speak `text` aloud — self-hosted TTS when available, speechSynthesis
+ * otherwise. Returns a promise that resolves when playback FINISHES (so a
+ * voice-conversation loop can resume listening after the reply is spoken). */
 export async function speakText(text) {
-  const clean = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 1200)
+  const clean = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 1500)
   if (!clean) return
   speakText.stop()
   try {
@@ -157,17 +159,25 @@ export async function speakText(text) {
       if (res.ok) {
         const blob = await res.blob()
         const url = URL.createObjectURL(blob)
-        currentAudio = new Audio(url)
-        currentAudio.onended = () => { URL.revokeObjectURL(url); currentAudio = null }
-        await currentAudio.play()
+        const audio = new Audio(url)
+        currentAudio = audio
+        await new Promise((resolve) => {
+          audio.onended = () => { URL.revokeObjectURL(url); if (currentAudio === audio) currentAudio = null; resolve() }
+          audio.onerror = () => { URL.revokeObjectURL(url); if (currentAudio === audio) currentAudio = null; resolve() }
+          audio.play().catch(() => resolve())
+        })
         return
       }
     }
   } catch { /* fall through to browser voice */ }
   if (typeof speechSynthesis !== 'undefined') {
-    const utter = new SpeechSynthesisUtterance(clean)
-    utter.rate = 1.05
-    speechSynthesis.speak(utter)
+    await new Promise((resolve) => {
+      const utter = new SpeechSynthesisUtterance(clean)
+      utter.rate = 1.05
+      utter.onend = resolve
+      utter.onerror = resolve
+      speechSynthesis.speak(utter)
+    })
   }
 }
 
@@ -177,4 +187,152 @@ speakText.stop = () => {
     currentAudio = null
   }
   if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel()
+}
+
+// ── Hands-free voice conversation loop (operator 2026-07-11) ─────────────────
+// listen (VAD auto-stop) → transcribe (grok STT) → onUtterance(text) → parent
+// sends to Shizuha → notifyReply(text) speaks it (kokoro TTS) → resume listen.
+// Voice-only; the mini-chat strip shows the rolling text alongside.
+
+async function _transcribeBlob(blob) {
+  const serverReady = await probeVoiceService()
+  if (!serverReady) return ''
+  try {
+    const form = new FormData()
+    form.append('audio', blob, 'utt.webm')
+    const res = await fetch('/voice/api/stt', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${getAccessToken()}` },
+      body: form,
+    })
+    if (res.ok) return (await res.json()).text || ''
+  } catch { /* ignore */ }
+  return ''
+}
+
+export function useVoiceConversation({ onUtterance } = {}) {
+  const [callState, setCallState] = useState('idle') // idle | listening | thinking | speaking
+  const activeRef = useRef(false)
+  const mrRef = useRef(null)
+  const streamRef = useRef(null)
+  const audioCtxRef = useRef(null)
+  const vadRafRef = useRef(null)
+  const chunksRef = useRef([])
+  const onUtteranceRef = useRef(onUtterance)
+  onUtteranceRef.current = onUtterance
+  const listenOnceRef = useRef(null)
+
+  const teardownCapture = useCallback(() => {
+    if (vadRafRef.current) { cancelAnimationFrame(vadRafRef.current); vadRafRef.current = null }
+    const mr = mrRef.current
+    if (mr && mr.state !== 'inactive') { try { mr.stop() } catch { /* noop */ } }
+    mrRef.current = null
+    if (streamRef.current) { streamRef.current.getTracks().forEach((t) => t.stop()); streamRef.current = null }
+    if (audioCtxRef.current) { try { audioCtxRef.current.close() } catch { /* noop */ } audioCtxRef.current = null }
+  }, [])
+
+  const listenOnce = useCallback(async () => {
+    if (!activeRef.current) return
+    setCallState('listening')
+    let stream
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      })
+    } catch {
+      activeRef.current = false
+      setCallState('idle')
+      return
+    }
+    streamRef.current = stream
+    const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm'
+    const mr = new MediaRecorder(stream, { mimeType: mime })
+    mrRef.current = mr
+    chunksRef.current = []
+    mr.ondataavailable = (e) => { if (e.data.size) chunksRef.current.push(e.data) }
+    mr.onstop = async () => {
+      teardownCapture()
+      const blob = new Blob(chunksRef.current, { type: mime })
+      chunksRef.current = []
+      if (!activeRef.current) return
+      if (blob.size < 2500) { listenOnceRef.current?.(); return } // too short — re-listen
+      setCallState('thinking')
+      const text = await _transcribeBlob(blob)
+      if (!activeRef.current) return
+      if (text && text.trim()) {
+        onUtteranceRef.current?.(text.trim())  // parent sends; reply arrives via notifyReply
+      } else {
+        listenOnceRef.current?.() // heard nothing usable — listen again
+      }
+    }
+    mr.start()
+
+    // VAD: watch RMS; stop the recorder ~1.1s after speech ends. Also a hard
+    // 15s cap, and an 8s no-speech timeout to re-listen (avoids a stuck mic).
+    let ctx
+    try {
+      ctx = new (window.AudioContext || window.webkitAudioContext)()
+      audioCtxRef.current = ctx
+      const src = ctx.createMediaStreamSource(stream)
+      const analyser = ctx.createAnalyser()
+      analyser.fftSize = 1024
+      src.connect(analyser)
+      const buf = new Uint8Array(analyser.fftSize)
+      const startedAt = performance.now()
+      let spokeAt = 0
+      let lastLoud = 0
+      const SPEECH = 0.018   // RMS threshold for "speaking"
+      const HANG_MS = 1100   // silence after speech → end utterance
+      const MAX_MS = 15000
+      const NOSPEECH_MS = 8000
+      const tick = () => {
+        if (!activeRef.current || mr.state !== 'recording') return
+        analyser.getByteTimeDomainData(buf)
+        let sum = 0
+        for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; sum += v * v }
+        const rms = Math.sqrt(sum / buf.length)
+        const now = performance.now()
+        if (rms > SPEECH) { if (!spokeAt) spokeAt = now; lastLoud = now }
+        const elapsed = now - startedAt
+        const endedBySilence = spokeAt && (now - lastLoud > HANG_MS)
+        const noSpeech = !spokeAt && elapsed > NOSPEECH_MS
+        if (endedBySilence || elapsed > MAX_MS || noSpeech) {
+          if (noSpeech) { // nothing said — stop and re-listen without a round-trip
+            try { mr.stop() } catch { /* noop */ }
+            return
+          }
+          try { mr.stop() } catch { /* noop */ }
+          return
+        }
+        vadRafRef.current = requestAnimationFrame(tick)
+      }
+      vadRafRef.current = requestAnimationFrame(tick)
+    } catch { /* no Web Audio — recorder still stops via endCall/max via onstop path */ }
+  }, [teardownCapture])
+  listenOnceRef.current = listenOnce
+
+  // Parent calls this when Shizuha's reply text arrives → speak, then re-listen.
+  const notifyReply = useCallback(async (text) => {
+    if (!activeRef.current || !text) return
+    setCallState('speaking')
+    await speakText(text)
+    if (activeRef.current) listenOnceRef.current?.()
+  }, [])
+
+  const startCall = useCallback(() => {
+    if (activeRef.current) return
+    activeRef.current = true
+    listenOnceRef.current?.()
+  }, [])
+
+  const endCall = useCallback(() => {
+    activeRef.current = false
+    teardownCapture()
+    speakText.stop()
+    setCallState('idle')
+  }, [teardownCapture])
+
+  useEffect(() => () => { activeRef.current = false; teardownCapture(); speakText.stop() }, [teardownCapture])
+
+  return { callState, startCall, endCall, notifyReply, isCallActive: () => activeRef.current }
 }
