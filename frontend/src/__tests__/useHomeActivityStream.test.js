@@ -35,14 +35,21 @@ function createOpenStream() {
 }
 
 // Helper: create a stream that emits events then throws (simulating read/network error)
+// Uses pull-based delivery so the reader consumes the valid frames before the
+// error is raised — controller.error() in start() discards queued data.
 function createThrowingStream(...events) {
   const encoder = new TextEncoder()
   const chunks = events.map(e => encoder.encode(e + '\n'))
+  let delivered = false
   return new ReadableStream({
-    start(controller) {
-      chunks.forEach(c => controller.enqueue(c))
-      // After emitting all events, throw an error to simulate a read/network failure
-      controller.error(new Error('simulated read error'))
+    pull(controller) {
+      if (!delivered) {
+        delivered = true
+        chunks.forEach(c => controller.enqueue(c))
+        // Don't close — next pull will throw
+        return
+      }
+      throw new Error('simulated read error')
     },
   })
 }
