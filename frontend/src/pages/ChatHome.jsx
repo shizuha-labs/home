@@ -8,7 +8,7 @@ import LiveTheater from '../components/dashboard/LiveTheater'
 import CockpitPeek from '../components/dashboard/CockpitPeek'
 import CommandPalette from '../components/assistant/CommandPalette'
 import MiniShizuhaChat from '../components/assistant/MiniShizuhaChat'
-import { useVoiceInput, speakText } from '../hooks/useVoice'
+import { useVoiceInput, useVoiceConversation, speakText } from '../hooks/useVoice'
 import { useHomeSummary } from '../hooks/useHomeSummary'
 import { useHomeActivity } from '../hooks/useHomeActivity'
 import { getAccessToken, handleUnauthorized } from '../utils/auth'
@@ -238,17 +238,37 @@ function ChatHomeInner() {
     navigate(`/c/${id}`)
   }, [miniConvId, navigate])
 
-  // Voice replies: speak Shizuha's newest message when enabled (mini mode only).
+  // Hands-free voice call (operator 2026-07-11): listen → transcribe → send →
+  // speak the reply → listen again. onUtterance fires when the caller finishes
+  // an utterance; we send it to Shizuha and the reply is spoken by the effect
+  // below once it streams in.
+  const { callState, startCall, endCall, notifyReply, isCallActive } = useVoiceConversation({
+    onUtterance: (text) => { sendToShizuha(text) },
+  })
+  const callActive = callState !== 'idle'
+
+  const toggleCall = useCallback(() => {
+    if (isCallActive()) { endCall(); return }
+    startCall()
+  }, [isCallActive, startCall, endCall])
+
+  // Speak Shizuha's newest message. During a live call this drives the loop
+  // (speak → re-listen via notifyReply); otherwise it honors the speak toggle.
   useEffect(() => {
-    if (!speakReplies || !miniConvId || activeConversationId !== miniConvId) return
+    if (!miniConvId || activeConversationId !== miniConvId) return
     const list = Array.isArray(messages) ? messages : []
     const last = list[list.length - 1]
     if (!last || last.sender_id === user?.id) return
     const key = last.id || last.client_message_id
     if (!key || lastSpokenIdRef.current === key) return
-    lastSpokenIdRef.current = key
-    speakText(last.content)
-  }, [messages, speakReplies, miniConvId, activeConversationId, user?.id])
+    if (callActive) {
+      lastSpokenIdRef.current = key
+      notifyReply(last.content)
+    } else if (speakReplies) {
+      lastSpokenIdRef.current = key
+      speakText(last.content)
+    }
+  }, [messages, speakReplies, callActive, notifyReply, miniConvId, activeConversationId, user?.id])
 
   const toggleSpeakReplies = useCallback(() => {
     setSpeakReplies((v) => {
@@ -630,6 +650,25 @@ function ChatHomeInner() {
                   </button>
                 )}
                 <button
+                  onClick={toggleCall}
+                  title={callActive ? 'End voice call' : 'Start a hands-free voice call with Shizuha'}
+                  className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors shadow-sm ${
+                    callActive
+                      ? 'bg-emerald-500 text-white animate-pulse'
+                      : 'bg-gray-100 text-gray-500 hover:bg-emerald-50 hover:text-emerald-600 dark:bg-gray-800 dark:text-gray-400 dark:hover:text-emerald-400'
+                  }`}
+                >
+                  {callActive ? (
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M6.62 10.79a15.05 15.05 0 006.59 6.59l2.2-2.2a1 1 0 011.02-.24 11.36 11.36 0 003.56.57 1 1 0 011 1V20a1 1 0 01-1 1A17 17 0 013 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.24.2 2.45.57 3.56a1 1 0 01-.24 1.02l-2.21 2.21z" transform="rotate(135 12 12)" />
+                    </svg>
+                  ) : (
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M6.62 10.79a15.05 15.05 0 006.59 6.59l2.2-2.2a1 1 0 011.02-.24 11.36 11.36 0 003.56.57 1 1 0 011 1V20a1 1 0 01-1 1A17 17 0 013 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.24.2 2.45.57 3.56a1 1 0 01-.24 1.02l-2.21 2.21z" />
+                    </svg>
+                  )}
+                </button>
+                <button
                   onClick={handleSubmit}
                   disabled={!inputValue.trim() || isSending}
                   className="w-9 h-9 rounded-xl bg-brand-600 hover:bg-brand-700 text-white flex items-center justify-center disabled:opacity-25 disabled:cursor-not-allowed transition-colors shadow-sm"
@@ -653,6 +692,8 @@ function ChatHomeInner() {
                 onClose={closeMiniChat}
                 speakEnabled={speakReplies}
                 onToggleSpeak={toggleSpeakReplies}
+                callState={callState}
+                onToggleCall={toggleCall}
               />
             )}
           </div>

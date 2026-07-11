@@ -21,8 +21,16 @@ export default function MiniShizuhaChat({
   onClose,
   speakEnabled,
   onToggleSpeak,
+  callState = 'idle',
+  onToggleCall,
 }) {
   const scrollRef = useRef(null)
+  const callActive = callState !== 'idle'
+  const callLabel =
+    callState === 'listening' ? 'Listening…'
+      : callState === 'thinking' ? 'Thinking…'
+        : callState === 'speaking' ? 'Speaking…'
+          : ''
 
   // Rolling window: latest 3 messages, newest at the bottom.
   const visible = useMemo(() => {
@@ -41,14 +49,37 @@ export default function MiniShizuhaChat({
     <div className="relative mt-2 rounded-2xl border border-gray-200/80 bg-white/85 shadow-lg shadow-brand-900/5 backdrop-blur-sm dark:border-gray-700/80 dark:bg-gray-900/70">
       {/* Header row: identity + controls */}
       <div className="flex items-center justify-between px-4 pt-2.5 pb-1">
-        <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-gray-400 dark:text-gray-500">
-          <span className="relative flex h-1.5 w-1.5">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-400 opacity-75" />
-            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-brand-500" />
+        {callActive ? (
+          <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-emerald-500">
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
+            </span>
+            {callLabel || 'On call'}
           </span>
-          Shizuha — live
-        </span>
+        ) : (
+          <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-gray-400 dark:text-gray-500">
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-400 opacity-75" />
+              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-brand-500" />
+            </span>
+            Shizuha — live
+          </span>
+        )}
         <div className="flex items-center gap-1">
+          {typeof onToggleCall === 'function' && (
+            <button
+              onClick={onToggleCall}
+              title={callActive ? 'End voice call' : 'Start a hands-free voice call'}
+              className={`rounded-lg p-1.5 transition-colors ${callActive
+                ? 'text-white bg-emerald-500 animate-pulse'
+                : 'text-gray-400 hover:text-emerald-600 dark:hover:text-emerald-400'}`}
+            >
+              <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M6.62 10.79a15.05 15.05 0 006.59 6.59l2.2-2.2a1 1 0 011.02-.24 11.36 11.36 0 003.56.57 1 1 0 011 1V20a1 1 0 01-1 1A17 17 0 013 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.24.2 2.45.57 3.56a1 1 0 01-.24 1.02l-2.21 2.21z" />
+              </svg>
+            </button>
+          )}
           {typeof onToggleSpeak === 'function' && (
             <button
               onClick={onToggleSpeak}
