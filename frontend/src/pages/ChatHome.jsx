@@ -197,12 +197,13 @@ function ChatHomeInner() {
       )
       if (!shizuhaConv) {
         const token = getAuthToken()
-        const searchResp = await fetch(`/connect/api/people/search/?q=shizuha`, {
+        const searchResp = await fetch(`/connect/api/search/people/?q=shizuha`, {
           headers: { Authorization: `Bearer ${token}` },
         })
         if (handleUnauthorized(searchResp)) return
         if (searchResp.ok) {
-          const users = await searchResp.json()
+          const data = await searchResp.json()
+          const users = Array.isArray(data) ? data : (data.results || data.people || [])
           const shizuhaUser = users.find(u => u.username === 'shizuha')
           if (shizuhaUser) {
             shizuhaConv = await createDirectConversation(shizuhaUser.id)
