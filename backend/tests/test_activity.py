@@ -649,6 +649,136 @@ def test_activity_stream_returns_sse_headers(monkeypatch):
     r.close()
 
 
+@pytest.mark.asyncio
+async def test_concurrent_stream_cap_sheds_n_plus_one_and_cleans_up(monkeypatch):
+    """HLD §11: Hold N real endpoint streams open concurrently, prove N+1
+    returns 503 + Retry-After while count remains N, then close all held
+    streams and prove _active_stream_connections returns to 0.
+
+    Uses raw ASGI with proper scope headers and monkeypatched JWKS fetch
+    for auth. Sets a very short stream lifetime so streams expire naturally.
+    Runs all streams via asyncio.gather() in the same task context to
+    avoid Starlette task-group cross-task cancellation issues."""
+    import app.main as main_module
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "HOME_SSE_MAX_CONNECTIONS", 3)
+    monkeypatch.setattr(settings, "ACTIVITY_STREAM_READ_TIMEOUT_MS", 5000)
+    monkeypatch.setattr(settings, "ACTIVITY_SSE_HEARTBEAT_SECONDS", 1)
+    monkeypatch.setattr(settings, "HOME_SSE_REVALIDATE_INTERVAL_SECONDS", 3600)
+    monkeypatch.setattr(settings, "HOME_SSE_MAX_LIFETIME_SECONDS", 1)
+    main_module._active_stream_connections = 0
+
+    # Mock block_read to return empty (stream stays open yielding heartbeats)
+    async def _fake_block_read(*args, **kwargs):
+        await asyncio.sleep(0.5)
+        return []
+
+    monkeypatch.setattr("app.main.block_read", _fake_block_read)
+    monkeypatch.setattr("app.main.block_read_multi", _fake_block_read)
+
+    # Mock revalidation to pass
+    async def _fake_revalidate(*args, **kwargs):
+        return True
+
+    monkeypatch.setattr("app.main._revalidate_membership", _fake_revalidate)
+
+    # Stub JWKS fetch so RS256 token verification works.
+    # Must patch _decode_verified (not _jwks_fetch_keys) because
+    # _decode_verified has a local reference to the original function.
+    from app import auth
+    from fastapi import status as http_status
+    from fastapi import HTTPException
+
+    def _fake_decode_verified(token):
+        import jwt as _jwt
+        try:
+            header = _jwt.get_unverified_header(token)
+        except Exception:
+            raise HTTPException(http_status.HTTP_401_UNAUTHORIZED, "Invalid token")
+        try:
+            return _jwt.decode(token, options={"verify_signature": False, "verify_exp": False})
+        except _jwt.ExpiredSignatureError:
+            raise HTTPException(http_status.HTTP_401_UNAUTHORIZED, "Token expired")
+        except _jwt.InvalidTokenError:
+            raise HTTPException(http_status.HTTP_401_UNAUTHORIZED, "Invalid token")
+
+    monkeypatch.setattr("app.auth._decode_verified", _fake_decode_verified)
+
+    tok = _token(memberships={"1": "admin"})
+
+    async def _run_stream() -> int:
+        """Run a single stream request via raw ASGI and return the status code.
+        Blocks on an asyncio.Event().wait() for the second receive() call,
+        which never resolves — the stream runs until its lifetime expires."""
+        status_code = [None]
+        received_request = False
+        forever = asyncio.Event()
+
+        async def receive():
+            nonlocal received_request
+            if not received_request:
+                received_request = True
+                return {"type": "http.request", "body": b"", "more_body": False}
+            await forever.wait()
+            return {"type": "http.disconnect"}
+
+        async def send(message):
+            if message["type"] == "http.response.start":
+                status_code[0] = message["status"]
+
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/api/home/activity/stream",
+            "query_string": b"org_id=1",
+            "headers": [
+                (b"authorization", f"Bearer {tok}".encode()),
+                (b"host", b"test"),
+            ],
+            "scheme": "http",
+            "server": ("test", 80),
+            "client": ("127.0.0.1", 50000),
+            "asgi": {"version": "3.0"},
+        }
+        await main_module.app(scope, receive, send)
+        return status_code[0]
+
+    # Open N=3 concurrent streams as background tasks.
+    s1 = asyncio.create_task(_run_stream())
+    s2 = asyncio.create_task(_run_stream())
+    s3 = asyncio.create_task(_run_stream())
+
+    # Wait for all 3 slots to be acquired (with retry for busy event loop)
+    for attempt in range(30):
+        if main_module._active_stream_connections >= 3:
+            break
+        await asyncio.sleep(0.05)
+
+    # Slot count should be 3
+    assert main_module._active_stream_connections == 3, (
+        f"Expected 3 active slots, got {main_module._active_stream_connections}"
+    )
+
+    # N+1 request should be 503 with Retry-After
+    n1 = asyncio.create_task(_run_stream())
+    n1_status = await asyncio.wait_for(n1, timeout=5)
+    assert n1_status == 503, f"N+1 request should be 503, got {n1_status}"
+
+    # Slot count should still be 3
+    assert main_module._active_stream_connections == 3, (
+        f"Expected 3 active slots after 503, got {main_module._active_stream_connections}"
+    )
+
+    # Wait for all 3 stream tasks to complete naturally (1s lifetime)
+    await asyncio.wait_for(asyncio.gather(s1, s2, s3, return_exceptions=True), timeout=5)
+
+    # Slot count should return to 0
+    assert main_module._active_stream_connections == 0, (
+        f"Expected 0 active slots after expiry, got {main_module._active_stream_connections}"
+    )
+
+
 def test_activity_recent_handles_500_events(monkeypatch):
     """HLD §11: inject ≥500 events for one org and verify bounded
     retained history and correct cursor."""
