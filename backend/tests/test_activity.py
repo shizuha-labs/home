@@ -563,9 +563,9 @@ async def test_bounded_stream_slot_released_on_slow_client():
 
 
 def test_stream_cap_plus_one_returns_503_with_retry_after(monkeypatch):
-    """When HOME_SSE_MAX_CONNECTIONS slots are full, the N+1 request
-    returns 503 with a Retry-After header (HLD §6.2).
-    Uses _acquire_stream_slot directly because the TestClient consumes
+    """HLD §11: When HOME_SSE_MAX_CONNECTIONS slots are full, the N+1 request
+    returns 503 with a Retry-After header.
+    Uses _acquire_stream_slot directly because TestClient consumes
     StreamingResponse synchronously, releasing the slot before the
     second request."""
     import app.main
@@ -590,14 +590,16 @@ def test_stream_cap_plus_one_returns_503_with_retry_after(monkeypatch):
 
 
 def test_stream_slots_return_to_zero_after_close(monkeypatch):
-    """After all streams close, _active_stream_connections returns to 0."""
+    """HLD §11: After all streams close, _active_stream_connections returns to 0.
+    Uses TestClient which consumes StreamingResponse synchronously, so each
+    request completes and releases its slot before the next starts."""
     import app.main
     from app.config import settings
 
     monkeypatch.setattr(settings, "HOME_SSE_MAX_CONNECTIONS", 3)
     app.main._active_stream_connections = 0
 
-    # Open 2 streams
+    # Open 2 streams sequentially (TestClient consumes each synchronously)
     r1 = client.get("/api/home/activity/stream?org_id=1", headers=_auth(_token(memberships={"1": "admin"})))
     r2 = client.get("/api/home/activity/stream?org_id=1", headers=_auth(_token(memberships={"1": "admin"})))
     assert r1.status_code == 200
@@ -612,11 +614,9 @@ def test_stream_slots_return_to_zero_after_close(monkeypatch):
 
 
 def test_stream_slot_released_on_client_disconnect(monkeypatch):
-    """When a client disconnects, the slot is released (producer detects
-    disconnect via write error).
-    Uses _acquire_stream_slot directly because the TestClient consumes
-    StreamingResponse synchronously, releasing the slot before the
-    assertion."""
+    """HLD §11: When a client disconnects, the slot is released.
+    Uses _acquire_stream_slot directly because TestClient consumes
+    StreamingResponse synchronously."""
     import app.main
     from app.config import settings
 
@@ -634,8 +634,7 @@ def test_stream_slot_released_on_client_disconnect(monkeypatch):
 
 
 def test_activity_stream_returns_sse_headers(monkeypatch):
-    """SSE endpoint returns text/event-stream with correct headers.
-    Replaces the previously skipped test with a real ASGI call."""
+    """SSE endpoint returns text/event-stream with correct headers."""
     import app.main
     from app.config import settings
 

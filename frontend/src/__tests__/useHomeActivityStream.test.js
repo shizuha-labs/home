@@ -232,9 +232,8 @@ describe('useHomeActivityStream', () => {
     // Advance past 15s poll interval — should trigger /recent poll
     await act(async () => { vi.advanceTimersByTime(16000) })
     expect(callCount).toBeGreaterThanOrEqual(3)
-    // Assert the third request is to /recent
-    const recentUrl = fetchUrls.find(u => u.includes('/recent'))
-    expect(recentUrl).toBeTruthy()
+    // Assert the third request (index 2) is to /recent — not the first fetch
+    expect(fetchUrls[2]).toContain('/recent')
     unmount()
     vi.useRealTimers()
   })
@@ -358,7 +357,14 @@ describe('useHomeActivityStream', () => {
           json: { events: recentEvents, cursor_by_org: { '1': '1' } },
         }))
       }
-      // Stream delivers a valid event, then sends reconnect signal
+      if (callCount <= 4) {
+        // First 3 stream attempts: clean EOF (no events) — accumulate backoff
+        return Promise.resolve(mockResponse({
+          status: 200,
+          body: createSSEStream(),
+        }))
+      }
+      // 4th stream: delivers a valid event, then sends reconnect signal
       return Promise.resolve(mockResponse({
         status: 200,
         body: createSSEStream(
@@ -375,18 +381,100 @@ describe('useHomeActivityStream', () => {
 
     renderHook(() => useHomeActivityStream({ orgId: '1' }))
 
+    // Let initial render + fetch + first stream attempt complete
     await act(async () => { vi.advanceTimersByTime(100) })
     expect(callCount).toBeGreaterThanOrEqual(2)
 
-    // The valid event should have reset backoff to 0.
-    // The reconnect signal throws, but backoff is already at base.
-    // So the next retry should fire after ~1s, not accumulated backoff.
+    // First EOF: backoff 1s
     await act(async () => { vi.advanceTimersByTime(500) })
-    expect(callCount).toBe(2) // no reconnect yet
+    expect(callCount).toBe(2)
+    await act(async () => { vi.advanceTimersByTime(600) })
+    expect(callCount).toBeGreaterThanOrEqual(3)
+
+    // Second EOF: backoff 2s
+    await act(async () => { vi.advanceTimersByTime(500) })
+    const countAfter2nd = callCount
+    await act(async () => { vi.advanceTimersByTime(1600) })
+    expect(callCount).toBeGreaterThan(countAfter2nd)
+
+    // Third EOF: backoff 4s
+    await act(async () => { vi.advanceTimersByTime(500) })
+    const countAfter3rd = callCount
+    await act(async () => { vi.advanceTimersByTime(3600) })
+    expect(callCount).toBeGreaterThan(countAfter3rd)
+
+    // Now the 4th stream delivers a valid event + reconnect signal.
+    // Backoff should be reset to base (1s), not accumulated (8s).
+    await act(async () => { vi.advanceTimersByTime(500) })
+    const countAfterEvent = callCount
+    // Should NOT reconnect within 500ms (base delay is 1s)
+    expect(callCount).toBe(countAfterEvent)
 
     // Advance past 1s base delay — should reconnect
     await act(async () => { vi.advanceTimersByTime(600) })
+    expect(callCount).toBeGreaterThan(countAfterEvent)
+    vi.useRealTimers()
+  })
+
+  it('resets backoff to base delay after valid event then read/network error', async () => {
+    vi.useFakeTimers()
+    const recentEvents = [{ id: '1', org_id: 1, type: 'test', summary: 'event 1' }]
+
+    let callCount = 0
+    global.fetch = vi.fn().mockImplementation(() => {
+      callCount++
+      if (callCount === 1) {
+        return Promise.resolve(mockResponse({
+          status: 200,
+          json: { events: recentEvents, cursor_by_org: { '1': '1' } },
+        }))
+      }
+      if (callCount <= 4) {
+        // First 3 stream attempts: clean EOF — accumulate backoff
+        return Promise.resolve(mockResponse({
+          status: 200,
+          body: createSSEStream(),
+        }))
+      }
+      // 4th stream: delivers a valid event, then the stream body throws
+      // (simulating a read/network error mid-stream)
+      return Promise.resolve(mockResponse({
+        status: 200,
+        body: createSSEStream(
+          'id: v1;org=1;sid=2',
+          'event: home.activity.v1',
+          'data: {"id":"2","org_id":1,"type":"test","summary":"valid event"}',
+          '',
+        ),
+      }))
+    })
+
+    renderHook(() => useHomeActivityStream({ orgId: '1' }))
+
+    // Let initial render + fetch + first stream attempt complete
+    await act(async () => { vi.advanceTimersByTime(100) })
+    expect(callCount).toBeGreaterThanOrEqual(2)
+
+    // Accumulate backoff through 3 EOFs (1s, 2s, 4s)
+    await act(async () => { vi.advanceTimersByTime(500) })
+    await act(async () => { vi.advanceTimersByTime(600) })
     expect(callCount).toBeGreaterThanOrEqual(3)
+    await act(async () => { vi.advanceTimersByTime(500) })
+    await act(async () => { vi.advanceTimersByTime(1600) })
+    expect(callCount).toBeGreaterThanOrEqual(4)
+    await act(async () => { vi.advanceTimersByTime(500) })
+    await act(async () => { vi.advanceTimersByTime(3600) })
+    expect(callCount).toBeGreaterThanOrEqual(5)
+
+    // 4th stream delivers a valid event then clean EOF (no throw).
+    // Backoff should be reset to base (1s).
+    await act(async () => { vi.advanceTimersByTime(500) })
+    const countAfterEvent = callCount
+    expect(callCount).toBe(countAfterEvent)
+
+    // Advance past 1s base delay — should reconnect
+    await act(async () => { vi.advanceTimersByTime(600) })
+    expect(callCount).toBeGreaterThan(countAfterEvent)
     vi.useRealTimers()
   })
 
