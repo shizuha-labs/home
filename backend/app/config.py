@@ -55,5 +55,21 @@ class Settings:
     AUDIT_LEAD_RETENTION_DAYS: int = int(os.environ.get("HOME_AUDIT_LEAD_RETENTION_DAYS", "45"))
     AUDIT_LEAD_RATE_LIMIT_PER_MINUTE: int = int(os.environ.get("HOME_AUDIT_LEAD_RATE_LIMIT_PER_MINUTE", "5"))
 
+    # HIVE-603 Redis Streams for activity feed.
+    REDIS_URL: str = os.environ.get("HOME_REDIS_URL", "redis://localhost:6379/0")
+    ACTIVITY_STREAM_PREFIX: str = os.environ.get("HOME_ACTIVITY_STREAM_PREFIX", "home:activity:v1:org:")
+    ACTIVITY_STREAM_MAXLEN: int = int(os.environ.get("HOME_ACTIVITY_STREAM_MAXLEN", "10000"))
+    ACTIVITY_STREAM_READ_TIMEOUT_MS: int = int(os.environ.get("HOME_ACTIVITY_STREAM_READ_TIMEOUT_MS", "30000"))
+    ACTIVITY_RECENT_DEFAULT_LIMIT: int = int(os.environ.get("HOME_ACTIVITY_RECENT_DEFAULT_LIMIT", "50"))
+    ACTIVITY_RECENT_MAX_LIMIT: int = int(os.environ.get("HOME_ACTIVITY_RECENT_MAX_LIMIT", "200"))
+    ACTIVITY_SSE_HEARTBEAT_SECONDS: float = float(os.environ.get("HOME_ACTIVITY_SSE_HEARTBEAT", "20"))
+
+    # HIVE-603 §6.1 SSE connection lifetime & revalidation.
+    HOME_SSE_MAX_LIFETIME_SECONDS: int = int(os.environ.get("HOME_SSE_MAX_LIFETIME", "900"))  # 15 min
+    HOME_SSE_REVALIDATE_INTERVAL_SECONDS: int = int(os.environ.get("HOME_SSE_REVALIDATE_INTERVAL", "60"))  # 60s
+
+    # HIVE-603 §6.2 per-instance connection cap.
+    HOME_SSE_MAX_CONNECTIONS: int = int(os.environ.get("HOME_SSE_MAX_CONNECTIONS", "100"))
+
 
 settings = Settings()
