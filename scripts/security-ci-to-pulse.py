@@ -539,7 +539,20 @@ def main() -> int:
         write_summary(args.summary, findings, suppressed, args)
 
     api_base = normalize_api_base(args.pulse_api_url or args.pulse_url)
-    can_post = bool(api_base and args.pulse_token and not args.dry_run)
+    posting_requested = bool(api_base and args.pulse_token and not args.dry_run)
+    if posting_requested:
+        try:
+            project_id = int(str(args.project_id).strip())
+        except (TypeError, ValueError):
+            project_id = 0
+        if project_id <= 0:
+            print(
+                "ERROR: Pulse posting requires a positive PULSE_PROJECT_ID; "
+                "refusing unscoped security-finding writes",
+                file=sys.stderr,
+            )
+            return 2
+    can_post = posting_requested
     post_errors = 0
     # 2026-07-03 flood post-mortem: filing EVERY finding created 646 Pulse tasks
     # in one day (105x bandit try/except-pass, 82x assert — style nits as tasks).
