@@ -14,11 +14,34 @@ on:
     # must be stamped with the current commit. Rebuild the lightweight backend
     # on all pushes so frontend/installer-only commits do not leave a permanent
     # partial-lag row.
+  # HIVE-652: run the authz invariant as a PR merge gate. The deploy job below
+  # is push/manual only, so a pull request can prove isolation without shipping.
+  pull_request:
+    branches: [main, master]
 concurrency:
   group: deploy-shizuha-home-backend-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  authz-invariant:
+    runs-on: ubuntu-latest
+    container:
+      image: python:3.12-slim
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@v4
+      - name: Run Home BFF organization-isolation gate
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet --no-cache-dir \
+            --index-url "${PIP_INDEX_URL:-http://pip-cache.registry.svc.cluster.local/simple/}" \
+            --trusted-host "${PIP_TRUSTED_HOST:-pip-cache.registry.svc.cluster.local}" \
+            -r backend/requirements.txt
+          cd backend
+          python -m pytest tests/test_summary.py tests/test_activity.py -q
+
   build-and-deploy:
+    needs: authz-invariant
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout exact triggering revision for monotonic release guard

@@ -42,7 +42,7 @@ def test_activity_returns_feed_and_agents(monkeypatch):
         return Widget.ok_(data=[{"type": "comment", "at": "2026-07-10T00:00:00Z",
                                  "item_key": "PLAT-1", "excerpt": "hi", "org_id": 1}])
 
-    async def _fake_agents(_client, _bearer):
+    async def _fake_agents(_client, _bearer, _org_id=None):
         return Widget.ok_(data=[{"name": "Rei", "status": "running", "teams": ["review"]}])
 
     monkeypatch.setattr("app.main.fetch_live_feed", _fake_feed)
@@ -59,6 +59,41 @@ def test_activity_foreign_org_is_403(monkeypatch):
     widget_cache.clear()
     resp = client.get("/api/home/activity?org_id=999", headers=_auth(_token()))
     assert resp.status_code == 403
+
+
+def test_activity_two_org_cache_and_selector_isolation(monkeypatch):
+    """HIVE-652: poll cache/header/query isolation mirrors summary isolation."""
+    widget_cache.clear()
+    from app.schema import Widget
+
+    async def _fake_feed(_client, _bearer, org_ids=None, since=None, limit=60):
+        scopes = list(org_ids or [])
+        if scopes == [11]:
+            return Widget.ok_(data=[{"org_id": 11, "item_key": "ORG11-MARKER"}])
+        if scopes == [22]:
+            return Widget.ok_(data=[{"org_id": 22, "item_key": "ORG22-MARKER"}])
+        raise AssertionError(f"unexpected feed scopes: {scopes}")
+
+    async def _fake_agents(_client, _bearer, org_id=None):
+        marker = "ORG11-AGENT" if org_id == 11 else "ORG22-AGENT"
+        return Widget.ok_(data=[{"name": marker, "status": "running"}])
+
+    monkeypatch.setattr("app.main.fetch_live_feed", _fake_feed)
+    monkeypatch.setattr("app.main.fetch_agents_live", _fake_agents)
+    token_a = _token(user_id=101, memberships={"11": "admin"})
+    token_b = _token(user_id=202, memberships={"22": "member"})
+
+    a = client.get("/api/home/activity?org_id=11", headers=_auth(token_a))
+    b = client.get(
+        "/api/home/activity?org_id=22",
+        headers={**_auth(token_b), "X-Organization-ID": "11", "X-Org-ID": "11"},
+    )
+    assert a.status_code == b.status_code == 200
+    assert a.json()["widgets"]["feed"]["data"][0]["item_key"] == "ORG11-MARKER"
+    assert b.json()["widgets"]["feed"]["data"][0]["item_key"] == "ORG22-MARKER"
+    assert a.json()["widgets"]["agents"]["data"][0]["name"] == "ORG11-AGENT"
+    assert b.json()["widgets"]["agents"]["data"][0]["name"] == "ORG22-AGENT"
+    assert client.get("/api/home/activity?org_id=11", headers=_auth(token_b)).status_code == 403
 
 
 # ---- HIVE-602 clients -------------------------------------------------------
@@ -95,6 +130,7 @@ def test_live_feed_since_is_forwarded():
 
 def test_agents_live_maps_fields_and_leads_with_working():
     def handler(request):
+        assert request.url.params.get("organization") == "7"
         return httpx.Response(200, json={"results": [
             {"agent_username": "akira", "display_name": "Akira", "role": "Security",
              "email": "akira@x", "team_names": ["security"], "effective_model": "gpt-5.5",
@@ -105,7 +141,7 @@ def test_agents_live_maps_fields_and_leads_with_working():
         ]})
     async def go():
         async with _mock_client(handler) as c:
-            return await clients.fetch_agents_live(c, "t")
+            return await clients.fetch_agents_live(c, "t", 7)
     w = _run(go())
     assert w.status == "ok"
     assert w.data[0]["name"] == "Rei"          # running first
