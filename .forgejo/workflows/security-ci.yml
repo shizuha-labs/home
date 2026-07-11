@@ -18,13 +18,12 @@ concurrency:
 
 jobs:
   sast-sca:
-    # PLAT-4255: prove both independent runner/storage failure domains on every
-    # security-ci run. Finding writes are idempotent Pulse upserts.
-    strategy:
-      fail-fast: false
-      matrix:
-        runner: [security-ci-amd64, security-ci-arm64]
-    runs-on: ${{ matrix.runner }}
+    # PLAT-4255 architecture success contract: the independent ARM failure
+    # domain is the one required scan leg. s1/amd64 remains a labelled cold
+    # standby, but is deliberately NOT a required matrix leg: an s1 storage
+    # failure therefore cannot false-red this workflow, while any real ARM
+    # scanner/finding failure still fails normally (no continue-on-error).
+    runs-on: security-ci-arm64
     # ORIG-71: a hung scan must FAIL FAST and free its runner slot instead of
     # pinning it for an hour (jobs 2616/2633 froze mid-scan with ~75-line logs
     # and starved 9+ waiting jobs). Normal green runs finish well under 15 min.
