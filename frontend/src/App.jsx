@@ -8,6 +8,7 @@ import BenchmarksPage from './pages/BenchmarksPage'
 import ForgePage from './pages/ForgePage'
 import ForgeDashboardPage from './pages/ForgeDashboardPage'
 import ForgePricingPage from './pages/ForgePricingPage'
+import ForgeSignupPage from './pages/ForgeSignupPage'
 import ApiPage from './pages/ApiPage'
 import HivePage from './pages/HivePage'
 import ResearchPage from './pages/ResearchPage'
@@ -67,10 +68,10 @@ export default function App() {
       <Route path="/c/:conversationId" element={<AuthGuard><Home /></AuthGuard>} />
       <Route path="/docs" element={<DocsPage />} />
       <Route path="/benchmarks" element={<BenchmarksPage />} />
+      <Route path="/forge/signup" element={<ForgeSignupPage />} />
       <Route path="/forge" element={<ForgePage />} />
       <Route path="/forge/dashboard" element={<ForgeDashboardPage />} />
       <Route path="/forge/pricing" element={<ForgePricingPage />} />
-      <Route path="/forge/signup" element={<ForgePage />} />
       <Route path="/api" element={<ApiPage />} />
       <Route path="/hive" element={<HivePage />} />
       <Route path="/dojo" element={<DojoPage />} />
