@@ -21,6 +21,10 @@ jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout exact triggering revision for monotonic release guard
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Install kubectl + cluster access
         run: |
           set -euo pipefail
@@ -153,6 +157,12 @@ jobs:
             exit 1
           }
 
+          set +e
+          .forgejo/scripts/monotonic-release-guard.sh shizuha shizuha-home-frontend "${{ github.sha }}"
+          GUARD_RC="$?"
+          set -e
+          if [ "${GUARD_RC}" = 10 ]; then exit 0; fi
+          if [ "${GUARD_RC}" != 0 ]; then exit "${GUARD_RC}"; fi
           # Re-assert loop (PLAT-4123, mirrors connect 943a3d9): deploy.yml
           # (same push, separate concurrency group) snapshots the LIVE frontend
           # tag for its helm --set — if it snapshots BEFORE we roll and applies
@@ -169,4 +179,5 @@ jobs:
             echo "Frontend image clobbered mid-rollout (likely concurrent backend helm apply) — re-asserting"
             sleep 10
           done
+          kubectl annotate -n shizuha deploy/shizuha-home-frontend shizuha.io/last-successful-sha="${{ github.sha }}" --overwrite
           kubectl get pods -n shizuha -l app.kubernetes.io/name=shizuha-home-frontend

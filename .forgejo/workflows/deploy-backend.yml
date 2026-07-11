@@ -21,6 +21,10 @@ jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout exact triggering revision for monotonic release guard
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Install kubectl + cluster access
         run: |
           set -euo pipefail
@@ -184,12 +188,19 @@ jobs:
             exit 1
           }
 
+          set +e
+          .forgejo/scripts/monotonic-release-guard.sh shizuha shizuha-home-backend "${{ github.sha }}"
+          GUARD_RC="$?"
+          set -e
+          if [ "${GUARD_RC}" = 10 ]; then exit 0; fi
+          if [ "${GUARD_RC}" != 0 ]; then exit "${GUARD_RC}"; fi
           kubectl set image -n shizuha deploy/shizuha-home-backend backend="localhost:30500/shizuha-home-backend:${BTAG}"
           kubectl rollout status -n shizuha deploy/shizuha-home-backend --timeout=300s
 
           LIVE="$(kubectl get deploy -n shizuha shizuha-home-backend -o jsonpath='{.spec.template.spec.containers[0].image}')"
           echo "Live backend image: ${LIVE}"
           echo "${LIVE}" | grep -q "${BTAG}" || { echo "::error::backend image mismatch"; exit 1; }
+          kubectl annotate -n shizuha deploy/shizuha-home-backend shizuha.io/last-successful-sha="${{ github.sha }}" --overwrite
           kubectl get pods -n shizuha -l app.kubernetes.io/name=shizuha-home-backend
 
 # redeploy trigger 20260708T233549Z
