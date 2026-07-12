@@ -34,7 +34,7 @@ const SpeechRecognitionImpl =
     : undefined
 
 export function useVoiceInput({ onTranscript } = {}) {
-  const [micState, setMicState] = useState('idle') // idle | listening | transcribing
+  const [micState, setMicState] = useState('idle') // idle | connecting | listening | transcribing
   const recognitionRef = useRef(null)
   const streamingRef = useRef(null)
   const mediaRecorderRef = useRef(null)
@@ -131,9 +131,8 @@ export function useVoiceInput({ onTranscript } = {}) {
     setMicState('listening')
   }, [])
 
-  const startServerStreaming = useCallback(async () => {
-    setMicState('listening')
-    const controller = await startStreamingStt({
+  const startServerStreaming = useCallback(() => {
+    const controller = startStreamingStt({
       token: getAccessToken(),
       onState: setMicState,
       onPartial: (text) => onTranscriptRef.current?.(text, { final: false }),
@@ -153,12 +152,12 @@ export function useVoiceInput({ onTranscript } = {}) {
   }, [startServerRecording])
 
   const toggleMic = useCallback(async () => {
-    if (micState === 'listening') { stopAll(); return }
+    if (micState === 'connecting' || micState === 'listening') { stopAll(); return }
     if (micState === 'transcribing') return
     try {
       const serverReady = await probeVoiceService()
       if (serverReady && navigator.mediaDevices?.getUserMedia) {
-        await startServerStreaming()
+        startServerStreaming()
       } else if (SpeechRecognitionImpl) {
         startBrowserRecognition()
       }
@@ -246,12 +245,12 @@ export function useVoiceConversation({ onUtterance } = {}) {
     streamingRef.current = null
   }, [])
 
-  const listenOnce = useCallback(async () => {
+  const listenOnce = useCallback(() => {
     if (!activeRef.current) return
     setCallState('listening')
     let utteranceDelivered = false
     try {
-      const controller = await startStreamingStt({
+      const controller = startStreamingStt({
         token: getAccessToken(),
         onPartial: () => {},
         onFinal: (text) => {
