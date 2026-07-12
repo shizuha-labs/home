@@ -124,7 +124,7 @@ async def home_summary(
         orgs, tasks_widget, agent_widget, alerts_widget, financial_widget, conversations_widget = await asyncio.gather(
             fetch_org_refs(client, caller.bearer, caller.user_id, caller.email, caller.memberships),
             widget_cache.get_or_fetch(
-                cache_key("tasks_by_status", caller.user_id, scope_org),
+                cache_key("tasks_by_status", caller.user_id, scope_org, caller.memberships),
                 # No selected org → aggregate work-in-flight across every org
                 # the token grants (HIVE-373: the command center shows the
                 # org's autonomous work, not just the caller's own queue).
@@ -135,22 +135,26 @@ async def home_summary(
             ),
             fetch_agent_activity(client, caller.bearer, scope_org),
             widget_cache.get_or_fetch(
-                cache_key("alerts", caller.user_id, scope_org),
+                cache_key("alerts", caller.user_id, scope_org, caller.memberships),
                 lambda: fetch_alerts(client, caller.bearer, scope_org),
             ),
             widget_cache.get_or_fetch(
                 # Books requires a concrete org; with none selected, default to
                 # the caller's first org so the panel is never a dead
                 # "select an organization" tile (HIVE-602: no inert panels).
-                cache_key("financial_snapshot", caller.user_id,
-                          scope_org if scope_org is not None else _first_org(caller)),
+                cache_key(
+                    "financial_snapshot",
+                    caller.user_id,
+                    scope_org if scope_org is not None else _first_org(caller),
+                    caller.memberships,
+                ),
                 lambda: fetch_financial_snapshot(
                     client, caller.bearer,
                     scope_org if scope_org is not None else _first_org(caller)),
                 cache_fresh=False,
             ),
             widget_cache.get_or_fetch(
-                cache_key("recent_conversations", caller.user_id, scope_org),
+                cache_key("recent_conversations", caller.user_id, scope_org, caller.memberships),
                 lambda: fetch_recent_conversations(client, caller.bearer, scope_org),
             ),
         )
@@ -201,7 +205,7 @@ async def home_activity(
                                         org_ids=feed_orgs, since=since)
         else:
             feed_coro = widget_cache.get_or_fetch(
-                cache_key("live_feed", caller.user_id, scope_org),
+                cache_key("live_feed", caller.user_id, scope_org, caller.memberships),
                 lambda: fetch_live_feed(client, caller.bearer, org_ids=feed_orgs),
                 cache_fresh=False,
             )
@@ -212,8 +216,8 @@ async def home_activity(
                 # and always-fetch at an 8s poll per viewer pushed ~335KB fleet
                 # reads onto hive continuously — enough to flap its (formerly
                 # 1s-timeout) readiness probe into a 502 outage (2026-07-10).
-                cache_key("agents_live", caller.user_id, scope_org),
-                lambda: fetch_agents_live(client, caller.bearer),
+                cache_key("agents_live", caller.user_id, scope_org, caller.memberships),
+                lambda: fetch_agents_live(client, caller.bearer, scope_org),
             ),
         )
 

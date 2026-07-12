@@ -53,6 +53,20 @@ wrong-key/expired→401, scope-from-token) and the pulse clients'
 graceful-degrade / unauthorized / Bearer-forwarding — all offline (TestClient +
 httpx MockTransport).
 
+### Live organization-isolation probe (HIVE-652)
+
+`scripts/home_org_isolation_probe.py` exercises the deployed summary, activity,
+recent-history, and SSE authorization boundaries with two live RS256 tokens that
+each contain one disjoint internal test organization. With
+`HOME_PROBE_REDIS_URL` it creates one unique marker event per synthetic org,
+proves neither selected nor aggregate reads cross the boundary, and deletes both
+preflight-empty stream keys in `finally`. It refuses overlapping memberships or
+pre-existing keys and never prints bearer tokens.
+
+Record the deployed image tag plus the script's JSON output on the Pulse task;
+the output includes marker hashes and pre/post cleanup counts. The probe is a
+post-deploy gate and must be refreshed within 30 days.
+
 ## Roadmap (remaining slices — see HIVE-375)
 
 4. Cortex widget + PLAT-1322 probe registration once deployed.

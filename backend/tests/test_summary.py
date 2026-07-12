@@ -143,6 +143,62 @@ def test_orgs_come_from_token_not_request():
     assert {o["id"] for o in body["orgs"]} == {1}
 
 
+def test_two_org_authz_matrix_rejects_selectors_and_stale_claim_cache(monkeypatch):
+    """HIVE-652 / PLAT-1317 deploy-blocking invariant.
+
+    Proves two disjoint users cannot reuse each other's aggregate card cache,
+    request headers cannot widen the signed membership set, an explicit foreign
+    selector is denied, and the same subject with a newly narrowed membership
+    claim cannot receive a fresh/stale card cached under the old claim.
+    """
+    from app.schema import Widget
+
+    async def _scoped_tasks(_client, _bearer, _email, _org_id=None, org_ids=None):
+        scopes = list(org_ids or ([_org_id] if _org_id is not None else []))
+        if scopes == [11]:
+            return Widget.ok_(data={"open": 111, "in_progress": 0, "in_review": 0,
+                                    "blocked": 0, "awaiting_merge": 0})
+        if scopes == [22]:
+            # User B has real, disjoint data; the later same-subject request is
+            # forced into a brownout so any old-org stale reuse is observable.
+            if "a@org-a.example" in (_email or ""):
+                return Widget.degraded_(data={"open": None})
+            return Widget.ok_(data={"open": 222, "in_progress": 0, "in_review": 0,
+                                    "blocked": 0, "awaiting_merge": 0})
+        raise AssertionError(f"unexpected downstream scopes: {scopes}")
+
+    monkeypatch.setattr("app.main.fetch_tasks_by_status", _scoped_tasks)
+    token_a = _token(user_id=101, email="a@org-a.example", memberships={"11": "admin"})
+    token_b = _token(user_id=202, email="b@org-b.example", memberships={"22": "member"})
+
+    a = client.get("/api/home/summary", headers=_auth(token_a))
+    b = client.get(
+        "/api/home/summary",
+        headers={**_auth(token_b), "X-Organization-ID": "11", "X-Org-ID": "11"},
+    )
+    assert a.status_code == b.status_code == 200
+    assert {o["id"] for o in a.json()["orgs"]} == {11}
+    assert {o["id"] for o in b.json()["orgs"]} == {22}
+    assert a.json()["widgets"]["tasks_by_status"]["data"]["open"] == 111
+    assert b.json()["widgets"]["tasks_by_status"]["data"]["open"] == 222
+
+    foreign = client.get("/api/home/summary?org_id=11", headers=_auth(token_b))
+    assert foreign.status_code == 403
+
+    # Same verified subject, but the new token no longer contains org 11. A
+    # user-only aggregate cache key would return 111 here without fetching.
+    narrowed = client.get(
+        "/api/home/summary",
+        headers=_auth(_token(user_id=101, email="a@org-a.example",
+                             memberships={"22": "member"})),
+    )
+    narrowed_tasks = narrowed.json()["widgets"]["tasks_by_status"]
+    assert narrowed.status_code == 200
+    assert {o["id"] for o in narrowed.json()["orgs"]} == {22}
+    assert narrowed_tasks["status"] == "degraded"
+    assert narrowed_tasks.get("data") != {"open": 111}
+
+
 # ---- pulse client: graceful degradation + forwarding ------------------------
 def _run(coro):
     return asyncio.run(coro)

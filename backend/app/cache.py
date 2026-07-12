@@ -6,6 +6,8 @@ serve a recently-good widget as `stale` instead of flashing empty/degraded state
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import time
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Optional
@@ -65,6 +67,28 @@ class WidgetCache:
 widget_cache = WidgetCache()
 
 
-def cache_key(widget_name: str, user_id: int, org_id: Optional[int]) -> str:
+def cache_key(
+    widget_name: str,
+    user_id: int,
+    org_id: Optional[int],
+    memberships: dict[int, str],
+) -> str:
+    """Return an authz-bound widget cache key.
+
+    User + selected org alone is insufficient: a refreshed token can remove an
+    organization or downgrade a role while retaining the same user id. Without
+    the signed membership/role set in the key, that less-privileged request can
+    receive a fresh or stale widget produced under the older claim.
+
+    Hash the canonical server-verified claim rather than embedding roles in a
+    process-visible key. In selected-org mode only that org's role is relevant;
+    aggregate mode binds the complete membership set.
+    """
     scope = "all" if org_id is None else str(org_id)
-    return f"{widget_name}:u={user_id}:org={scope}"
+    if org_id is None:
+        authorized = sorted((int(oid), str(role)) for oid, role in memberships.items())
+    else:
+        authorized = [(int(org_id), str(memberships.get(org_id, "")))]
+    encoded = json.dumps(authorized, separators=(",", ":"), ensure_ascii=True).encode()
+    authz_fingerprint = hashlib.sha256(encoded).hexdigest()[:16]
+    return f"{widget_name}:u={user_id}:org={scope}:authz={authz_fingerprint}"

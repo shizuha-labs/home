@@ -307,7 +307,8 @@ async def fetch_live_feed(client: httpx.AsyncClient, bearer: str,
     return Widget.ok_(data=events)
 
 
-async def fetch_agents_live(client: httpx.AsyncClient, bearer: str) -> Widget:
+async def fetch_agents_live(client: httpx.AsyncClient, bearer: str,
+                            org_id: Optional[int] = None) -> Widget:
     """HIVE-602: the fleet as live entities for the agents-at-work strip —
     name, role, teams, model, state, freshness. Same authz model as
     fetch_agent_activity (forwarded bearer; 403 → unauthorized widget)."""
@@ -315,7 +316,10 @@ async def fetch_agents_live(client: httpx.AsyncClient, bearer: str) -> Widget:
         resp = await client.get(
             f"{settings.HIVE_API_URL}/v1/fleet/agents/",
             headers=_auth_headers(bearer),
-            params={"page_size": "250"},
+            # Selected-org Home responses must not silently become a global
+            # fleet response. Hive remains the enforcing downstream; this is a
+            # server-derived narrowing hint, never a client authority.
+            params={"page_size": "250", **_scope_params(org_id)},
             timeout=settings.SOURCE_TIMEOUT_SECONDS,
         )
     except (httpx.TimeoutException, httpx.TransportError) as exc:
