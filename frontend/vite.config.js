@@ -51,6 +51,8 @@ function createFallbackShizuhaConfig({ port, serviceName }) {
     base: basePath,
     resolve: {
       alias: createSharedPackageAliases(),
+      // HIVE-694: pin react resolution to this app's copy (see overlay below).
+      dedupe: ['react', 'react-dom'],
     },
     optimizeDeps: {
       include: ['lucide-react'],
@@ -89,6 +91,14 @@ export default defineConfig(async () => {
         // Keep local monorepo checkouts working when /packages is absent.
         // In prod/Origin CI the shared /packages vite config supplies the same aliases.
         alias: createSharedPackageAliases(),
+        // HIVE-694 (2026-07-12): the @shizuha/ui|chat aliases point at package
+        // SOURCE under /packages, whose npm install (peer auto-install) plants
+        // a NESTED react/react-dom there. Under vite 6 (PLAT-4316-4330 bump)
+        // imports of 'react' from inside those packages resolved to the nested
+        // copy → TWO reacts in the prod bundle → hooks dispatcher null →
+        // "Cannot read properties of null (reading 'useState')" crash on
+        // shizuha.com. dedupe forces a single react from this app's root.
+        dedupe: ['react', 'react-dom'],
       },
     })
   )
