@@ -37,7 +37,21 @@ jobs:
             --trusted-host "${PIP_TRUSTED_HOST:-pip-cache.registry.svc.cluster.local}" \
             -r backend/requirements.txt
           cd backend
-          python -m pytest tests/test_summary.py tests/test_activity.py -q
+          # Keep this trust-boundary gate limited to organization-isolation
+          # invariants. Unrelated SSE capacity/lifecycle coverage runs in the
+          # service test lane and must not make this authz proof nondeterministic.
+          python -m pytest -q \
+            tests/test_summary.py::test_requesting_foreign_org_is_403 \
+            tests/test_summary.py::test_two_org_authz_matrix_rejects_selectors_and_stale_claim_cache \
+            tests/test_summary.py::test_widget_cache_does_not_serve_stale_over_unauthorized \
+            tests/test_summary.py::test_financial_cache_revalidates_books_authz_inside_fresh_ttl \
+            tests/test_activity.py::test_activity_foreign_org_is_403 \
+            tests/test_activity.py::test_activity_two_org_cache_and_selector_isolation \
+            tests/test_activity.py::test_activity_recent_single_org_foreign_org_is_403 \
+            tests/test_activity.py::test_activity_recent_aggregate_excludes_non_member_orgs \
+            tests/test_activity.py::test_activity_stream_foreign_org_is_403 \
+            tests/test_activity.py::test_parse_entry_drops_wrong_org \
+            tests/test_activity.py::test_activity_recent_aggregate_excludes_deauth_org_events
 
   build-and-deploy:
     needs: authz-invariant
