@@ -2,12 +2,14 @@
 fastapi>=0.110,<1
 uvicorn[standard]>=0.29,<1
 httpx>=0.27,<1
-pyjwt>=2.8,<3
+idna>=3.18,<4
+pyjwt>=2.13.0,<3
 # RS256/JWKS verification of shizuha-id user tokens (PyJWT's RSAAlgorithm
 # needs the cryptography backend; without it every RS256 token is rejected).
 cryptography>=42,<50
 # HIVE-603 Redis Streams for activity feed.
 redis[hiredis]>=5.1,<6
 # tests
-pytest>=8,<9
-pytest-asyncio>=0.24,<1
+Pygments>=2.20.0,<3
+pytest>=9.0.3,<10
+pytest-asyncio>=1.4,<2

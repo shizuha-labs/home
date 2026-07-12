@@ -306,7 +306,8 @@ def test_tasks_widget_skips_forbidden_org_and_counts_the_rest():
 def test_org_refs_are_hydrated_from_admin_without_widening_memberships():
     def handler(request):
         assert request.url.path == "/api/internal/users/101/organizations/"
-        assert request.headers.get("Authorization") == "Bearer caller-tok"
+        assert request.headers.get("Authorization") is None
+        assert request.headers.get("X-Internal-Service") == "shizuha-home"
         return httpx.Response(200, json={"organizations": [
             {"id": 7, "name": "Shizuha Labs", "slug": "shizuha"},
             {"id": 999, "name": "Foreign Org", "slug": "foreign"},
