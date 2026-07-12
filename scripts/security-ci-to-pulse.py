@@ -334,8 +334,22 @@ def pulse_create_or_update_finding(api_base: str, token: str, finding: Finding, 
         terminal_statuses = {"done", "closed", "completed", "cancelled", "canceled", "deferred", "rejected", "duplicate", "wont_fix", "failed", "expired"}
         if existing.get("status_category") == "done" or str(existing.get("status") or "").strip() in terminal_statuses:
             return f"skipped-terminal:{ref}"
-        pulse_comment(api_base, token, ref, finding_comment(finding, args))
-        return f"updated:{ref}"
+        # HIVE-694 (operator 2026-07-12): do NOT re-comment "observed again" on
+        # every CI run. With ~20 open findings per repo and CI firing per push,
+        # this flooded the Pulse activity feed and the Home dashboard live
+        # theater (the "source flood anomaly: security-ci" the board itself
+        # flagged). An OPEN finding already means "still present" — a
+        # per-run breadcrumb adds nothing. Only comment when the finding
+        # MATERIALLY changed (severity shifted); the security workflow's
+        # Verify stage re-runs the tooling anyway.
+        prev_severity = str(existing.get("severity") or "").strip().lower()
+        new_severity = str(PULSE_SEVERITY.get(finding.severity, "warning")).strip().lower()
+        if prev_severity and prev_severity != new_severity:
+            pulse_comment(api_base, token, ref,
+                          f"Severity changed: `{prev_severity}` → `{new_severity}`.\n\n"
+                          + finding_comment(finding, args))
+            return f"updated:{ref}"
+        return f"skipped-unchanged:{ref}"
     location = f"{finding.path}:{finding.line}" if finding.line else finding.path
     body = {
         "mode": "task",
