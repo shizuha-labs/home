@@ -2,9 +2,12 @@
 # Keep portfolio copies synchronized; repo language/layout is detected at runtime.
 name: security-ci
 on:
-  pull_request: {}
-  push:
-    branches: [main, master]
+  # HIVE-694 (operator 2026-07-12): security scanning is a RECURRING flow,
+  # not a deploy-time gate — these jobs never gated any deploy (advisory
+  # only) and per-push runs starved the shared runners (ORIG-71) while
+  # flooding Pulse. Weekly staggered schedule + on-demand dispatch.
+  schedule:
+    - cron: '30 23 * * 1'
   workflow_dispatch: {}
 
 # ORIG-71: serialize security-ci per repo. The single amd64 runner has

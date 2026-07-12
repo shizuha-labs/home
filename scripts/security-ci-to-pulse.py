@@ -406,6 +406,103 @@ def pulse_create_or_update_finding(api_base: str, token: str, finding: Finding, 
     return f"created:{ref}"
 
 
+def pulse_upsert_ledger(api_base: str, token: str, findings: list[Finding], args: argparse.Namespace) -> str:
+    """HIVE-694 (operator 2026-07-12): ONE rolling ledger item per repo instead
+    of a Pulse task per finding.
+
+    Per-finding filing put 1,500+ security-finding tasks on the board; the
+    operator's directive is wiki-for-bulk, Pulse-for-pointers. The ledger item
+    holds the CURRENT findings table (top 50) + a pointer to the repo's wiki
+    ledger page, is updated IN PLACE only when the finding set changes
+    (content hash kept in a label), and never accumulates comments. The
+    security team triages from the ledger; individual remediation work items
+    are created by humans/agents only for findings they actually pick up.
+    Set SECURITY_CI_PER_FINDING=1 to restore the legacy per-finding filing.
+    """
+    import hashlib
+    source_id = f"security-ci:{args.repo}:ledger"
+    digest = hashlib.sha256(
+        "\n".join(sorted(f"{f.source_id}|{f.severity}" for f in findings)).encode()
+    ).hexdigest()[:12]
+    hash_label = f"ledger-hash:{digest}"
+    sev_counts: dict[str, int] = {}
+    for f in findings:
+        sev_counts[f.severity] = sev_counts.get(f.severity, 0) + 1
+    counts_md = ", ".join(
+        f"{k}: {v}" for k, v in sorted(sev_counts.items(), key=lambda kv: -SEV_RANK.get(kv[0], 0))
+    ) or "none"
+    top = sorted(findings, key=lambda f: -SEV_RANK.get(f.severity, 0))[:50]
+    rows = "\n".join(
+        "| {sev} | `{tool}` | `{rule}` | `{loc}` | `{sid}` |".format(
+            sev=f.severity, tool=f.tool, rule=(f.rule or "")[:60].replace("|", "/"),
+            loc=((f.path or "") + (f":{f.line}" if f.line else ""))[:80].replace("|", "/"),
+            sid=(f.source_id or "")[:48],
+        ) for f in top
+    )
+    wiki_slug = args.repo.split("/")[-1]
+    description = "\n".join([
+        f"Rolling security-findings ledger for `{args.repo}` (weekly scheduled scan; HIVE-694 rollup mode).",
+        "",
+        f"- Open findings: **{len(findings)}** ({counts_md})",
+        f"- Last scan: `{args.ref}` / `{args.sha or 'N/A'}` — {args.run_url or 'N/A'}",
+        f"- Full ledger, history and remediation notes: **wiki → Security → Findings Ledger — {wiki_slug}**",
+        f"- Ledger hash: `{digest}`",
+        "",
+        "This item is UPDATED IN PLACE by security-ci; do not file per-finding tasks from it wholesale.",
+        "Pick up a finding → create a scoped remediation task (or batch-PR task per repo for dep advisories),",
+        "record the disposition on the wiki ledger page, and suppress accepted false-positives via",
+        "`.security-ci-allowlist.json`.",
+        "",
+        "| Severity | Tool | Rule | Location | Source ID |",
+        "|---|---|---|---|---|",
+        rows or "| — | — | — | (no findings at/above filing threshold) | — |",
+    ])
+    max_sev = max((f.severity for f in findings), key=lambda s: SEV_RANK.get(s, 0), default="low")
+    existing = pulse_find_existing(api_base, token, source_id)
+    if existing:
+        ref = str(existing.get("item_key") or existing.get("id"))
+        labels = [l for l in (existing.get("labels") or []) if isinstance(l, str)]
+        if hash_label in labels:
+            return f"ledger-unchanged:{ref}"
+        new_labels = [l for l in labels if not l.startswith("ledger-hash:")] + [hash_label]
+        try:
+            pulse_request("PATCH", f"{api_base}/items/{existing.get('id') or ref}/", token,
+                          {"description": description, "labels": new_labels,
+                           "priority": PRIORITY.get(max_sev, "normal")})
+            return f"ledger-updated:{ref}"
+        except Exception as exc:
+            # PATCH rejected → one compact refresh comment (still no per-finding spam).
+            print(f"WARN: ledger PATCH failed for {ref}: {exc}", file=sys.stderr)
+            pulse_comment(api_base, token, ref,
+                          f"Ledger refresh — {len(findings)} open finding(s) ({counts_md}); hash `{digest}`. "
+                          f"See item description staleness note; run: {args.run_url or 'N/A'}")
+            return f"ledger-comment:{ref}"
+    body = {
+        "mode": "task",
+        "title": f"[security-ci] Findings ledger — {args.repo}"[:240],
+        "description": description,
+        "priority": PRIORITY.get(max_sev, "normal"),
+        "severity": PULSE_SEVERITY.get(max_sev, "warning"),
+        "workflow_name": "security-finding",
+        "assignment_group": "security",
+        "source": SECURITY_CI_SOURCE,
+        "source_id": source_id,
+        "source_url": args.run_url or "",
+        "labels": ["security-ci", "security-ci:ledger", f"repo:{args.repo}", hash_label],
+        "assignee_id": None,
+    }
+    if args.project_id:
+        body["project"] = int(args.project_id)
+    created = pulse_request("POST", f"{api_base}/items/", token, body)
+    ref = created.get("item_key") or created.get("id")
+    try:
+        if created.get("assignee") or created.get("assignee_id"):
+            pulse_request("PATCH", f"{api_base}/items/{created.get('id')}/", token, {"assignee_id": None})
+    except Exception as exc:
+        print(f"WARN: could not clear auto-assigned assignee on {ref}: {exc}", file=sys.stderr)
+    return f"ledger-created:{ref}"
+
+
 def write_summary(path: str, findings: list[Finding], suppressed: list[tuple[Finding, str]], args: argparse.Namespace) -> None:
     lines = ["# Security CI summary", "", f"Repository: `{args.repo}`", f"SHA: `{args.sha or 'N/A'}`", ""]
     lines += [f"Active findings: **{len(findings)}**", f"Suppressed findings: **{len(suppressed)}**", ""]
@@ -586,19 +683,27 @@ def main() -> int:
         print(f"security-ci: {len(below)} finding(s) below the filing threshold — tracked in summary only, not filed to Pulse")
 
     if can_post:
-        for f in to_file:
+        if os.environ.get("SECURITY_CI_PER_FINDING") == "1":
+            # Legacy per-finding filing (pre-HIVE-694), kept behind an env flag.
+            for f in to_file:
+                try:
+                    print(f"pulse {f.source_id}: {pulse_create_or_update_finding(api_base, args.pulse_token, f, args)}")
+                except Exception as exc:
+                    # Filing findings into Pulse is best-effort telemetry for an
+                    # ADVISORY scan — one bad payload / transient Pulse error must NOT
+                    # abort the whole run (it used to `return 2` on the first failure,
+                    # killing security-ci entirely). Log loudly and continue; the job's
+                    # exit code is driven by the `--fail-on` severity gate below.
+                    print(f"ERROR: Pulse create/update failed for {f.source_id}: {exc}", file=sys.stderr)
+                    post_errors += 1
+            if post_errors:
+                print(f"security-ci: {post_errors}/{len(to_file)} filed-item(s) failed to file into Pulse (non-fatal; see errors above)", file=sys.stderr)
+        else:
+            # HIVE-694 default: ONE rolling ledger item per repo, updated in place.
             try:
-                print(f"pulse {f.source_id}: {pulse_create_or_update_finding(api_base, args.pulse_token, f, args)}")
+                print(f"pulse ledger: {pulse_upsert_ledger(api_base, args.pulse_token, to_file, args)}")
             except Exception as exc:
-                # Filing findings into Pulse is best-effort telemetry for an
-                # ADVISORY scan — one bad payload / transient Pulse error must NOT
-                # abort the whole run (it used to `return 2` on the first failure,
-                # killing security-ci entirely). Log loudly and continue; the job's
-                # exit code is driven by the `--fail-on` severity gate below.
-                print(f"ERROR: Pulse create/update failed for {f.source_id}: {exc}", file=sys.stderr)
-                post_errors += 1
-        if post_errors:
-            print(f"security-ci: {post_errors}/{len(to_file)} filed-item(s) failed to file into Pulse (non-fatal; see errors above)", file=sys.stderr)
+                print(f"ERROR: Pulse ledger upsert failed: {exc}", file=sys.stderr)
     elif findings:
         print("security-ci: Pulse posting skipped (dry-run or PULSE_URL/PULSE_API_URL/PULSE_TOKEN missing)")
 
