@@ -639,9 +639,9 @@ function ChatHomeInner() {
                 {micSupported && (
                   <button
                     onClick={toggleMic}
-                    title={micState === 'listening' ? 'Stop listening' : micState === 'transcribing' ? 'Transcribing…' : 'Speak to Shizuha'}
+                    title={micState === 'connecting' || micState === 'listening' ? 'Stop listening' : micState === 'transcribing' ? 'Transcribing…' : 'Speak to Shizuha'}
                     className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors shadow-sm ${
-                      micState === 'listening'
+                      micState === 'connecting' || micState === 'listening'
                         ? 'bg-red-500 text-white animate-pulse'
                         : micState === 'transcribing'
                           ? 'bg-amber-400 text-white'
