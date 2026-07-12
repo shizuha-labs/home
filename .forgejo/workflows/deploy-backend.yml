@@ -33,14 +33,25 @@ jobs:
       # Python slim image does not provide; run an exact-revision shell checkout
       # instead so the gate works without broadening the image/toolchain.
       - name: Checkout exact revision without node-based actions
+        # HIVE-681/SRCH-17: act_runner does not reliably expose the automatic
+        # token to shell steps unless it is bound explicitly.  The live Origin
+        # server URL is also an internal http:// Service, so preserve the scheme
+        # instead of only rewriting https:// URLs.
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           apt-get update -qq
           apt-get install -y -qq --no-install-recommends ca-certificates git
-          REPO_URL="${GITHUB_SERVER_URL:-https://origin.shizuha.com}/${GITHUB_REPOSITORY:-shizuha-labs/home}.git"
-          if [ -n "${GITHUB_TOKEN:-}" ]; then
-            REPO_URL="$(printf '%s' "$REPO_URL" | sed "s#^https://#https://x-access-token:${GITHUB_TOKEN}@#")"
-          fi
+          [ -n "${GITHUB_TOKEN:-}" ] || { echo "::error::Forgejo workflow token is unavailable"; exit 1; }
+          SERVER_URL="${GITHUB_SERVER_URL:-https://origin.shizuha.com}"
+          SERVER_URL="${SERVER_URL%/}"
+          REPOSITORY="${GITHUB_REPOSITORY:-shizuha-labs/home}"
+          case "$SERVER_URL" in
+            http://*) REPO_URL="http://x-access-token:${GITHUB_TOKEN}@${SERVER_URL#http://}/${REPOSITORY}.git" ;;
+            https://*) REPO_URL="https://x-access-token:${GITHUB_TOKEN}@${SERVER_URL#https://}/${REPOSITORY}.git" ;;
+            *) echo "::error::Unsupported Forgejo server URL scheme"; exit 1 ;;
+          esac
           git init .
           git remote add origin "$REPO_URL"
           git fetch --depth=1 origin "${GITHUB_SHA}"
