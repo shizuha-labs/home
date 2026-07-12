@@ -159,7 +159,11 @@ jobs:
                       - --registry-mirror=mirror-dockerhub.registry.svc.cluster.local:5000
                       - --build-arg=PIP_INDEX_URL=http://pip-cache.registry.svc.cluster.local/simple/
                       - --build-arg=PIP_TRUSTED_HOST=pip-cache.registry.svc.cluster.local
-                      - --cache=false
+                      - --cache=true
+                      - --cache-repo=${REG}/kaniko-cache/home-deploy-backend-${ARCH}
+                      - --cache-copy-layers=true
+                      - --cache-ttl=336h
+                      - --compressed-caching=false
                     volumeMounts: [{ mountPath: /workspace, name: workspace }]
                 volumes: [{ emptyDir: {}, name: workspace }]
           YAML
