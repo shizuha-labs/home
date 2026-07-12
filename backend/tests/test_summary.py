@@ -303,6 +303,59 @@ def test_tasks_widget_skips_forbidden_org_and_counts_the_rest():
     assert w.data["open"] == 1
 
 
+def test_org_progress_forwards_bearer_and_scope_and_returns_payload():
+    def handler(request):
+        assert request.url.path == "/api/items/org-progress/"
+        assert request.headers.get("Authorization") == "Bearer caller-tok"
+        assert request.url.params.get("organization") == "7"
+        assert request.url.params.get("hours") == "24"
+        return httpx.Response(200, json={
+            "by_status": {"open": 3, "done": 5},
+            "timeseries": {"points": [{"ts": "t", "created": 1, "completed": 2, "terminal": 2}],
+                           "totals": {"created": 1, "completed": 2, "terminal": 2}},
+            "throughput": [], "snapshot": {"open": 3, "blocked": 0},
+        })
+    async def go():
+        async with _mock_client(handler) as c:
+            return await clients.fetch_org_progress(c, "caller-tok", org_id=7)
+    w = _run(go())
+    assert w.status == "ok"
+    assert w.data["by_status"]["done"] == 5
+    assert w.data["timeseries"]["totals"]["completed"] == 2
+
+
+def test_org_progress_degrades_on_timeout():
+    def handler(request):
+        raise httpx.ConnectTimeout("boom")
+    async def go():
+        async with _mock_client(handler) as c:
+            return await clients.fetch_org_progress(c, "t", org_id=1)
+    assert _run(go()).status == "degraded"
+
+
+def test_org_progress_unauthorized_on_403():
+    def handler(request):
+        return httpx.Response(403, json={"detail": "forbidden"})
+    async def go():
+        async with _mock_client(handler) as c:
+            return await clients.fetch_org_progress(c, "t", org_id=999)
+    assert _run(go()).status == "unauthorized"
+
+
+def test_org_progress_empty_when_no_activity():
+    def handler(request):
+        return httpx.Response(200, json={
+            "by_status": {},
+            "timeseries": {"points": [{"ts": "t", "created": 0, "completed": 0, "terminal": 0}],
+                           "totals": {"created": 0, "completed": 0, "terminal": 0}},
+            "throughput": [], "snapshot": {},
+        })
+    async def go():
+        async with _mock_client(handler) as c:
+            return await clients.fetch_org_progress(c, "t", org_id=1)
+    assert _run(go()).status == "empty"
+
+
 def test_org_refs_are_hydrated_from_admin_without_widening_memberships():
     def handler(request):
         assert request.url.path == "/api/internal/users/101/organizations/"

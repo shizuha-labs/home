@@ -33,8 +33,8 @@ from .auth import Caller, resolve_scope_org, verify_caller
 from .cache import cache_key, widget_cache
 from .clients import (
     fetch_agent_activity, fetch_agent_peek, fetch_agents_live, fetch_alerts,
-    fetch_financial_snapshot, fetch_live_feed, fetch_org_map, fetch_org_refs,
-    fetch_recent_conversations, fetch_task_peek, fetch_tasks_by_status,
+    fetch_financial_snapshot, fetch_live_feed, fetch_org_map, fetch_org_progress,
+    fetch_org_refs, fetch_recent_conversations, fetch_task_peek, fetch_tasks_by_status,
 )
 from .audit_leads import AuditLeadRequest, AuditLeadResponse, persist_audit_lead
 from .config import settings
@@ -254,6 +254,26 @@ async def home_org_map(
                                     caller.email, caller.memberships)
         slug = next((o.slug for o in orgs if o.id == scope_org and o.slug), None)
         widget = (await fetch_org_map(client, caller.bearer, slug)) if slug else Widget.empty_()
+    return {"generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "org_id": scope_org, "widget": widget}
+
+
+@app.get("/api/home/progress")
+async def home_progress(
+    caller: Caller = Depends(verify_caller),
+    org_id: int = Query(),
+    hours: int = Query(24, ge=1, le=720),
+    buckets: int = Query(24, ge=1, le=200),
+    days: int = Query(7, ge=1, le=90),
+):
+    """Org progress dashboard: task resolution-rate + intake trend, current
+    status distribution, and per-team bottleneck dwell — org-scoped via pulse
+    (forwarded Bearer; 403 for a non-member org). Feeds the home charts panel."""
+    scope_org = resolve_scope_org(caller, org_id)
+    async with httpx.AsyncClient() as client:
+        widget = await fetch_org_progress(
+            client, caller.bearer, org_id=scope_org,
+            hours=hours, buckets=buckets, days=days)
     return {"generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "org_id": scope_org, "widget": widget}
 

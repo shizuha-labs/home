@@ -50,6 +50,12 @@ class Settings:
     # degrades ONE widget, never the page (async-frontends doctrine).
     SOURCE_TIMEOUT_SECONDS: float = float(os.environ.get("HOME_BFF_SOURCE_TIMEOUT", "2.5"))
 
+    # The org-progress dashboard runs a heavier pulse analytics query (per-item
+    # transition scan for throughput/dwell), so it gets its own longer budget —
+    # still fail-soft (degraded widget on timeout), just not clipped at 2.5s.
+    # Kept under the nginx /api/home/progress read timeout (20s).
+    PROGRESS_TIMEOUT_SECONDS: float = float(os.environ.get("HOME_BFF_PROGRESS_TIMEOUT", "15"))
+
     # Best-effort in-process cache. Fresh hits avoid fan-out work; stale hits are
     # served only when a source fails, so the page remains useful during brownouts.
     CACHE_TTL_SECONDS: float = float(os.environ.get("HOME_BFF_CACHE_TTL", "15"))

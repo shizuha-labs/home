@@ -208,6 +208,45 @@ async def fetch_tasks_by_status(client: httpx.AsyncClient, bearer: str,
     return Widget.ok_(data=counts)
 
 
+async def fetch_org_progress(client: httpx.AsyncClient, bearer: str,
+                             org_id: Optional[int] = None,
+                             hours: int = 24, buckets: int = 24,
+                             days: int = 7) -> Widget:
+    """Org-progress metrics for the home dashboard — resolution-rate trend,
+    status distribution, and team bottlenecks — from pulse's org-scoped
+    /api/items/org-progress/ endpoint, forwarding the caller's Bearer. Pulse
+    resolves the user from the token and enforces org membership (403 for a
+    non-member org). The BFF passes no privileged token and never widens scope.
+    """
+    headers = _auth_headers(bearer)
+    params = {"hours": str(hours), "buckets": str(buckets), "days": str(days),
+              **_scope_params(org_id)}
+    try:
+        resp = await client.get(
+            f"{settings.PULSE_API_URL}/api/items/org-progress/",
+            headers=headers, params=params,
+            timeout=settings.PROGRESS_TIMEOUT_SECONDS,
+        )
+    except (httpx.TimeoutException, httpx.TransportError) as exc:
+        logger.warning("org_progress source failed: %s", type(exc).__name__)
+        return Widget.degraded_()
+    if resp.status_code == 403:
+        return Widget.unauthorized_()
+    if resp.status_code >= 400:
+        logger.warning("org_progress source HTTP %s", resp.status_code)
+        return Widget.degraded_()
+    try:
+        payload = resp.json()
+    except ValueError:
+        return Widget.degraded_()
+    if not isinstance(payload, dict):
+        return Widget.degraded_()
+    totals = (payload.get("timeseries") or {}).get("totals") or {}
+    has_data = bool(payload.get("by_status")) or any(
+        (totals.get(k) or 0) for k in ("created", "completed", "terminal"))
+    return Widget.ok_(data=payload) if has_data else Widget.empty_()
+
+
 async def fetch_agent_activity(client: httpx.AsyncClient, bearer: str,
                                org_id: Optional[int] = None) -> Widget:
     """Compact live agent rollup for the command center.
