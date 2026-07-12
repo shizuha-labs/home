@@ -6,6 +6,7 @@ import { SHIZUHA_APPS, useEnabledServices } from '@shizuha/ui'
 import CommandCenterDashboard from '../components/dashboard/CommandCenterDashboard'
 import LiveTheater from '../components/dashboard/LiveTheater'
 import CockpitPeek from '../components/dashboard/CockpitPeek'
+import OrgProgressCharts from '../components/dashboard/OrgProgressCharts'
 import CommandPalette from '../components/assistant/CommandPalette'
 import MiniShizuhaChat from '../components/assistant/MiniShizuhaChat'
 import { useVoiceInput, useVoiceConversation, speakText } from '../hooks/useVoice'
@@ -104,6 +105,10 @@ function ChatHomeInner() {
   const textareaRef = useRef(null)
   const { summary } = useHomeSummary()
   const orgs = Array.isArray(summary?.orgs) ? summary.orgs : null
+  // Org-progress panel: per-org selection (defaults to the first org) + range.
+  const [progressOrgId, setProgressOrgId] = useState(null)
+  const [progressRange, setProgressRange] = useState('24h')
+  const effectiveProgressOrgId = progressOrgId ?? orgs?.[0]?.id ?? null
   // HIVE-602 live theater: fast-poll the org's activity so the home MOVES.
   const { widget: activityWidget } = useHomeActivity()
   const feedWidget = activityWidget('feed')
@@ -706,6 +711,22 @@ function ChatHomeInner() {
               streaming in, projects moving. The show. */}
           <LiveTheater feed={feedWidget} agents={agentsWidget} onPeekAgent={peekAgent} onPeekTask={peekTask} />
 
+
+          {/* Org progress: is the org making progress and is anything badly
+              wrong? Live resolution-rate trend, status distribution, bottleneck
+              stages + a green/amber/red health read — org-scoped, own BFF poll,
+              degrades independently (async-frontends doctrine). */}
+          {orgs && orgs.length > 0 && effectiveProgressOrgId != null && (
+            <div className="mt-8">
+              <OrgProgressCharts
+                orgs={orgs}
+                orgId={effectiveProgressOrgId}
+                onOrgChange={setProgressOrgId}
+                range={progressRange}
+                onRangeChange={setProgressRange}
+              />
+            </div>
+          )}
 
           {/* HIVE-376: command-center dashboard — a concise, live, access-scoped
               view of the user's orgs / agents / work / money / alerts, hydrating
