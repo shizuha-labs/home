@@ -2,6 +2,7 @@
 fastapi>=0.110,<1
 uvicorn[standard]>=0.29,<1
 httpx>=0.27,<1
+idna>=3.18,<4
 pyjwt>=2.13.0,<3
 # RS256/JWKS verification of shizuha-id user tokens (PyJWT's RSAAlgorithm
 # needs the cryptography backend; without it every RS256 token is rejected).
