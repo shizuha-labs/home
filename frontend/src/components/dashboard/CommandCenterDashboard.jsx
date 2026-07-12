@@ -2,7 +2,6 @@ import { useNavigate } from 'react-router-dom'
 import {
   Bell, Plus,
 } from 'lucide-react'
-import { cn } from '../../utils/cn'
 import { useHomeSummary } from '../../hooks/useHomeSummary'
 
 /**
@@ -18,72 +17,6 @@ import { useHomeSummary } from '../../hooks/useHomeSummary'
 const DEEP_LINKS = {
   pulse: '/pulse',
   books: '/books',
-}
-
-function WidgetShell({ title, icon: Icon, status, children, action }) {
-  return (
-    <section
-      className="flex flex-col rounded-2xl border border-gray-200/70 dark:border-gray-800/70 bg-white/70 dark:bg-gray-900/50 backdrop-blur-sm p-4 min-h-[7.5rem]"
-      aria-busy={status === 'loading'}
-    >
-      <header className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">
-          {Icon ? <Icon className="w-4 h-4" /> : null}
-          <h3 className="text-xs font-semibold uppercase tracking-wider">{title}</h3>
-        </div>
-        {action}
-      </header>
-      <div className="flex-1">{children}</div>
-    </section>
-  )
-}
-
-function Skeleton({ rows = 2 }) {
-  return (
-    <div className="space-y-2 animate-pulse" aria-hidden="true">
-      {Array.from({ length: rows }).map((_, i) => (
-        <div key={i} className="h-3 rounded bg-gray-200/80 dark:bg-gray-700/60" style={{ width: `${90 - i * 15}%` }} />
-      ))}
-    </div>
-  )
-}
-
-function Muted({ children }) {
-  return <p className="text-xs text-gray-400 dark:text-gray-500">{children}</p>
-}
-
-// Render a widget body by its per-widget status, delegating the `ok` case to `render`.
-function ByStatus({ status, render, empty, unauthorized }) {
-  switch (status) {
-    case 'loading':
-      return <Skeleton />
-    case 'ok':
-    case 'stale':
-      return (
-        <>
-          {render()}
-          {status === 'stale' ? <Muted>Showing cached data…</Muted> : null}
-        </>
-      )
-    case 'unauthorized':
-      return (
-        <div className="flex items-center gap-2 text-xs text-gray-400 dark:text-gray-500">
-          <Lock className="w-3.5 h-3.5" /> {unauthorized || 'Not authorized to view this.'}
-        </div>
-      )
-    case 'empty':
-      return empty || <Muted>Nothing yet.</Muted>
-    default: // degraded / unknown
-      return (
-        <div className="flex items-center gap-2 text-xs text-amber-500/90">
-          <AlertTriangle className="w-3.5 h-3.5" /> Temporarily unavailable.
-        </div>
-      )
-  }
-}
-
-function num(v) {
-  return typeof v === 'number' ? v : 0
 }
 
 function orgName(o) {
@@ -105,13 +38,15 @@ function formatMoney(value, currency = 'INR') {
 
 export default function CommandCenterDashboard({ orgId, onPeekOrg }) {
   const navigate = useNavigate()
-  const { summary, widget } = useHomeSummary({ orgId })
+  const { summary, widget, refresh } = useHomeSummary({ orgId })
 
   const orgs = Array.isArray(summary?.orgs) ? summary.orgs : null
+  const agents = widget('agent_activity')
   const tasks = widget('tasks_by_status')
   const money = widget('financial_snapshot')
   const alerts = widget('alerts')
 
+  const agentData = agents.data || {}
   const t = tasks.data || {}
   const inFlight = (t.open || 0) + (t.in_progress || 0) + (t.in_review || 0) + (t.awaiting_merge || 0)
   const blocked = t.blocked || 0
@@ -121,13 +56,14 @@ export default function CommandCenterDashboard({ orgId, onPeekOrg }) {
   const alertItems = Array.isArray(alerts.data) ? alerts.data : []
 
   // HIVE-602: the status dock — one segmented glass bar (matching the theater
-  // panels) instead of loose text lines: org avatars (click = org peek),
-  // work-queue segment (→ Pulse), money segment (→ Books).
+  // panels) instead of loose text lines: org avatars (click = org peek), agent
+  // activity, work queue, money, and attention. Empty and unavailable are real
+  // states — never an endless "retrying" placeholder (HIVE-573).
   return (
     <div className="w-full">
-      <div className="flex justify-center">
-        <div className="flex items-stretch divide-x divide-gray-200/60 rounded-2xl bg-white/60 px-1 py-1.5 ring-1 ring-gray-200/60 backdrop-blur-sm dark:divide-gray-700/40 dark:bg-gray-900/50 dark:ring-gray-700/40">
-          <div className="flex items-center gap-1.5 px-3">
+      <div className="flex w-full justify-center px-2 sm:px-0">
+        <div className="grid w-full max-w-full grid-cols-2 gap-1 rounded-2xl bg-white/60 p-1.5 ring-1 ring-gray-200/60 backdrop-blur-sm dark:bg-gray-900/50 dark:ring-gray-700/40 sm:w-auto sm:grid-cols-none sm:flex sm:items-stretch sm:gap-0 sm:divide-x sm:divide-gray-200/60 sm:px-1 sm:py-1.5 sm:dark:divide-gray-700/40">
+          <div className="col-span-2 flex min-w-0 flex-wrap items-center gap-1.5 rounded-xl px-3 py-2 sm:col-span-1 sm:flex-nowrap sm:rounded-none sm:py-0">
             {orgs === null ? (
               <span className="h-8 w-24 animate-pulse rounded-lg bg-gray-200/70 dark:bg-gray-700/50" />
             ) : orgs.length === 0 ? (
@@ -150,20 +86,54 @@ export default function CommandCenterDashboard({ orgId, onPeekOrg }) {
               ))
             )}
           </div>
-          {tasks.status === 'ok' && (
-            <button onClick={() => navigate(DEEP_LINKS.pulse)} className="group px-4 text-left">
-              <p className="text-sm font-semibold tabular-nums text-gray-800 dark:text-gray-100">
+          {agents.status === 'loading' ? (
+            <div className="flex min-w-0 items-center rounded-xl px-3 py-2 sm:rounded-none sm:px-4 sm:py-0" aria-label="Loading agent activity">
+              <span className="h-7 w-20 animate-pulse rounded-lg bg-gray-200/70 dark:bg-gray-700/50" />
+            </div>
+          ) : agents.status === 'ok' || agents.status === 'stale' ? (
+            <button onClick={() => navigate('/hive/agents')} className="group min-w-0 rounded-xl px-3 py-2 text-left sm:rounded-none sm:px-4 sm:py-0">
+              <p className="truncate text-sm font-semibold tabular-nums text-gray-800 dark:text-gray-100">
+                {agentData.active || 0} <span className="font-normal text-gray-500 dark:text-gray-400">live</span>
+                {typeof agentData.total === 'number' && (
+                  <> <span className="text-gray-300 dark:text-gray-600">·</span> {agentData.total} <span className="font-normal text-gray-500 dark:text-gray-400">total</span></>
+                )}
+              </p>
+              <p className="truncate text-[10px] font-semibold uppercase tracking-widest text-gray-400 group-hover:text-brand-500 dark:text-gray-500">
+                Agent activity{agents.status === 'stale' ? ' · cached' : ''}
+              </p>
+            </button>
+          ) : agents.status === 'empty' ? (
+            <button onClick={() => navigate('/hive/agents')} className="group min-w-0 rounded-xl px-3 py-2 text-left sm:rounded-none sm:px-4 sm:py-0">
+              <p className="text-sm font-semibold text-gray-600 dark:text-gray-300">No agents</p>
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 group-hover:text-brand-500 dark:text-gray-500">Agent activity</p>
+            </button>
+          ) : agents.status === 'unauthorized' ? (
+            <div className="min-w-0 rounded-xl px-3 py-2 text-left sm:rounded-none sm:px-4 sm:py-0">
+              <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Scoped</p>
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 dark:text-gray-500">Agent activity</p>
+            </div>
+          ) : (
+            <button onClick={refresh} className="group min-w-0 rounded-xl px-3 py-2 text-left sm:rounded-none sm:px-4 sm:py-0" title="Retry agent activity snapshot">
+              <p className="text-sm font-medium text-amber-600 dark:text-amber-400">Unavailable</p>
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 group-hover:text-brand-500 dark:text-gray-500">Agent activity · retry</p>
+            </button>
+          )}
+          {(tasks.status === 'ok' || tasks.status === 'stale') && (
+            <button onClick={() => navigate(DEEP_LINKS.pulse)} className="group min-w-0 rounded-xl px-3 py-2 text-left sm:rounded-none sm:px-4 sm:py-0">
+              <p className="truncate text-sm font-semibold tabular-nums text-gray-800 dark:text-gray-100">
                 {inFlight} <span className="font-normal text-gray-500 dark:text-gray-400">in flight</span>
                 {blocked > 0 && (
                   <> <span className="text-gray-300 dark:text-gray-600">·</span> <span className="text-amber-600 dark:text-amber-400">{blocked}</span> <span className="font-normal text-gray-500 dark:text-gray-400">blocked</span></>
                 )}
               </p>
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 group-hover:text-brand-500 dark:text-gray-500">Work queue</p>
+              <p className="truncate text-[10px] font-semibold uppercase tracking-widest text-gray-400 group-hover:text-brand-500 dark:text-gray-500">
+                Work queue{tasks.status === 'stale' ? ' · cached' : ''}
+              </p>
             </button>
           )}
-          {money.status === 'ok' && typeof money.data?.cash === 'number' && (
-            <button onClick={() => navigate(DEEP_LINKS.books)} className="group px-4 text-left">
-              <p className="text-sm font-semibold tabular-nums text-gray-800 dark:text-gray-100">
+          {(money.status === 'ok' || money.status === 'stale') && typeof money.data?.cash === 'number' && (
+            <button onClick={() => navigate(DEEP_LINKS.books)} className="group min-w-0 rounded-xl px-3 py-2 text-left sm:rounded-none sm:px-4 sm:py-0" title={`${formatMoney(money.data.cash, money.data.currency)} · ${finOrg?.name || 'Books'}`}>
+              <p className="truncate text-sm font-semibold tabular-nums text-gray-800 dark:text-gray-100">
                 {formatMoney(money.data.cash, money.data.currency)}
                 {typeof money.data?.period_net === 'number' && (
                   <span className={money.data.period_net < 0 ? 'font-normal text-red-500/80' : 'font-normal text-emerald-600'}>
@@ -171,9 +141,38 @@ export default function CommandCenterDashboard({ orgId, onPeekOrg }) {
                   </span>
                 )}
               </p>
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 group-hover:text-brand-500 dark:text-gray-500">
-                {finOrg?.name || 'Books'}
+              <p className="truncate text-[10px] font-semibold uppercase tracking-widest text-gray-400 group-hover:text-brand-500 dark:text-gray-500">
+                {finOrg?.name || 'Books'}{money.status === 'stale' ? ' · cached' : ''}
               </p>
+            </button>
+          )}
+          {alerts.status === 'loading' ? (
+            <div className="flex min-w-0 items-center rounded-xl px-3 py-2 sm:rounded-none sm:px-4 sm:py-0" aria-label="Loading attention items">
+              <span className="h-7 w-16 animate-pulse rounded-lg bg-gray-200/70 dark:bg-gray-700/50" />
+            </div>
+          ) : alerts.status === 'ok' || alerts.status === 'stale' ? (
+            <button onClick={() => navigate(DEEP_LINKS.pulse)} className="group min-w-0 rounded-xl px-3 py-2 text-left sm:rounded-none sm:px-4 sm:py-0">
+              <p className={alertItems.length ? 'text-sm font-semibold text-amber-600 dark:text-amber-400' : 'text-sm font-semibold text-emerald-600 dark:text-emerald-400'}>
+                {alertItems.length ? `${alertItems.length} active` : 'All clear'}
+              </p>
+              <p className="truncate text-[10px] font-semibold uppercase tracking-widest text-gray-400 group-hover:text-brand-500 dark:text-gray-500">
+                Attention{alerts.status === 'stale' ? ' · cached' : ''}
+              </p>
+            </button>
+          ) : alerts.status === 'empty' ? (
+            <button onClick={() => navigate(DEEP_LINKS.pulse)} className="group min-w-0 rounded-xl px-3 py-2 text-left sm:rounded-none sm:px-4 sm:py-0">
+              <p className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">All clear</p>
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 group-hover:text-brand-500 dark:text-gray-500">Attention</p>
+            </button>
+          ) : alerts.status === 'unauthorized' ? (
+            <div className="min-w-0 rounded-xl px-3 py-2 text-left sm:rounded-none sm:px-4 sm:py-0">
+              <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Restricted</p>
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 dark:text-gray-500">Attention</p>
+            </div>
+          ) : (
+            <button onClick={refresh} className="group min-w-0 rounded-xl px-3 py-2 text-left sm:rounded-none sm:px-4 sm:py-0" title="Retry attention snapshot">
+              <p className="text-sm font-medium text-amber-600 dark:text-amber-400">Unavailable</p>
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 group-hover:text-brand-500 dark:text-gray-500">Attention · retry</p>
             </button>
           )}
         </div>

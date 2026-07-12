@@ -28,6 +28,15 @@ COPY packages/shizuha-chat /packages/shizuha-chat
 RUN cd /packages/shizuha-ui && npm install --omit=dev
 RUN cd /packages/shizuha-chat && npm install --omit=dev
 
+# HIVE-694 (2026-07-12): npm>=7 auto-installs peerDependencies, so the installs
+# above plant a NESTED react/react-dom under each package. The vite aliases
+# point at package SOURCE, so under vite 6 imports of 'react' from /packages/...
+# resolved to those nested copies — TWO reacts in the bundle → hooks dispatcher
+# null → "useState of null" crash on shizuha.com. Remove them so the app's own
+# react is the only candidate (vite resolve.dedupe is the belt; this is braces).
+RUN rm -rf /packages/shizuha-ui/node_modules/react /packages/shizuha-ui/node_modules/react-dom \
+           /packages/shizuha-chat/node_modules/react /packages/shizuha-chat/node_modules/react-dom
+
 # Install dependencies first (better caching)
 # Note: shizuha-home has frontend/ subdirectory
 # Use only package.json (not package-lock.json) to avoid lock file path resolution issues

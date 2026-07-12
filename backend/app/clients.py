@@ -67,9 +67,21 @@ async def fetch_org_refs(client: httpx.AsyncClient, bearer: str, user_id: int,
     if not memberships:
         return []
     try:
+        # This admin endpoint is on the INTERNAL control plane: it authorizes a
+        # service identity and EXPLICITLY REJECTS a forwarded user bearer (a
+        # tenant JWT is never a substitute for service auth there). Authorization
+        # here already comes from the verified JWT membership claim above — admin
+        # is only a best-effort name source — so call it as the shizuha-home
+        # service (+ service token when configured; the compat branch accepts the
+        # named service today) instead of forwarding the caller's bearer, which
+        # would 403 and leave every org labelled "Organization <id>".
+        svc_headers = {"X-Internal-Service": "shizuha-home"}
+        svc_token = getattr(settings, "ADMIN_INTERNAL_SERVICE_TOKEN", "") or ""
+        if svc_token:
+            svc_headers["X-Internal-Service-Token"] = svc_token
         resp = await client.get(
             f"{settings.ADMIN_API_URL}/internal/users/{user_id}/organizations/",
-            headers=_auth_headers(bearer),
+            headers=svc_headers,
             params={"email": email} if email else {},
             timeout=settings.SOURCE_TIMEOUT_SECONDS,
         )
@@ -196,6 +208,45 @@ async def fetch_tasks_by_status(client: httpx.AsyncClient, bearer: str,
     return Widget.ok_(data=counts)
 
 
+async def fetch_org_progress(client: httpx.AsyncClient, bearer: str,
+                             org_id: Optional[int] = None,
+                             hours: int = 24, buckets: int = 24,
+                             days: int = 7) -> Widget:
+    """Org-progress metrics for the home dashboard — resolution-rate trend,
+    status distribution, and team bottlenecks — from pulse's org-scoped
+    /api/items/org-progress/ endpoint, forwarding the caller's Bearer. Pulse
+    resolves the user from the token and enforces org membership (403 for a
+    non-member org). The BFF passes no privileged token and never widens scope.
+    """
+    headers = _auth_headers(bearer)
+    params = {"hours": str(hours), "buckets": str(buckets), "days": str(days),
+              **_scope_params(org_id)}
+    try:
+        resp = await client.get(
+            f"{settings.PULSE_API_URL}/api/items/org-progress/",
+            headers=headers, params=params,
+            timeout=settings.PROGRESS_TIMEOUT_SECONDS,
+        )
+    except (httpx.TimeoutException, httpx.TransportError) as exc:
+        logger.warning("org_progress source failed: %s", type(exc).__name__)
+        return Widget.degraded_()
+    if resp.status_code == 403:
+        return Widget.unauthorized_()
+    if resp.status_code >= 400:
+        logger.warning("org_progress source HTTP %s", resp.status_code)
+        return Widget.degraded_()
+    try:
+        payload = resp.json()
+    except ValueError:
+        return Widget.degraded_()
+    if not isinstance(payload, dict):
+        return Widget.degraded_()
+    totals = (payload.get("timeseries") or {}).get("totals") or {}
+    has_data = bool(payload.get("by_status")) or any(
+        (totals.get(k) or 0) for k in ("created", "completed", "terminal"))
+    return Widget.ok_(data=payload) if has_data else Widget.empty_()
+
+
 async def fetch_agent_activity(client: httpx.AsyncClient, bearer: str,
                                org_id: Optional[int] = None) -> Widget:
     """Compact live agent rollup for the command center.
@@ -295,7 +346,8 @@ async def fetch_live_feed(client: httpx.AsyncClient, bearer: str,
     return Widget.ok_(data=events)
 
 
-async def fetch_agents_live(client: httpx.AsyncClient, bearer: str) -> Widget:
+async def fetch_agents_live(client: httpx.AsyncClient, bearer: str,
+                            org_id: Optional[int] = None) -> Widget:
     """HIVE-602: the fleet as live entities for the agents-at-work strip —
     name, role, teams, model, state, freshness. Same authz model as
     fetch_agent_activity (forwarded bearer; 403 → unauthorized widget)."""
@@ -303,7 +355,10 @@ async def fetch_agents_live(client: httpx.AsyncClient, bearer: str) -> Widget:
         resp = await client.get(
             f"{settings.HIVE_API_URL}/v1/fleet/agents/",
             headers=_auth_headers(bearer),
-            params={"page_size": "250"},
+            # Selected-org Home responses must not silently become a global
+            # fleet response. Hive remains the enforcing downstream; this is a
+            # server-derived narrowing hint, never a client authority.
+            params={"page_size": "250", **_scope_params(org_id)},
             timeout=settings.SOURCE_TIMEOUT_SECONDS,
         )
     except (httpx.TimeoutException, httpx.TransportError) as exc:

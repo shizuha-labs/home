@@ -34,6 +34,11 @@ class Settings:
     # tenant-isolation control: each service applies its own authz).
     PULSE_API_URL: str = os.environ.get("PULSE_API_URL", "http://shizuha-pulse:8002").rstrip("/")
     ADMIN_API_URL: str = os.environ.get("ADMIN_API_URL", "http://shizuha-admin:8003/api").rstrip("/")
+    # Service token for admin's internal control-plane endpoints (org-name
+    # hydration). Optional today (admin's compat branch accepts the named
+    # service while ADMIN_INTERNAL_SERVICE_TOKEN_ENFORCE is off); wire it before
+    # that enforce flip so org labels don't regress to "Organization <id>".
+    ADMIN_INTERNAL_SERVICE_TOKEN: str = os.environ.get("ADMIN_INTERNAL_SERVICE_TOKEN", "")
     HIVE_API_URL: str = os.environ.get(
         "HIVE_API_URL",
         "http://hive.shizuha-hive.svc.cluster.local:8030/hive/api",
@@ -44,6 +49,12 @@ class Settings:
     # Per-source timeout (seconds) for the async fan-out — one slow/down source
     # degrades ONE widget, never the page (async-frontends doctrine).
     SOURCE_TIMEOUT_SECONDS: float = float(os.environ.get("HOME_BFF_SOURCE_TIMEOUT", "2.5"))
+
+    # The org-progress dashboard runs a heavier pulse analytics query (per-item
+    # transition scan for throughput/dwell), so it gets its own longer budget —
+    # still fail-soft (degraded widget on timeout), just not clipped at 2.5s.
+    # Kept under the nginx /api/home/progress read timeout (20s).
+    PROGRESS_TIMEOUT_SECONDS: float = float(os.environ.get("HOME_BFF_PROGRESS_TIMEOUT", "15"))
 
     # Best-effort in-process cache. Fresh hits avoid fan-out work; stale hits are
     # served only when a source fails, so the page remains useful during brownouts.
@@ -60,6 +71,22 @@ class Settings:
     HARNESS_POLL_INTERVAL: int = int(os.environ.get("HARNESS_POLL_INTERVAL", "21600"))
     HARNESS_CANARY_OBSERVATION: int = int(os.environ.get("HARNESS_CANARY_OBSERVATION", "900"))
     HARNESS_CANARY_AGENT: str = os.environ.get("HARNESS_CANARY_AGENT", "test@shizuha.com")
+
+    # HIVE-603 Redis Streams for activity feed.
+    REDIS_URL: str = os.environ.get("HOME_REDIS_URL", "redis://localhost:6379/0")
+    ACTIVITY_STREAM_PREFIX: str = os.environ.get("HOME_ACTIVITY_STREAM_PREFIX", "home:activity:v1:org:")
+    ACTIVITY_STREAM_MAXLEN: int = int(os.environ.get("HOME_ACTIVITY_STREAM_MAXLEN", "10000"))
+    ACTIVITY_STREAM_READ_TIMEOUT_MS: int = int(os.environ.get("HOME_ACTIVITY_STREAM_READ_TIMEOUT_MS", "30000"))
+    ACTIVITY_RECENT_DEFAULT_LIMIT: int = int(os.environ.get("HOME_ACTIVITY_RECENT_DEFAULT_LIMIT", "50"))
+    ACTIVITY_RECENT_MAX_LIMIT: int = int(os.environ.get("HOME_ACTIVITY_RECENT_MAX_LIMIT", "200"))
+    ACTIVITY_SSE_HEARTBEAT_SECONDS: float = float(os.environ.get("HOME_ACTIVITY_SSE_HEARTBEAT", "20"))
+
+    # HIVE-603 §6.1 SSE connection lifetime & revalidation.
+    HOME_SSE_MAX_LIFETIME_SECONDS: int = int(os.environ.get("HOME_SSE_MAX_LIFETIME", "900"))  # 15 min
+    HOME_SSE_REVALIDATE_INTERVAL_SECONDS: int = int(os.environ.get("HOME_SSE_REVALIDATE_INTERVAL", "60"))  # 60s
+
+    # HIVE-603 §6.2 per-instance connection cap.
+    HOME_SSE_MAX_CONNECTIONS: int = int(os.environ.get("HOME_SSE_MAX_CONNECTIONS", "100"))
 
 
 settings = Settings()

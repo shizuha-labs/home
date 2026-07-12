@@ -1,0 +1,203 @@
+# Vendored security-ci template: PLAT-4164 / source shizuha-tasks@main.
+# Keep portfolio copies synchronized; repo language/layout is detected at runtime.
+name: security-ci
+on:
+  # HIVE-694 (operator 2026-07-12): security scanning is a RECURRING flow,
+  # not a deploy-time gate — these jobs never gated any deploy (advisory
+  # only) and per-push runs starved the shared runners (ORIG-71) while
+  # flooding Pulse. Weekly staggered schedule + on-demand dispatch.
+  schedule:
+    - cron: '30 23 * * 1'
+  workflow_dispatch: {}
+
+# ORIG-71: serialize security-ci per repo. The single amd64 runner has
+# capacity 2; two concurrent sast-sca runs (a PR + a push) once pinned BOTH
+# slots for ~1h and starved every other repo's CI. With a repo-wide group, at
+# most one security-ci run holds a slot; the rest queue in Forgejo (queued
+# runs do NOT occupy runner slots).
+concurrency:
+  group: security-ci-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  sast-sca:
+    # PLAT-4255 architecture success contract: the independent ARM failure
+    # domain is the one required scan leg. s1/amd64 remains a labelled cold
+    # standby, but is deliberately NOT a required matrix leg: an s1 storage
+    # failure therefore cannot false-red this workflow, while any real ARM
+    # scanner/finding failure still fails normally (no continue-on-error).
+    runs-on: security-ci-arm64
+    # ORIG-71: a hung scan must FAIL FAST and free its runner slot instead of
+    # pinning it for an hour (jobs 2616/2633 froze mid-scan with ~75-line logs
+    # and starved 9+ waiting jobs). Normal green runs finish well under 15 min.
+    timeout-minutes: 20
+    steps:
+      # PLAT-1610: pin to the full 40-char commit SHA (v4) — a mutable tag can be
+      # silently repointed by the action owner (supply-chain risk; cf. the
+      # trivy-action / kics-github-action compromises). Bump the SHA + comment
+      # together when upgrading the action version.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      # ORIG-71: every network-touching step below is wrapped in coreutils
+      # `timeout` as belt-and-suspenders for the job-level timeout-minutes —
+      # the observed hang class (frozen pip/registry/vuln-DB fetches) then
+      # kills only the stuck command and the existing empty-JSON fallbacks
+      # keep the scan non-blocking.
+      - name: Install Semgrep, Bandit, and uv
+        run: |
+          set -euo pipefail
+          # PLS-384: this is the one HARD-FAIL network step (set -euo pipefail) —
+          # unlike the scanner/download steps below it had no retry, so a single
+          # transient pip/registry hiccup on the Origin runner reds the whole
+          # (non-blocking) security-ci run and false-pages leads via ORIG-11.
+          # Retry each install up to 3x with backoff; only a persistent failure
+          # fails the step.
+          retry() {
+            local n=0
+            until "$@"; do
+              n=$((n+1))
+              if [ "$n" -ge 3 ]; then echo "FAILED after 3 attempts: $*" >&2; return 1; fi
+              echo "attempt $n failed, retrying in $((n*10))s: $*" >&2
+              sleep $((n*10))
+            done
+          }
+          retry timeout -k 30 300 python3 -m pip install --upgrade pip
+          retry timeout -k 30 480 python3 -m pip install 'semgrep>=1.75,<2' 'uv==0.11.26'
+          if find . -type f -name '*.py' -not -path './.git/*' -print -quit | grep -q .; then
+            retry timeout -k 30 480 python3 -m pip install 'bandit[toml]>=1.7,<2'
+          else
+            echo 'No Python sources; Bandit install skipped'
+          fi
+
+      - name: Check Python dependency lock drift
+        run: |
+          set -euo pipefail
+          if [ -f pyproject.toml ] && [ -f uv.lock ]; then
+            timeout -k 30 300 env UV_CACHE_DIR="${RUNNER_TEMP:-/tmp}/uv-cache" uv lock --check
+          else
+            echo 'No pyproject.toml + uv.lock pair; uv lock check skipped'
+          fi
+
+      - name: Run Semgrep SAST
+        run: |
+          set +e
+          # semgrep fetches the p/ci ruleset from the remote registry — the
+          # fetch can hang; cap the whole scan (ORIG-71).
+          timeout -k 30 600 semgrep scan --config p/ci --json --output semgrep.json .
+          rc=$?
+          echo "semgrep exit=${rc} (normalized in security-ci-to-pulse)"
+          test -s semgrep.json || echo '{"results":[]}' > semgrep.json
+          exit 0
+
+      - name: Run Bandit Python SAST
+        run: |
+          set +e
+          if find . -type f -name '*.py' -not -path './.git/*' -print -quit | grep -q .; then
+            timeout -k 30 600 bandit -r . -f json -o bandit.json \
+              -x './.git,./frontend/node_modules,./node_modules,./venv,./.venv,./build,./dist,./static,./media'
+          else
+            echo '{"results":[]}' > bandit.json
+          fi
+          rc=$?
+          echo "bandit exit=${rc} (normalized in security-ci-to-pulse)"
+          test -s bandit.json || echo '{"results":[]}' > bandit.json
+          exit 0
+
+      # PLAT-1248 fix: `uses:` third-party actions resolve against the Forgejo
+      # actions mirror (data.forgejo.org), which does not host
+      # google/osv-scanner-action or aquasecurity/trivy-action — every run died
+      # at clone with "repository not found". Install the release binaries
+      # directly instead; scan failures stay non-blocking (empty-JSON fallback)
+      # exactly like the semgrep/bandit steps.
+      - name: Run OSV dependency scan
+        run: |
+          set +e
+          case "$(uname -m)" in
+            x86_64|amd64) OSV_ARCH=amd64 ;;
+            aarch64|arm64) OSV_ARCH=arm64 ;;
+            *) echo "unsupported security-ci architecture: $(uname -m)" >&2; exit 1 ;;
+          esac
+          timeout -k 30 180 curl -sfL --max-time 150 -o /usr/local/bin/osv-scanner \
+            "https://github.com/google/osv-scanner/releases/latest/download/osv-scanner_linux_${OSV_ARCH}" \
+            && chmod +x /usr/local/bin/osv-scanner
+          timeout -k 30 600 osv-scanner -r --format=json --output=osv.json .
+          rc=$?
+          echo "osv-scanner exit=${rc} (normalized in security-ci-to-pulse)"
+          test -s osv.json || echo '{"results":[]}' > osv.json
+          exit 0
+
+      - name: Run Trivy filesystem scan
+        run: |
+          set +e
+          # PLAT-1982 fix: avoid the "curl | sh" install pattern (semgrep
+          # gha-curl-pipe-shell / CWE-78). Download the pinned release tarball,
+          # verify its published SHA-256 checksum, then extract — the same safe
+          # pattern the osv-scanner step above uses. Scan stays non-blocking:
+          # if the download/verify fails, trivy is absent, the scan errors, and
+          # the empty-JSON fallback below keeps CI green (findings are tracked,
+          # not gated).
+          TRIVY_VERSION=0.72.0
+          case "$(uname -m)" in
+            x86_64|amd64) TRIVY_ARCH=64bit ;;
+            aarch64|arm64) TRIVY_ARCH=ARM64 ;;
+            *) echo "unsupported security-ci architecture: $(uname -m)" >&2; exit 1 ;;
+          esac
+          asset="trivy_${TRIVY_VERSION}_Linux-${TRIVY_ARCH}.tar.gz"
+          base="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}"
+          ( set -e
+            cd /tmp
+            timeout -k 30 180 curl -sfL --max-time 150 -o "${asset}" "${base}/${asset}"
+            timeout -k 30 60 curl -sfL --max-time 45 -o trivy_checksums.txt "${base}/trivy_${TRIVY_VERSION}_checksums.txt"
+            grep " ${asset}\$" trivy_checksums.txt | sha256sum -c -
+            tar -xzf "${asset}" -C /usr/local/bin trivy )
+          # trivy downloads its vuln DB on first run — the download can hang;
+          # cap both at the tool level and the shell level (ORIG-71).
+          timeout -k 30 600 trivy fs --timeout 8m --format json --output trivy.json \
+            --severity HIGH,CRITICAL --ignore-unfixed .
+          rc=$?
+          echo "trivy exit=${rc} (normalized in security-ci-to-pulse)"
+          test -s trivy.json || echo '{"Results":[]}' > trivy.json
+          exit 0
+
+      - name: Normalize findings and file/update Pulse security findings
+        env:
+          PULSE_API_URL: ${{ secrets.PULSE_API_URL }}
+          PULSE_TOKEN: ${{ secrets.PULSE_SECURITY_CI_TOKEN }}
+          PULSE_PROJECT_ID: ${{ secrets.PULSE_PROJECT_ID }}
+          # PLS-246: hard-block only on CRITICAL. security-ci is a track/alert
+          # workflow (it does NOT gate deploy.yml); with the severity-filing bug
+          # fixed, ALL high findings are now filed to Pulse (security-finding /
+          # assignment_group=security) and remain fully tracked — they just no
+          # longer page main red via ORIG-11. This matches the standing operator
+          # directive (functionality > security hardening; defer the backlog) and
+          # unblocks the pre-existing ~38 high dependency-CVE backlog. Restore to
+          # `high` once that backlog is remediated (tracked in the PLS-246 sibling
+          # security task). Criticals still block.
+          SECURITY_CI_FAIL_ON: critical
+        run: |
+          set -euo pipefail
+          # PLAT-4120: per-finding Pulse errors are already non-fatal inside
+          # the script; this retry covers what is not — unguarded startup
+          # fetches / interpreter crashes on a flaky runner. Filing is
+          # idempotent (upserts), so retries are safe; genuine CRITICAL
+          # blocking findings still exit non-zero after the retries (they are
+          # deterministic, so the retry just re-confirms).
+          n=0
+          until python3 scripts/security-ci-to-pulse.py \
+            --semgrep semgrep.json \
+            --bandit bandit.json \
+            --osv osv.json \
+            --trivy trivy.json \
+            --allowlist .security-ci-allowlist.json \
+            --summary security-ci-summary.md; do
+            rc=$?
+            n=$((n+1))
+            if [ "$n" -ge 3 ]; then echo "::error::security-ci-to-pulse failed after 3 attempts"; exit "$rc"; fi
+            echo "security-ci-to-pulse attempt $n failed (rc=$rc), retrying in $((n*15))s"
+            sleep $((n*15))
+          done
+
+      - name: Print Security CI summary
+        if: always()
+        run: |
+          test -f security-ci-summary.md && cat security-ci-summary.md || true

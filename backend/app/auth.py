@@ -26,6 +26,8 @@ class Caller:
     # The raw Bearer token, forwarded verbatim to every downstream so each
     # service applies ITS OWN authz. Never logged.
     bearer: str
+    # Token expiry (epoch seconds) for §6.1 SSE lifetime bound.
+    token_exp: float
 
     @property
     def org_ids(self) -> list:
@@ -127,6 +129,7 @@ def verify_caller(authorization: Optional[str] = Header(default=None)) -> Caller
         email=payload.get("email"),
         memberships=_normalize_memberships(payload.get("organization_memberships")),
         bearer=token,
+        token_exp=float(payload.get("exp", 0)),
     )
 
 

@@ -6,7 +6,10 @@ import { SHIZUHA_APPS, useEnabledServices } from '@shizuha/ui'
 import CommandCenterDashboard from '../components/dashboard/CommandCenterDashboard'
 import LiveTheater from '../components/dashboard/LiveTheater'
 import CockpitPeek from '../components/dashboard/CockpitPeek'
+import OrgProgressCharts from '../components/dashboard/OrgProgressCharts'
 import CommandPalette from '../components/assistant/CommandPalette'
+import MiniShizuhaChat from '../components/assistant/MiniShizuhaChat'
+import { useVoiceInput, useVoiceConversation, speakText } from '../hooks/useVoice'
 import { useHomeSummary } from '../hooks/useHomeSummary'
 import { useHomeActivity } from '../hooks/useHomeActivity'
 import { getAccessToken, handleUnauthorized } from '../utils/auth'
@@ -89,6 +92,12 @@ function ChatHomeInner() {
 
   const [inputValue, setInputValue] = useState('')
   const [isSending, setIsSending] = useState(false)
+  // Inline mini-chat (operator 2026-07-11): chat with Shizuha while STAYING on
+  // the home page. When set, the Shizuha conversation is ACTIVE in the provider
+  // (messages stream in) but we render a rolling strip instead of navigating.
+  const [miniConvId, setMiniConvId] = useState(null)
+  const [speakReplies, setSpeakReplies] = useState(() => localStorage.getItem('shizuha_speak_replies') === '1')
+  const lastSpokenIdRef = useRef(null)
   const [showApps, setShowApps] = useState(false)
   const [showNewChat, setShowNewChat] = useState(false)
   const [showCommandPalette, setShowCommandPalette] = useState(false)
@@ -96,6 +105,10 @@ function ChatHomeInner() {
   const textareaRef = useRef(null)
   const { summary } = useHomeSummary()
   const orgs = Array.isArray(summary?.orgs) ? summary.orgs : null
+  // Org-progress panel: per-org selection (defaults to the first org) + range.
+  const [progressOrgId, setProgressOrgId] = useState(null)
+  const [progressRange, setProgressRange] = useState('24h')
+  const effectiveProgressOrgId = progressOrgId ?? orgs?.[0]?.id ?? null
   // HIVE-602 live theater: fast-poll the org's activity so the home MOVES.
   const { widget: activityWidget } = useHomeActivity()
   const feedWidget = activityWidget('feed')
@@ -145,14 +158,16 @@ function ChatHomeInner() {
     })()
   }, [])
 
-  // Sync URL param to active conversation
+  // Sync URL param to active conversation. The mini chat activates the
+  // Shizuha conversation WITHOUT a /c/:id URL — don't clear it here.
   useEffect(() => {
     if (urlConversationId && urlConversationId !== activeConversationId) {
+      setMiniConvId(null)
       setActiveConversation(urlConversationId)
-    } else if (!urlConversationId && activeConversationId) {
+    } else if (!urlConversationId && activeConversationId && activeConversationId !== miniConvId) {
       setActiveConversation(null)
     }
-  }, [activeConversationId, setActiveConversation, urlConversationId])
+  }, [activeConversationId, miniConvId, setActiveConversation, urlConversationId])
 
   // Send pending message from home input after conversation loads
   useEffect(() => {
@@ -177,36 +192,113 @@ function ChatHomeInner() {
     if (!message.trim() || isSending) return
     setIsSending(true)
     try {
+      // Mini chat already live: just send on the active conversation.
+      if (miniConvId && activeConversationId === miniConvId) {
+        sendMessage(message)
+        return
+      }
       let shizuhaConv = conversations.find(c =>
         c.participants?.some(p => p.user_name === 'Shizuha' || p.agent_role)
       )
       if (!shizuhaConv) {
         const token = getAuthToken()
-        const searchResp = await fetch(`/connect/api/people/search/?q=shizuha`, {
-          headers: { Authorization: `Bearer ${token}` },
+        // HIVE-620/624: every user has their OWN personal "Shizuha" agent — a real
+        // k3s fleet agent (SCLI) owned by them, isolated to their org. Get-or-create
+        // it and DM its Connect user directly (it's a member of the user's personal
+        // org, so the shared-org gate passes with no tenancy exemption).
+        const ensureResp = await fetch('/hive/api/v1/fleet/personal-agent', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         })
-        if (handleUnauthorized(searchResp)) return
-        if (searchResp.ok) {
-          const users = await searchResp.json()
-          const shizuhaUser = users.find(u => u.username === 'shizuha')
-          if (shizuhaUser) {
-            shizuhaConv = await createDirectConversation(shizuhaUser.id)
+        if (handleUnauthorized(ensureResp)) return
+        if (ensureResp.ok) {
+          const agent = await ensureResp.json()
+          if (agent.agent_user_id) {
+            shizuhaConv = await createDirectConversation(agent.agent_user_id)
           }
         }
       }
       if (shizuhaConv) {
-        // Store pending message so the chat view sends it after mounting
+        // Store pending message; the existing pending-message effect sends it
+        // once the conversation is active + connected (works without navigating).
         sessionStorage.setItem('shizuha_pending_message', JSON.stringify({
           conversationId: shizuhaConv.id,
           content: message,
         }))
+        // Operator 2026-07-11: STAY on the home page — open the inline mini
+        // chat instead of navigating to the full /c/:id view.
+        setMiniConvId(shizuhaConv.id)
         setActiveConversation(shizuhaConv.id)
-        navigate(`/c/${shizuhaConv.id}`)
       }
     } finally {
       setIsSending(false)
     }
-  }, [conversations, createDirectConversation, navigate, setActiveConversation, isSending])
+  }, [activeConversationId, conversations, createDirectConversation, isSending, miniConvId, sendMessage, setActiveConversation])
+
+  const closeMiniChat = useCallback(() => {
+    setMiniConvId(null)
+    setActiveConversation(null)
+  }, [setActiveConversation])
+
+  const openFullFromMini = useCallback(() => {
+    if (!miniConvId) return
+    const id = miniConvId
+    setMiniConvId(null)
+    navigate(`/c/${id}`)
+  }, [miniConvId, navigate])
+
+  // Hands-free voice call (operator 2026-07-11): listen → transcribe → send →
+  // speak the reply → listen again. onUtterance fires when the caller finishes
+  // an utterance; we send it to Shizuha and the reply is spoken by the effect
+  // below once it streams in.
+  const { callState, startCall, endCall, notifyReply, isCallActive } = useVoiceConversation({
+    onUtterance: (text) => { sendToShizuha(text) },
+  })
+  const callActive = callState !== 'idle'
+
+  const toggleCall = useCallback(() => {
+    if (isCallActive()) { endCall(); return }
+    startCall()
+  }, [isCallActive, startCall, endCall])
+
+  // Speak Shizuha's newest message. During a live call this drives the loop
+  // (speak → re-listen via notifyReply); otherwise it honors the speak toggle.
+  useEffect(() => {
+    if (!miniConvId || activeConversationId !== miniConvId) return
+    const list = Array.isArray(messages) ? messages : []
+    const last = list[list.length - 1]
+    if (!last || last.sender_id === user?.id) return
+    const key = last.id || last.client_message_id
+    if (!key || lastSpokenIdRef.current === key) return
+    if (callActive) {
+      lastSpokenIdRef.current = key
+      notifyReply(last.content)
+    } else if (speakReplies) {
+      lastSpokenIdRef.current = key
+      speakText(last.content)
+    }
+  }, [messages, speakReplies, callActive, notifyReply, miniConvId, activeConversationId, user?.id])
+
+  const toggleSpeakReplies = useCallback(() => {
+    setSpeakReplies((v) => {
+      const next = !v
+      localStorage.setItem('shizuha_speak_replies', next ? '1' : '0')
+      if (!next) speakText.stop?.()
+      return next
+    })
+  }, [])
+
+  // Voice input: hold-to-talk / tap-to-toggle mic. Transcript lands in the
+  // input box so the user can review before sending (or auto-send on final).
+  const { micState, micSupported, toggleMic } = useVoiceInput({
+    onTranscript: (text, { final }) => {
+      setInputValue(text)
+      if (final && text.trim()) {
+        sendToShizuha(text)
+        setInputValue('')
+      }
+    },
+  })
 
   const handleSubmit = useCallback(() => {
     if (inputValue.trim()) {
@@ -256,8 +348,10 @@ function ChatHomeInner() {
 
   const firstName = user?.first_name || user?.username || ''
 
-  // Active conversation: show chat in the same branded shell
-  if (activeConversationId) {
+  // Active conversation VIA URL: show the full chat in the same branded shell.
+  // (A mini-chat activation keeps activeConversationId set WITHOUT a URL — the
+  // home layout below renders the inline strip instead.)
+  if (activeConversationId && urlConversationId) {
     const activeConv = conversations.find(c => c.id === activeConversationId)
     const activeName = (() => {
       if (!activeConv) return 'Chat'
@@ -547,6 +641,42 @@ function ChatHomeInner() {
                 >
                   ⌘K
                 </button>
+                {micSupported && (
+                  <button
+                    onClick={toggleMic}
+                    title={micState === 'connecting' || micState === 'listening' ? 'Stop listening' : micState === 'transcribing' ? 'Transcribing…' : 'Speak to Shizuha'}
+                    className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors shadow-sm ${
+                      micState === 'connecting' || micState === 'listening'
+                        ? 'bg-red-500 text-white animate-pulse'
+                        : micState === 'transcribing'
+                          ? 'bg-amber-400 text-white'
+                          : 'bg-gray-100 text-gray-500 hover:bg-brand-50 hover:text-brand-600 dark:bg-gray-800 dark:text-gray-400 dark:hover:text-brand-400'
+                    }`}
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+                    </svg>
+                  </button>
+                )}
+                <button
+                  onClick={toggleCall}
+                  title={callActive ? 'End voice call' : 'Start a hands-free voice call with Shizuha'}
+                  className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors shadow-sm ${
+                    callActive
+                      ? 'bg-emerald-500 text-white animate-pulse'
+                      : 'bg-gray-100 text-gray-500 hover:bg-emerald-50 hover:text-emerald-600 dark:bg-gray-800 dark:text-gray-400 dark:hover:text-emerald-400'
+                  }`}
+                >
+                  {callActive ? (
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M6.62 10.79a15.05 15.05 0 006.59 6.59l2.2-2.2a1 1 0 011.02-.24 11.36 11.36 0 003.56.57 1 1 0 011 1V20a1 1 0 01-1 1A17 17 0 013 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.24.2 2.45.57 3.56a1 1 0 01-.24 1.02l-2.21 2.21z" transform="rotate(135 12 12)" />
+                    </svg>
+                  ) : (
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M6.62 10.79a15.05 15.05 0 006.59 6.59l2.2-2.2a1 1 0 011.02-.24 11.36 11.36 0 003.56.57 1 1 0 011 1V20a1 1 0 01-1 1A17 17 0 013 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.24.2 2.45.57 3.56a1 1 0 01-.24 1.02l-2.21 2.21z" />
+                    </svg>
+                  )}
+                </button>
                 <button
                   onClick={handleSubmit}
                   disabled={!inputValue.trim() || isSending}
@@ -558,12 +688,45 @@ function ChatHomeInner() {
                 </button>
               </div>
             </div>
+
+            {/* Inline mini chat (operator 2026-07-11): rolling 2-3 line strip —
+                talk with Shizuha without leaving the home page. */}
+            {miniConvId && activeConversationId === miniConvId && (
+              <MiniShizuhaChat
+                messages={messages}
+                typingUsers={typingUsers}
+                currentUserId={user?.id}
+                isLoading={isLoadingMessages}
+                onOpenFull={openFullFromMini}
+                onClose={closeMiniChat}
+                speakEnabled={speakReplies}
+                onToggleSpeak={toggleSpeakReplies}
+                callState={callState}
+                onToggleCall={toggleCall}
+              />
+            )}
           </div>
 
           {/* HIVE-602: the live theater — agents visibly working, events
               streaming in, projects moving. The show. */}
           <LiveTheater feed={feedWidget} agents={agentsWidget} onPeekAgent={peekAgent} onPeekTask={peekTask} />
 
+
+          {/* Org progress: is the org making progress and is anything badly
+              wrong? Live resolution-rate trend, status distribution, bottleneck
+              stages + a green/amber/red health read — org-scoped, own BFF poll,
+              degrades independently (async-frontends doctrine). */}
+          {orgs && orgs.length > 0 && effectiveProgressOrgId != null && (
+            <div className="mt-8">
+              <OrgProgressCharts
+                orgs={orgs}
+                orgId={effectiveProgressOrgId}
+                onOrgChange={setProgressOrgId}
+                range={progressRange}
+                onRangeChange={setProgressRange}
+              />
+            </div>
+          )}
 
           {/* HIVE-376: command-center dashboard — a concise, live, access-scoped
               view of the user's orgs / agents / work / money / alerts, hydrating
