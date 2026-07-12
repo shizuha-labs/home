@@ -59,6 +59,7 @@ jobs:
       - name: Run Home BFF organization-isolation gate
         run: |
           set -euo pipefail
+          python .forgejo/scripts/test-hive708-release-reassert.py
           python -m pip install --quiet --no-cache-dir \
             --index-url "${PIP_INDEX_URL:-http://pip-cache.registry.svc.cluster.local/simple/}" \
             --trusted-host "${PIP_TRUSTED_HOST:-pip-cache.registry.svc.cluster.local}" \
@@ -262,12 +263,19 @@ jobs:
           set -e
           if [ "${GUARD_RC}" = 10 ]; then exit 0; fi
           if [ "${GUARD_RC}" != 0 ]; then exit "${GUARD_RC}"; fi
-          kubectl set image -n shizuha deploy/shizuha-home-backend backend="localhost:30500/shizuha-home-backend:${BTAG}"
-          kubectl rollout status -n shizuha deploy/shizuha-home-backend --timeout=300s
-
-          LIVE="$(kubectl get deploy -n shizuha shizuha-home-backend -o jsonpath='{.spec.template.spec.containers[0].image}')"
-          echo "Live backend image: ${LIVE}"
-          echo "${LIVE}" | grep -q "${BTAG}" || { echo "::error::backend image mismatch"; exit 1; }
+          # HIVE-708: the deploy chart reconciler snapshots exact live images.
+          # If it overlaps this release, it can apply that snapshot once. Keep
+          # re-asserting the monotonic winner until the chart-only apply is past.
+          for attempt in 1 2 3; do
+            kubectl set image -n shizuha deploy/shizuha-home-backend backend="localhost:30500/shizuha-home-backend:${BTAG}"
+            kubectl rollout status -n shizuha deploy/shizuha-home-backend --timeout=300s
+            LIVE="$(kubectl get deploy -n shizuha shizuha-home-backend -o jsonpath='{.spec.template.spec.containers[0].image}')"
+            echo "Live backend image (attempt ${attempt}): ${LIVE}"
+            if echo "${LIVE}" | grep -q "${BTAG}"; then break; fi
+            if [ "${attempt}" = 3 ]; then echo "::error::backend image mismatch after ${attempt} attempts"; exit 1; fi
+            echo "Backend image clobbered by concurrent chart reconcile — re-asserting"
+            sleep 10
+          done
           kubectl annotate -n shizuha deploy/shizuha-home-backend shizuha.io/last-successful-sha="${{ github.sha }}" --overwrite
           kubectl get pods -n shizuha -l app.kubernetes.io/name=shizuha-home-backend
 
