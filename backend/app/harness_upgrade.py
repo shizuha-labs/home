@@ -9,11 +9,9 @@ HLD: https://wiki.shizuha.com/9e59bd34-941c-4c23-b4a5-2adbc333b5d2
 """
 import asyncio
 import datetime
-import json
 import logging
-import os
 import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from enum import Enum
 from typing import Optional
 
@@ -31,10 +29,12 @@ class AutoUpgradeLevel(str, Enum):
     minor = "minor"
     major = "major"
 
-AUTOUPGRADE = AutoUpgradeLevel(os.environ.get("HARNESS_AUTOUPGRADE", "patch"))
-POLL_INTERVAL_SECONDS = int(os.environ.get("HARNESS_POLL_INTERVAL", "21600"))  # 6h
-CANARY_OBSERVATION_SECONDS = int(os.environ.get("HARNESS_CANARY_OBSERVATION", "900"))  # 15m
-CANARY_AGENT_EMAIL = os.environ.get("HARNESS_CANARY_AGENT", "test@shizuha.com")
+# Config is read from settings (config.py), which sources from env.
+# These module-level aliases keep the pipeline code concise.
+AUTOUPGRADE = AutoUpgradeLevel(settings.HARNESS_AUTOUPGRADE)
+POLL_INTERVAL_SECONDS = settings.HARNESS_POLL_INTERVAL
+CANARY_OBSERVATION_SECONDS = settings.HARNESS_CANARY_OBSERVATION
+CANARY_AGENT_EMAIL = settings.HARNESS_CANARY_AGENT
 
 # Known harnesses with their npm package names and OCI label keys.
 HARNESSES = {
