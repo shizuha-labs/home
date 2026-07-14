@@ -1,5 +1,5 @@
 # HIVE-375 home BFF — stateless async fan-out (FastAPI + uvicorn).
-FROM python:3.12-slim
+FROM python:3.14-slim
 WORKDIR /app
 ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 COPY requirements.txt .

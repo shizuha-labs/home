@@ -25,7 +25,7 @@ jobs:
   authz-invariant:
     runs-on: ubuntu-latest
     container:
-      image: python:3.12-slim
+      image: python:3.14-slim
     steps:
       # HIVE-652/HOME deploy-backend: this job intentionally runs inside
       # python:3.12-slim for a small, deterministic authz gate. JS actions such
