@@ -139,11 +139,11 @@ jobs:
                     args:
                       - |
                         set -e
-                        git clone --depth=50 https://x-token-auth:\${GIT_PASSWORD}@github.com/shizuha-labs/home.git /workspace/src
+                        git clone --depth=50 http://x-token-auth:\${GIT_PASSWORD}@forgejo-http.origin.svc.cluster.local/shizuha-labs/home.git /workspace/src
                         cd /workspace/src && (git checkout ${{ github.sha }} 2>/dev/null || echo "sha not in shallow clone; building default HEAD")
                     env:
                       - name: GIT_PASSWORD
-                        valueFrom: { secretKeyRef: { name: github-token, key: password } }
+                        valueFrom: { secretKeyRef: { name: forgejo-token, key: password } }
                     volumeMounts: [{ mountPath: /workspace, name: workspace }]
                 containers:
                   - name: kaniko
