@@ -167,8 +167,8 @@ jobs:
           set -e
           if [ "${GUARD_RC}" = 10 ]; then exit 0; fi
           if [ "${GUARD_RC}" != 0 ]; then exit "${GUARD_RC}"; fi
-          # Re-assert loop (PLAT-4123, mirrors connect 943a3d9): deploy.yml
-          # (same push, separate concurrency group) snapshots the LIVE frontend
+          # Re-assert loop (PLAT-4123/HIVE-708): the deploy chart reconciler
+          # (separate repository/concurrency group) snapshots the LIVE frontend
           # tag for its helm --set — if it snapshots BEFORE we roll and applies
           # DURING our rollout, it reverts us to the previous tag. helm applies
           # once and never re-touches the FE, so re-asserting converges; only a
