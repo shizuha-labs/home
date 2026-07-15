@@ -66,6 +66,22 @@ class Settings:
     AUDIT_LEAD_RETENTION_DAYS: int = int(os.environ.get("HOME_AUDIT_LEAD_RETENTION_DAYS", "45"))
     AUDIT_LEAD_RATE_LIMIT_PER_MINUTE: int = int(os.environ.get("HOME_AUDIT_LEAD_RATE_LIMIT_PER_MINUTE", "5"))
 
+    # HIVE-615 Automatic fleet-wide harness upgrades.
+    HARNESS_AUTOUPGRADE: str = os.environ.get("HARNESS_AUTOUPGRADE", "patch")
+    HARNESS_POLL_INTERVAL: int = int(os.environ.get("HARNESS_POLL_INTERVAL", "21600"))
+    HARNESS_CANARY_OBSERVATION: int = int(os.environ.get("HARNESS_CANARY_OBSERVATION", "900"))
+    HARNESS_CANARY_AGENT: str = os.environ.get("HARNESS_CANARY_AGENT", "test@shizuha.com")
+    # Staff-scoped Hive service token for the SCHEDULED (callerless) auto-upgrade
+    # path — it must POST the staff-guarded Hive control endpoints (runtime-image,
+    # harness upgrade, switch-backend). Empty ⇒ the scheduler runs notify-only
+    # (detect + record, never roll); the manual trigger endpoint uses the staff
+    # caller's own bearer instead, so it works without this being set.
+    HIVE_SERVICE_TOKEN: str = os.environ.get("HIVE_SERVICE_TOKEN", "")
+    # How long to wait for the canary agent's new image to build+pull+report
+    # healthy before declaring the canary failed (bounds a never-publishing build).
+    HARNESS_CANARY_TIMEOUT: int = int(os.environ.get("HARNESS_CANARY_TIMEOUT", "1800"))
+    HARNESS_ROLL_TIMEOUT: int = int(os.environ.get("HARNESS_ROLL_TIMEOUT", "3600"))
+
     # HIVE-603 Redis Streams for activity feed.
     REDIS_URL: str = os.environ.get("HOME_REDIS_URL", "redis://localhost:6379/0")
     ACTIVITY_STREAM_PREFIX: str = os.environ.get("HOME_ACTIVITY_STREAM_PREFIX", "home:activity:v1:org:")

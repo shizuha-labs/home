@@ -38,6 +38,7 @@ from .clients import (
 )
 from .audit_leads import AuditLeadRequest, AuditLeadResponse, persist_audit_lead
 from .config import settings
+from .harness_upgrade import get_upgrade_history, get_upgrade_status, poll_and_upgrade
 from .redis_client import block_read, block_read_multi, read_recent, read_recent_multi
 from .schema import (
     ActivityRecentResponse, HomeActivityEventV1, HomeSummaryV1, HomeActivityV1,
@@ -80,6 +81,66 @@ def _clear_audit_lead_rate_limits_for_tests() -> None:
 @app.get("/api/home/health")
 async def health():
     return {"status": "ok", "version": SUMMARY_VERSION}
+
+
+# ── HIVE-615 Harness auto-upgrade endpoints ───────────────────────────────────
+
+_STAFF_ROLES = {"owner", "admin", "staff"}
+
+
+def _require_staff(caller: Caller) -> None:
+    """Trigger is a fleet-wide control action — gate it at the edge to an
+    owner/admin caller (reika P3). The Hive control endpoints re-enforce staff
+    on their side against the forwarded bearer, so this is defense-in-depth, not
+    the sole check."""
+    roles = {str(r).lower() for r in caller.memberships.values()}
+    if roles.isdisjoint(_STAFF_ROLES):
+        raise HTTPException(status_code=403, detail="Harness upgrade trigger is staff/owner only")
+
+
+@app.get("/api/hive/harness-upgrade/status")
+async def harness_upgrade_status(caller: Caller = Depends(verify_caller)):
+    """Current harness auto-upgrade status + recent history (audit-visible)."""
+    return {
+        "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        **(await get_upgrade_status()),
+    }
+
+
+@app.get("/api/hive/harness-upgrade/history")
+async def harness_upgrade_history(
+    caller: Caller = Depends(verify_caller),
+    limit: int = Query(default=20, ge=1, le=100),
+):
+    """Auditable history of each auto-upgrade (what/when/result)."""
+    return {
+        "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "upgrades": await get_upgrade_history(limit=limit),
+    }
+
+
+@app.post("/api/hive/harness-upgrade/trigger")
+async def harness_upgrade_trigger(
+    caller: Caller = Depends(verify_caller),
+    current_versions: Optional[str] = Query(default=None, description="JSON dict of current harness versions"),
+):
+    """Manually run one poll-and-upgrade cycle. Staff/owner only; the pipeline
+    drives the real Hive fleet-control API with the caller's staff bearer."""
+    _require_staff(caller)
+    versions: dict = {}
+    if current_versions:
+        try:
+            versions = json.loads(current_versions)
+            if not isinstance(versions, dict):
+                raise ValueError
+        except (json.JSONDecodeError, TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="current_versions must be a JSON object")
+    results = await poll_and_upgrade(versions, bearer=caller.bearer)
+    return {
+        "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "upgrades_triggered": len(results),
+        "results": [r.__dict__ for r in results],
+    }
 
 
 @app.post("/api/research/audit-leads", response_model=AuditLeadResponse, status_code=201)
