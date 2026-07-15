@@ -61,10 +61,10 @@ jobs:
               sleep $((n*10))
             done
           }
-          retry timeout -k 30 300 python3 -m pip install --upgrade pip
-          retry timeout -k 30 480 python3 -m pip install 'semgrep>=1.75,<2' 'uv==0.11.26'
+          retry timeout -k 30 300 python3 -m pip install --index-url http://pip-cache.registry.svc.cluster.local/simple --trusted-host pip-cache.registry.svc.cluster.local --upgrade pip
+          retry timeout -k 30 480 python3 -m pip install --index-url http://pip-cache.registry.svc.cluster.local/simple --trusted-host pip-cache.registry.svc.cluster.local 'semgrep>=1.75,<2' 'uv==0.11.26'
           if find . -type f -name '*.py' -not -path './.git/*' -print -quit | grep -q .; then
-            retry timeout -k 30 480 python3 -m pip install 'bandit[toml]>=1.7,<2'
+            retry timeout -k 30 480 python3 -m pip install --index-url http://pip-cache.registry.svc.cluster.local/simple --trusted-host pip-cache.registry.svc.cluster.local 'bandit[toml]>=1.7,<2'
           else
             echo 'No Python sources; Bandit install skipped'
           fi
