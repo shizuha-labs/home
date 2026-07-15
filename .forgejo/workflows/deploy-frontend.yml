@@ -29,7 +29,13 @@ jobs:
         run: |
           set -euo pipefail
           KUBECTL_ARCH=$(uname -m); case "$KUBECTL_ARCH" in x86_64) KUBECTL_ARCH=amd64;; aarch64) KUBECTL_ARCH=arm64;; esac
-          curl -fsSL -o kubectl "http://forgejo-http.origin.svc.cluster.local/api/packages/actions/generic/kubectl/v1.34.1/kubectl-${KUBECTL_ARCH}"
+          case "$KUBECTL_ARCH" in
+            amd64) KUBECTL_SHA256=7721f265e18709862655affba5343e85e1980639395d5754473dafaadcaa69e3 ;;
+            arm64) KUBECTL_SHA256=420e6110e3ba7ee5a3927b5af868d18df17aae36b720529ffa4e9e945aa95450 ;;
+            *) echo "Unsupported runner arch: $KUBECTL_ARCH" >&2; exit 1 ;;
+          esac
+          curl -fsSL --connect-timeout 10 --max-time 120 --retry 3 --retry-all-errors -o kubectl "https://origin.shizuha.com/api/packages/actions/generic/kubectl/v1.34.1/kubectl-${KUBECTL_ARCH}"
+          echo "${KUBECTL_SHA256}  kubectl" | sha256sum -c -
           install -m 0755 kubectl /usr/local/bin/kubectl
           mkdir -p "$HOME/.kube"
           printf '%s' "${{ secrets.KUBE_CONFIG_B64 }}" | base64 -d > "$HOME/.kube/config"
