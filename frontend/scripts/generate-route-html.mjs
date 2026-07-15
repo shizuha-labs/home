@@ -35,6 +35,14 @@ const routes = [
       'Sign up for a Shizuha Forge API key and make your first image generation request with the free tier.',
   },
   {
+    // VEN-174: /forge/docs must have its own prerendered shell, or nginx's
+    // `try_files $uri/` hits the bare directory and 403s (same as bare forge/).
+    output: 'forge/docs/index.html',
+    title: 'Forge API Documentation — Shizuha',
+    description:
+      'Forge API developer docs: authentication, the POST /api/forge/generate endpoint, rate limits, status codes, and curl/Python/JavaScript examples.',
+  },
+  {
     output: 'autonomous-org/index.html',
     title: 'Shizuha Autonomous Org — managed AI workforce for startups',
     description:
