@@ -118,7 +118,7 @@ jobs:
             labels: { app: ci-build, service: home-backend }
           spec:
             backoffLimit: 0
-            ttlSecondsAfterFinished: 900
+            ttlSecondsAfterFinished: 300
             template:
               spec:
                 restartPolicy: Never
@@ -153,6 +153,7 @@ jobs:
                       - --dockerfile=/workspace/src/backend/Dockerfile
                       - --destination=${REG}/shizuha-home-backend:${BTAG}-${ARCH}
                       - --destination=${REG}/shizuha-home-backend:${BOOTSTRAP_TAG}-${ARCH}
+                      - --cleanup
                       - --insecure
                       - --skip-tls-verify
                       - --insecure-pull
@@ -187,8 +188,16 @@ jobs:
             done
             wait "$WP"
           }
-          wait_job amd64
-          wait_job arm64
+          wait_job amd64 &
+          WAIT_AMD64_PID=$!
+          wait_job arm64 &
+          WAIT_ARM64_PID=$!
+          WAIT_FAILED=0
+          wait "${WAIT_AMD64_PID}" || WAIT_FAILED=1
+          wait "${WAIT_ARM64_PID}" || WAIT_FAILED=1
+          if [ "${WAIT_FAILED}" -ne 0 ]; then
+            exit 1
+          fi
 
           cat <<YAML | kubectl apply -f -
           apiVersion: batch/v1
@@ -199,7 +208,7 @@ jobs:
             labels: { app: ci-manifest, service: home-backend }
           spec:
             backoffLimit: 0
-            ttlSecondsAfterFinished: 900
+            ttlSecondsAfterFinished: 300
             template:
               spec:
                 restartPolicy: Never
@@ -232,7 +241,7 @@ jobs:
             labels: { app: ci-manifest, service: home-backend }
           spec:
             backoffLimit: 0
-            ttlSecondsAfterFinished: 900
+            ttlSecondsAfterFinished: 300
             template:
               spec:
                 restartPolicy: Never
