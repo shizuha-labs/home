@@ -113,50 +113,46 @@ jobs:
         run: |
           set +e
           case "$(uname -m)" in
-            x86_64|amd64) OSV_ARCH=amd64 ;;
-            aarch64|arm64) OSV_ARCH=arm64 ;;
+            x86_64|amd64) OSV_ARCH=amd64; OSV_SHA256=15314940c10d26af9c6649f150b8a47c1262e8fc7e17b1d1029b0e479e8ed8a0 ;;
+            aarch64|arm64) OSV_ARCH=arm64; OSV_SHA256=44e580752910f0ff36ec99aff59af20f65df1e859aa31e5605a8f0d055b496e9 ;;
             *) echo "unsupported security-ci architecture: $(uname -m)" >&2; exit 1 ;;
           esac
-          timeout -k 30 180 curl -sfL --max-time 150 -o /usr/local/bin/osv-scanner \
-            "https://github.com/google/osv-scanner/releases/latest/download/osv-scanner_linux_${OSV_ARCH}" \
-            && chmod +x /usr/local/bin/osv-scanner
+          base="http://forgejo-http.origin.svc.cluster.local/api/packages/actions/generic/security-ci-tools/osv-2.4.0_trivy-0.72.0"
+          ( set -e
+            timeout -k 10 60 curl --retry 3 --retry-all-errors --retry-delay 1 -sfL \
+              --max-time 45 -o /usr/local/bin/osv-scanner "${base}/osv-scanner-linux-${OSV_ARCH}"
+            echo "${OSV_SHA256}  /usr/local/bin/osv-scanner" | sha256sum -c -
+            chmod +x /usr/local/bin/osv-scanner )
           timeout -k 30 600 osv-scanner -r --format=json --output=osv.json .
           rc=$?
           echo "osv-scanner exit=${rc} (normalized in security-ci-to-pulse)"
-          test -s osv.json || echo '{"results":[]}' > osv.json
+          test -s osv.json || echo {results:[]} > osv.json
           exit 0
 
       - name: Run Trivy filesystem scan
         run: |
           set +e
-          # PLAT-1982 fix: avoid the "curl | sh" install pattern (semgrep
-          # gha-curl-pipe-shell / CWE-78). Download the pinned release tarball,
-          # verify its published SHA-256 checksum, then extract — the same safe
-          # pattern the osv-scanner step above uses. Scan stays non-blocking:
-          # if the download/verify fails, trivy is absent, the scan errors, and
-          # the empty-JSON fallback below keeps CI green (findings are tracked,
-          # not gated).
           TRIVY_VERSION=0.72.0
           case "$(uname -m)" in
-            x86_64|amd64) TRIVY_ARCH=64bit ;;
-            aarch64|arm64) TRIVY_ARCH=ARM64 ;;
+            x86_64|amd64) TRIVY_ARCH=64bit; TRIVY_SHA256=bbb64b9695866ce4a7a8f5c9592002c5961cab378577fa3f8a040df362b9b2ea ;;
+            aarch64|arm64) TRIVY_ARCH=ARM64; TRIVY_SHA256=2ca2c023109c2db6b2b77366b6717291452d4531167377d95c79547f0c8e3467 ;;
             *) echo "unsupported security-ci architecture: $(uname -m)" >&2; exit 1 ;;
           esac
           asset="trivy_${TRIVY_VERSION}_Linux-${TRIVY_ARCH}.tar.gz"
-          base="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}"
+          base="http://forgejo-http.origin.svc.cluster.local/api/packages/actions/generic/security-ci-tools/osv-2.4.0_trivy-0.72.0"
           ( set -e
             cd /tmp
-            timeout -k 30 180 curl -sfL --max-time 150 -o "${asset}" "${base}/${asset}"
-            timeout -k 30 60 curl -sfL --max-time 45 -o trivy_checksums.txt "${base}/trivy_${TRIVY_VERSION}_checksums.txt"
-            grep " ${asset}\$" trivy_checksums.txt | sha256sum -c -
+            timeout -k 10 60 curl --retry 3 --retry-all-errors --retry-delay 1 -sfL \
+              --max-time 45 -o "${asset}" "${base}/${asset}"
+            echo "${TRIVY_SHA256}  ${asset}" | sha256sum -c -
             tar -xzf "${asset}" -C /usr/local/bin trivy )
-          # trivy downloads its vuln DB on first run — the download can hang;
-          # cap both at the tool level and the shell level (ORIG-71).
+          # The vulnerability DB remains managed by Trivy itself; cap its first-run
+          # refresh so an unavailable upstream cannot pin the shared runner.
           timeout -k 30 600 trivy fs --timeout 8m --format json --output trivy.json \
             --severity HIGH,CRITICAL --ignore-unfixed .
           rc=$?
           echo "trivy exit=${rc} (normalized in security-ci-to-pulse)"
-          test -s trivy.json || echo '{"Results":[]}' > trivy.json
+          test -s trivy.json || echo {Results:[]} > trivy.json
           exit 0
 
       - name: Normalize findings and file/update Pulse security findings
