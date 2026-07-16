@@ -146,9 +146,12 @@ jobs:
               --max-time 45 -o "${asset}" "${base}/${asset}"
             echo "${TRIVY_SHA256}  ${asset}" | sha256sum -c -
             tar -xzf "${asset}" -C /usr/local/bin trivy )
-          # The vulnerability DB remains managed by Trivy itself; cap its first-run
-          # refresh so an unavailable upstream cannot pin the shared runner.
-          timeout -k 30 600 trivy fs --timeout 8m --format json --output trivy.json \
+          # Keep Trivy DB/language caches on the persistent runner tool-cache volume;
+          # refreshes cross WAN only when this runner actually needs newer metadata.
+          TRIVY_CACHE_DIR=/opt/hostedtoolcache/trivy
+          mkdir -p ""
+          timeout -k 30 600 trivy fs --cache-dir "" \
+            --timeout 8m --format json --output trivy.json \
             --severity HIGH,CRITICAL --ignore-unfixed .
           rc=$?
           echo "trivy exit=${rc} (normalized in security-ci-to-pulse)"
