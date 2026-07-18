@@ -9,6 +9,9 @@ pyjwt>=2.13.0,<3
 cryptography>=42,<50
 # HIVE-603 Redis Streams for activity feed.
 redis[hiredis]>=5.1,<6
+# VEN-194 Gate-2 durable Books Compliance funnel. The public write gate defaults
+# off; when enabled, Postgres is the only authoritative store.
+psycopg[binary]>=3.2,<4
 # tests
 Pygments>=2.20.0,<3
 pytest>=9.0.3,<10
