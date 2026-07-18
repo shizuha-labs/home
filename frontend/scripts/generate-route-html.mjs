@@ -64,6 +64,24 @@ const routes = [
     description:
       'Manage your Shizuha Forge API key, usage, free-tier quota, billing status, and account settings.',
   },
+  {
+    output: 'books/compliance/index.html',
+    title: 'Books Compliance Cockpit — GST readiness workflow',
+    description:
+      'India-hosted Books compliance readiness for GST tracking, reconciliation, evidence and reports. Request-access validation only; no payment or tax advice.',
+  },
+  {
+    output: 'books/compliance/pricing/index.html',
+    title: 'Books Compliance Cockpit Pricing — validation only',
+    description:
+      '₹0 demo and ₹499/month validation hypothesis for Books Compliance readiness. Subject to change; request-access only, no payment.',
+  },
+  {
+    output: 'books/compliance/confirmation/index.html',
+    title: 'Confirm Books Compliance request — Shizuha',
+    description:
+      'Deliberately confirm a Books Compliance request. Opening this page alone changes nothing.',
+  },
 ]
 
 const replaceTag = (html, pattern, replacement) => {

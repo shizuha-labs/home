@@ -19,12 +19,14 @@ cross-org. (STRIDE-lite on the task; PLAT-1236 cross-org→403 tests below.)
 import asyncio
 import base64
 import datetime
+import hmac
 import json
+import os
 import time
 from typing import AsyncGenerator, Optional
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -37,6 +39,26 @@ from .clients import (
     fetch_org_refs, fetch_recent_conversations, fetch_task_peek, fetch_tasks_by_status,
 )
 from .audit_leads import AuditLeadRequest, AuditLeadResponse, persist_audit_lead
+from .books_compliance import (
+    CATALOG,
+    BeaconRequest,
+    ChallengeConsumeRequest,
+    IntakeRequest,
+    RecoveryRequest,
+    RightsRequest,
+    TokenRequest,
+    consume_confirmation,
+    consume_recovery,
+    create_rights_request,
+    database_url,
+    intake_enabled,
+    issue_token,
+    record_beacon,
+    request_recovery,
+    require_json,
+    submit_intake,
+    sweep_expired,
+)
 from .config import settings
 from .redis_client import block_read, block_read_multi, read_recent, read_recent_multi
 from .schema import (
@@ -46,10 +68,46 @@ from .schema import (
 
 app = FastAPI(title="Shizuha Home BFF", version=str(SUMMARY_VERSION))
 
+
+BOOKS_COMPLIANCE_BODY_LIMITS = {
+    "/api/books/compliance/token": 1024,
+    "/api/books/compliance/beacon": 4096,
+    "/api/books/compliance/intake": 8192,
+    "/api/books/compliance/confirmation": 1024,
+    "/api/books/compliance/recovery": 2048,
+    "/api/books/compliance/recovery/consume": 1024,
+    "/api/books/compliance/rights": 2048,
+}
+
+
+@app.middleware("http")
+async def books_compliance_request_boundary(request: Request, call_next):
+    """Reject public POSTs before FastAPI parses or validates attacker bodies."""
+    limit = BOOKS_COMPLIANCE_BODY_LIMITS.get(request.url.path) if request.method == "POST" else None
+    if limit is None:
+        return await call_next(request)
+    content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if content_type != "application/json":
+        return JSONResponse(status_code=415, content={"detail": "application/json required"})
+    allowed = {
+        item.strip()
+        for item in os.environ.get("BOOKS_COMPLIANCE_ALLOWED_ORIGINS", "https://shizuha.com").split(",")
+        if item.strip()
+    }
+    if request.headers.get("origin") not in allowed:
+        return JSONResponse(status_code=403, content={"detail": "origin rejected"})
+    length = request.headers.get("content-length")
+    if length and (not length.isdigit() or int(length) > limit):
+        return JSONResponse(status_code=413, content={"detail": "request too large"})
+    body = await request.body()
+    if len(body) > limit:
+        return JSONResponse(status_code=413, content={"detail": "request too large"})
+    return await call_next(request)
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     """Avoid reflecting AuditLead PII in public validation error traces."""
-    if request.url.path == "/api/research/audit-leads":
+    if request.url.path == "/api/research/audit-leads" or request.url.path.startswith("/api/books/compliance/"):
         errors = []
         for err in exc.errors():
             scrubbed = {k: v for k, v in err.items() if k not in {"input", "ctx"}}
@@ -80,6 +138,73 @@ def _clear_audit_lead_rate_limits_for_tests() -> None:
 @app.get("/api/home/health")
 async def health():
     return {"status": "ok", "version": SUMMARY_VERSION}
+
+
+# VEN-194: explicit routes keep every /api/books/compliance/* response JSON and
+# out of the frontend SPA fallback. Public PII writes default disabled.
+@app.get("/api/books/compliance/health")
+async def books_compliance_health():
+    return {
+        "status": "ok",
+        "intake_enabled": intake_enabled(),
+        "store": "postgres" if database_url() else "not_configured",
+        "provider": "fake" if os.environ.get("BOOKS_COMPLIANCE_FAKE_PROVIDER_ENABLED", "true").lower() in {"1", "true", "yes"} else "none",
+    }
+
+
+@app.get("/api/books/compliance/catalog")
+async def books_compliance_catalog():
+    return CATALOG
+
+
+@app.post("/api/books/compliance/token", status_code=201)
+def books_compliance_token(payload: TokenRequest, request: Request):
+    require_json(request, 1024)
+    return issue_token(request)
+
+
+@app.post("/api/books/compliance/beacon", status_code=202)
+def books_compliance_beacon(payload: BeaconRequest, request: Request):
+    require_json(request, 4096)
+    return record_beacon(payload)
+
+
+@app.post("/api/books/compliance/intake", status_code=202)
+def books_compliance_intake(payload: IntakeRequest, request: Request):
+    require_json(request, 8192)
+    return submit_intake(payload, request)
+
+
+@app.post("/api/books/compliance/confirmation", status_code=202)
+def books_compliance_confirmation(payload: ChallengeConsumeRequest, request: Request):
+    require_json(request, 1024)
+    return consume_confirmation(payload)
+
+
+@app.post("/api/books/compliance/recovery", status_code=202)
+def books_compliance_recovery(payload: RecoveryRequest, request: Request):
+    require_json(request, 2048)
+    return request_recovery(payload, request)
+
+
+@app.post("/api/books/compliance/recovery/consume", status_code=202)
+def books_compliance_recovery_consume(payload: ChallengeConsumeRequest, request: Request):
+    require_json(request, 1024)
+    return consume_recovery(payload)
+
+
+@app.post("/api/books/compliance/rights", status_code=202)
+def books_compliance_rights(payload: RightsRequest, request: Request):
+    require_json(request, 2048)
+    return create_rights_request(payload)
+
+
+@app.post("/api/books/compliance/internal/retention", include_in_schema=False)
+def books_compliance_retention(x_books_retention_secret: str = Header(default="")):
+    expected = os.environ.get("BOOKS_COMPLIANCE_RETENTION_SECRET", "")
+    if not expected or not hmac.compare_digest(expected, x_books_retention_secret):
+        raise HTTPException(status_code=404, detail="not found")
+    return sweep_expired()
 
 
 @app.post("/api/research/audit-leads", response_model=AuditLeadResponse, status_code=201)

@@ -47,6 +47,12 @@ export default function Footer() {
             >
               Create org
             </a>
+            <a
+              href="/books/compliance"
+              className="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white transition-colors"
+            >
+              Books Compliance
+            </a>
           </div>
 
           {/* Copyright */}
