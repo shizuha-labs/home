@@ -78,6 +78,7 @@ function ChatHomeInner() {
   const {
     conversations,
     activeConversationId,
+    activeInitialUnread,
     setActiveConversation,
     createDirectConversation,
     isConnected,
@@ -472,12 +473,15 @@ function ChatHomeInner() {
 
           {/* Messages + Input from @shizuha/chat */}
           <MessageList
+            key={activeConversationId}
+            conversationId={activeConversationId}
             messages={messages}
             currentUserId={user?.id}
             typingUsers={activeConversationId ? typingUsers.get(activeConversationId) : undefined}
             hasMore={hasMore}
             isLoadingMore={isLoadingMessages}
             onLoadMore={loadMore}
+            initialUnreadCount={activeInitialUnread}
           />
           <MessageInput
             onSend={sendMessage}
