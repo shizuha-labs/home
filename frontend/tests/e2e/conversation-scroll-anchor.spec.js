@@ -64,7 +64,9 @@ const initialB = Array.from({ length: 40 }, (_, index) =>
 async function installMockConnect(page) {
   let socket
   let releaseImage
+  let releaseOlder
   const imageGate = new Promise((resolve) => { releaseImage = resolve })
+  const olderGate = new Promise((resolve) => { releaseOlder = resolve })
 
   await page.routeWebSocket('**/connect/ws/connect/user/**', (ws) => {
     socket = ws
@@ -86,6 +88,7 @@ async function installMockConnect(page) {
     const conversationId = url.pathname.split('/')[4]
     const before = url.searchParams.get('before')
     if (conversationId === 'con-235-a') {
+      if (before) await olderGate
       await route.fulfill({ json: before ? olderA : initialA })
     } else {
       await route.fulfill({ json: initialB })
@@ -105,15 +108,19 @@ async function installMockConnect(page) {
       socket.send(JSON.stringify(payload))
     },
     releaseImage,
+    releaseOlder,
   }
 }
 
-test('CON-235 opens at latest without a painted top frame and preserves reader intent', async ({
-  authenticatedPage: page,
-}) => {
+test('CON-235 opens at latest without a painted top frame and preserves reader intent', async ({ page }) => {
   await page.addInitScript(() => {
+    // Keep this regression deterministic and independent of the live ID service:
+    // AuthProvider only needs a non-expired token plus the cached user shape.
+    const payload = btoa(JSON.stringify({ enabled_services: ['connect'], exp: 4_102_444_800 }))
+    localStorage.setItem('shizuha_access_token', `header.${payload}.signature`)
+    localStorage.setItem('shizuha_user', JSON.stringify({ id: 1, username: 'con235-browser' }))
     window.__con235Frames = []
-    const observer = new MutationObserver(() => {
+    const sampleFrame = () => {
       const list = document.querySelector('[data-testid="connect-message-list"]')
       if (list && list.scrollHeight > list.clientHeight) {
         window.__con235Frames.push({
@@ -122,8 +129,9 @@ test('CON-235 opens at latest without a painted top frame and preserves reader i
           clientHeight: list.clientHeight,
         })
       }
-    })
-    observer.observe(document.documentElement, { childList: true, subtree: true })
+      requestAnimationFrame(sampleFrame)
+    }
+    requestAnimationFrame(sampleFrame)
   })
 
   const connect = await installMockConnect(page)
@@ -149,7 +157,10 @@ test('CON-235 opens at latest without a painted top frame and preserves reader i
 
   // Reading older history + incoming WS traffic: preserve the viewport and show
   // an explicit new-message affordance instead of yanking to the bottom.
-  await list.evaluate((el) => { el.scrollTop = Math.max(200, el.scrollHeight / 2) })
+  await list.evaluate((el) => {
+    el.scrollTop = Math.max(200, el.scrollHeight / 2)
+    el.dispatchEvent(new Event('scroll'))
+  })
   const beforeIncoming = await list.evaluate((el) => el.scrollTop)
   connect.sendIncoming({
     type: 'new_message',
@@ -162,11 +173,15 @@ test('CON-235 opens at latest without a painted top frame and preserves reader i
   // Loading older pages prepends content, but the same visible message remains
   // at the same viewport position (no pagination layout jump).
   const anchor = page.getByText('Message 0:', { exact: false }).first()
-  await list.evaluate((el) => { el.scrollTop = 0 })
-  const beforePrepend = await anchor.boundingBox()
+  await list.evaluate((el) => {
+    el.scrollTop = 0
+    el.dispatchEvent(new Event('scroll'))
+  })
+  const beforePrepend = await anchor.evaluate((el) => el.getBoundingClientRect().top)
+  connect.releaseOlder()
   await expect(page.getByText('Older 0:', { exact: false })).toBeVisible()
-  const afterPrepend = await anchor.boundingBox()
-  expect(Math.abs(afterPrepend.y - beforePrepend.y)).toBeLessThanOrEqual(2)
+  const afterPrepend = await anchor.evaluate((el) => el.getBoundingClientRect().top)
+  expect(Math.abs(afterPrepend - beforePrepend)).toBeLessThanOrEqual(2)
 
   // A conversation switch remounts the list and starts the new thread at its
   // own latest message rather than inheriting the previous scroll position.
