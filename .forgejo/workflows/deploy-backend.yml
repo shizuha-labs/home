@@ -41,8 +41,8 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          apt-get update -qq
-          apt-get install -y -qq --no-install-recommends ca-certificates git
+          apt-get -o Acquire::http::Proxy=http://apt-cache.registry.svc.cluster.local:3142 update -qq
+          apt-get -o Acquire::http::Proxy=http://apt-cache.registry.svc.cluster.local:3142 install -y -qq --no-install-recommends ca-certificates git
           [ -n "${GITHUB_TOKEN:-}" ] || { echo "::error::Forgejo workflow token is unavailable"; exit 1; }
           SERVER_URL="${GITHUB_SERVER_URL:-https://origin.shizuha.com}"
           SERVER_URL="${SERVER_URL%/}"
@@ -59,7 +59,7 @@ jobs:
       - name: Run Home BFF organization-isolation gate
         run: |
           set -euo pipefail
-          python -m pip install --quiet --no-cache-dir \
+          python -m pip install --index-url http://pip-cache.registry.svc.cluster.local/simple --trusted-host pip-cache.registry.svc.cluster.local --quiet --no-cache-dir \
             --index-url "${PIP_INDEX_URL:-http://pip-cache.registry.svc.cluster.local/simple/}" \
             --trusted-host "${PIP_TRUSTED_HOST:-pip-cache.registry.svc.cluster.local}" \
             -r backend/requirements.txt
@@ -118,7 +118,7 @@ jobs:
             labels: { app: ci-build, service: home-backend }
           spec:
             backoffLimit: 0
-            ttlSecondsAfterFinished: 900
+            ttlSecondsAfterFinished: 300
             template:
               spec:
                 restartPolicy: Never
@@ -153,6 +153,7 @@ jobs:
                       - --dockerfile=/workspace/src/backend/Dockerfile
                       - --destination=${REG}/shizuha-home-backend:${BTAG}-${ARCH}
                       - --destination=${REG}/shizuha-home-backend:${BOOTSTRAP_TAG}-${ARCH}
+                      - --cleanup
                       - --insecure
                       - --skip-tls-verify
                       - --insecure-pull
@@ -187,8 +188,16 @@ jobs:
             done
             wait "$WP"
           }
-          wait_job amd64
-          wait_job arm64
+          wait_job amd64 &
+          WAIT_AMD64_PID=$!
+          wait_job arm64 &
+          WAIT_ARM64_PID=$!
+          WAIT_FAILED=0
+          wait "${WAIT_AMD64_PID}" || WAIT_FAILED=1
+          wait "${WAIT_ARM64_PID}" || WAIT_FAILED=1
+          if [ "${WAIT_FAILED}" -ne 0 ]; then
+            exit 1
+          fi
 
           cat <<YAML | kubectl apply -f -
           apiVersion: batch/v1
@@ -199,7 +208,7 @@ jobs:
             labels: { app: ci-manifest, service: home-backend }
           spec:
             backoffLimit: 0
-            ttlSecondsAfterFinished: 900
+            ttlSecondsAfterFinished: 300
             template:
               spec:
                 restartPolicy: Never
@@ -232,7 +241,7 @@ jobs:
             labels: { app: ci-manifest, service: home-backend }
           spec:
             backoffLimit: 0
-            ttlSecondsAfterFinished: 900
+            ttlSecondsAfterFinished: 300
             template:
               spec:
                 restartPolicy: Never

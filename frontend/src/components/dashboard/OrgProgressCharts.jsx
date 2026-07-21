@@ -177,7 +177,7 @@ export default function OrgProgressCharts({ orgs, orgId, onOrgChange, range, onR
   const ts = data?.timeseries
   const points = ts?.points || []
   const snapshot = data?.snapshot || {}
-  const health = useMemo(() => assessHealth(snapshot), [snapshot])
+  const health = useMemo(() => assessHealth(data?.snapshot), [data?.snapshot])
   const HealthIcon = HEALTH_ICON[health.level]
 
   const groups = useMemo(() => {
