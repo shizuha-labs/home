@@ -321,6 +321,24 @@ def finding_comment(finding: Finding, args: argparse.Namespace) -> str:
     """).strip()
 
 
+def origin_observation(args: argparse.Namespace, *, check: str = "security-ci") -> dict[str, str]:
+    """Build the standalone CI writer's immutable Pulse provenance payload."""
+    values = {
+        "provider": "origin-forgejo",
+        "repo": str(args.repo or "").strip(),
+        "ref": str(args.ref or "").strip(),
+        "workflow": os.environ.get("GITHUB_WORKFLOW") or "security-ci.yml",
+        "check": check,
+        "run_id": os.environ.get("GITHUB_RUN_ID") or "",
+        "run_number": os.environ.get("GITHUB_RUN_NUMBER") or "",
+        "run_url": str(args.run_url or "").strip(),
+    }
+    sha = str(args.sha or "").strip().lower()
+    if 7 <= len(sha) <= 64 and all(c in "0123456789abcdef" for c in sha):
+        values["commit_sha"] = sha
+    return {key: value for key, value in values.items() if value}
+
+
 def pulse_create_or_update_finding(api_base: str, token: str, finding: Finding, args: argparse.Namespace) -> str:
     existing = pulse_find_existing(api_base, token, finding.source_id)
     if existing:
@@ -383,6 +401,9 @@ def pulse_create_or_update_finding(api_base: str, token: str, finding: Finding, 
         "source": SECURITY_CI_SOURCE,
         "source_id": finding.source_id,
         "source_url": args.run_url or finding.url,
+        "metadata": {"origin_observations": [
+            origin_observation(args, check=f"security-ci:{finding.tool}")
+        ]},
         # Pulse `/items/` `labels` is a list of strings, NOT a mapping — a dict here
         # is rejected with HTTP 400 (the security-ci filing failure). Encode the
         # metadata as flat `key:value` label strings.
@@ -468,7 +489,8 @@ def pulse_upsert_ledger(api_base: str, token: str, findings: list[Finding], args
         try:
             pulse_request("PATCH", f"{api_base}/items/{existing.get('id') or ref}/", token,
                           {"description": description, "labels": new_labels,
-                           "priority": PRIORITY.get(max_sev, "normal")})
+                           "priority": PRIORITY.get(max_sev, "normal"),
+                           "append_origin_observations": [origin_observation(args)]})
             return f"ledger-updated:{ref}"
         except Exception as exc:
             # PATCH rejected → one compact refresh comment (still no per-finding spam).
@@ -488,6 +510,7 @@ def pulse_upsert_ledger(api_base: str, token: str, findings: list[Finding], args
         "source": SECURITY_CI_SOURCE,
         "source_id": source_id,
         "source_url": args.run_url or "",
+        "metadata": {"origin_observations": [origin_observation(args)]},
         "labels": ["security-ci", "security-ci:ledger", f"repo:{args.repo}", hash_label],
         "assignee_id": None,
     }
