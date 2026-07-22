@@ -16,7 +16,8 @@ REQUIRED_PATTERNS = {
     "three outer attempts": r'''if \[ "\$n" -ge 3 \]''',
     "300-second bootstrap deadline": r"retry timeout -k 30 300 python3 -m pip install",
     "480-second scanner deadline": r"retry timeout -k 30 480 python3 -m pip install",
-    "job deadline": r"(?m)^\s*timeout-minutes:\s*40$",
+    "job deadline": r"(?m)^\s*timeout-minutes:\s*70$",
+    "retry backoff": r"sleep \$\(\(n\*10\)\)",
     "bounded semgrep deadline": r"timeout -k 30 300 semgrep scan",
     "bounded bandit deadline": r"timeout -k 30 300 bandit -r",
     "bounded osv deadline": r"timeout -k 30 300 osv-scanner",
@@ -24,6 +25,8 @@ REQUIRED_PATTERNS = {
 }
 
 TIMEOUT_FINALIZATION_MARGIN_SECONDS = 120
+RETRY_ATTEMPTS = 3
+RETRY_BACKOFF_SECONDS_PER_COMMAND = sum(attempt * 10 for attempt in range(1, RETRY_ATTEMPTS))
 
 
 def validate(workflow: Path, expected_sha256: str | None = None) -> list[str]:
@@ -37,13 +40,30 @@ def validate(workflow: Path, expected_sha256: str | None = None) -> list[str]:
         int(value)
         for value in re.findall(r"\btimeout\s+-k\s+\d+\s+(\d+)\b", text)
     ]
+    retry_command_budgets = [
+        int(value)
+        for value in re.findall(
+            r"(?m)^\s*retry\s+timeout\s+-k\s+\d+\s+(\d+)\b", text
+        )
+    ]
     if job_match and command_budgets:
         job_budget = int(job_match.group(1)) * 60
-        required = sum(command_budgets) + TIMEOUT_FINALIZATION_MARGIN_SECONDS
+        literal_budget = sum(command_budgets)
+        retry_extra_budget = (RETRY_ATTEMPTS - 1) * sum(retry_command_budgets)
+        retry_backoff_budget = (
+            len(retry_command_budgets) * RETRY_BACKOFF_SECONDS_PER_COMMAND
+        )
+        required = (
+            literal_budget
+            + retry_extra_budget
+            + retry_backoff_budget
+            + TIMEOUT_FINALIZATION_MARGIN_SECONDS
+        )
         if required > job_budget:
             errors.append(
-                "timeout hierarchy inverted: command budgets "
-                f"{sum(command_budgets)}s + finalization margin "
+                "timeout hierarchy inverted: literal command budgets "
+                f"{literal_budget}s + retry attempt budgets {retry_extra_budget}s "
+                f"+ retry backoff {retry_backoff_budget}s + finalization margin "
                 f"{TIMEOUT_FINALIZATION_MARGIN_SECONDS}s exceed job budget {job_budget}s"
             )
     if expected_sha256:
