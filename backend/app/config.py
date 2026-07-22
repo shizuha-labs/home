@@ -66,6 +66,12 @@ class Settings:
     AUDIT_LEAD_RETENTION_DAYS: int = int(os.environ.get("HOME_AUDIT_LEAD_RETENTION_DAYS", "45"))
     AUDIT_LEAD_RATE_LIMIT_PER_MINUTE: int = int(os.environ.get("HOME_AUDIT_LEAD_RATE_LIMIT_PER_MINUTE", "5"))
 
+    # HIVE-615 Automatic fleet-wide harness upgrades.
+    HARNESS_AUTOUPGRADE: str = os.environ.get("HARNESS_AUTOUPGRADE", "patch")
+    HARNESS_POLL_INTERVAL: int = int(os.environ.get("HARNESS_POLL_INTERVAL", "21600"))
+    HARNESS_CANARY_OBSERVATION: int = int(os.environ.get("HARNESS_CANARY_OBSERVATION", "900"))
+    HARNESS_CANARY_AGENT: str = os.environ.get("HARNESS_CANARY_AGENT", "test@shizuha.com")
+
     # HIVE-603 Redis Streams for activity feed.
     REDIS_URL: str = os.environ.get("HOME_REDIS_URL", "redis://localhost:6379/0")
     ACTIVITY_STREAM_PREFIX: str = os.environ.get("HOME_ACTIVITY_STREAM_PREFIX", "home:activity:v1:org:")

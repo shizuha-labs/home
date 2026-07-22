@@ -38,6 +38,7 @@ from .clients import (
 )
 from .audit_leads import AuditLeadRequest, AuditLeadResponse, persist_audit_lead
 from .config import settings
+from .harness_upgrade import get_upgrade_history, get_upgrade_status, poll_and_upgrade
 from .redis_client import block_read, block_read_multi, read_recent, read_recent_multi
 from .schema import (
     ActivityRecentResponse, HomeActivityEventV1, HomeSummaryV1, HomeActivityV1,
@@ -289,6 +290,52 @@ async def home_task_peek(
     return {"generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "key": key.strip(), "widget": widget}
 
+
+<<<<<<< HEAD
+# ── HIVE-615 Harness auto-upgrade endpoints ───────────────────────────────────
+
+@app.get("/api/hive/harness-upgrade/status")
+async def harness_upgrade_status(
+    caller: Caller = Depends(verify_caller),
+):
+    """Return current harness auto-upgrade status and recent history."""
+    return {
+        "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        **get_upgrade_status(),
+    }
+
+
+@app.get("/api/hive/harness-upgrade/history")
+async def harness_upgrade_history(
+    caller: Caller = Depends(verify_caller),
+    limit: int = Query(default=20, ge=1, le=100),
+):
+    """Return harness upgrade history."""
+    return {
+        "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "upgrades": get_upgrade_history(limit=limit),
+    }
+
+
+@app.post("/api/hive/harness-upgrade/trigger")
+async def harness_upgrade_trigger(
+    caller: Caller = Depends(verify_caller),
+    current_versions: Optional[str] = Query(default=None, description="JSON dict of current harness versions"),
+):
+    """Manually trigger a poll-and-upgrade cycle. Staff/owner only."""
+    # Parse current versions from query param or use empty dict (will detect from Hive).
+    versions = {}
+    if current_versions:
+        try:
+            versions = json.loads(current_versions)
+        except (json.JSONDecodeError, TypeError):
+            raise HTTPException(status_code=400, detail="current_versions must be a valid JSON object")
+    results = await poll_and_upgrade(versions)
+    return {
+        "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "upgrades_triggered": len(results),
+        "results": [r.__dict__ for r in results],
+    }
 
 # ---- HIVE-603 activity stream endpoints --------------------------------------
 
@@ -795,3 +842,4 @@ async def _stream_multi_org(org_ids: list[int], since_by_org: dict[str, str], ca
             await asyncio.sleep(0)  # yield control
     finally:
         pass  # slot released by _bounded_stream wrapper
+>>>>>>> origin/main
