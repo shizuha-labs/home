@@ -1,0 +1,21 @@
+name: security-ci-parity
+on:
+  pull_request:
+    paths:
+      - .forgejo/workflows/security-ci.yml
+      - .forgejo/workflows/security-ci-parity.yml
+      - scripts/check-security-ci-contract.py
+      - scripts/security-ci-to-pulse.py
+  workflow_dispatch: {}
+
+jobs:
+  parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@8ade135a41bc03ea155e62e844d188df1ea18608
+      - name: Validate vendored security-ci contract and bytes
+        run: |
+          python3 scripts/check-security-ci-contract.py \
+            --workflow .forgejo/workflows/security-ci.yml \
+            --expected-sha256 cb9e9f0e969bba20c3b0a61b079376195b9cc685af6cf3f575a2f8df894c433c
