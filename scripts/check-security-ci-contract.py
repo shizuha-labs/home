@@ -22,6 +22,8 @@ REQUIRED_PATTERNS = {
     "bounded bandit deadline": r"timeout -k 30 300 bandit -r",
     "bounded osv deadline": r"timeout -k 30 300 osv-scanner",
     "bounded trivy deadline": r"timeout -k 30 300 trivy fs",
+    "uv lock project guard": r"if \[ -f pyproject\.toml \] && \[ -f uv\.lock \]; then",
+    "uv lock non-project skip": r"Skipping uv lock drift check: pyproject\.toml and uv\.lock are not both present\.",
 }
 
 TIMEOUT_FINALIZATION_MARGIN_SECONDS = 120
