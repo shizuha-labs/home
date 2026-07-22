@@ -16,8 +16,14 @@ REQUIRED_PATTERNS = {
     "three outer attempts": r'''if \[ "\$n" -ge 3 \]''',
     "300-second bootstrap deadline": r"retry timeout -k 30 300 python3 -m pip install",
     "480-second scanner deadline": r"retry timeout -k 30 480 python3 -m pip install",
-    "job deadline": r"(?m)^\s*timeout-minutes:\s*20$",
+    "job deadline": r"(?m)^\s*timeout-minutes:\s*40$",
+    "bounded semgrep deadline": r"timeout -k 30 300 semgrep scan",
+    "bounded bandit deadline": r"timeout -k 30 300 bandit -r",
+    "bounded osv deadline": r"timeout -k 30 300 osv-scanner",
+    "bounded trivy deadline": r"timeout -k 30 300 trivy fs",
 }
+
+TIMEOUT_FINALIZATION_MARGIN_SECONDS = 120
 
 
 def validate(workflow: Path, expected_sha256: str | None = None) -> list[str]:
@@ -26,6 +32,20 @@ def validate(workflow: Path, expected_sha256: str | None = None) -> list[str]:
     errors = [name for name, pattern in REQUIRED_PATTERNS.items() if not re.search(pattern, text)]
     if text.count('python3 -m pip install "${pip_cache_args[@]}"') < 2:
         errors.append("all in-cluster pip installs use the bounded argument array")
+    job_match = re.search(r"(?m)^\s*timeout-minutes:\s*(\d+)\s*$", text)
+    command_budgets = [
+        int(value)
+        for value in re.findall(r"\btimeout\s+-k\s+\d+\s+(\d+)\b", text)
+    ]
+    if job_match and command_budgets:
+        job_budget = int(job_match.group(1)) * 60
+        required = sum(command_budgets) + TIMEOUT_FINALIZATION_MARGIN_SECONDS
+        if required > job_budget:
+            errors.append(
+                "timeout hierarchy inverted: command budgets "
+                f"{sum(command_budgets)}s + finalization margin "
+                f"{TIMEOUT_FINALIZATION_MARGIN_SECONDS}s exceed job budget {job_budget}s"
+            )
     if expected_sha256:
         actual = hashlib.sha256(data).hexdigest()
         if actual != expected_sha256:
