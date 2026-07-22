@@ -14,6 +14,7 @@ import json
 import os
 import sys
 import textwrap
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -242,19 +243,35 @@ def pulse_request(method: str, url: str, token: str, body: dict[str, Any] | None
         "Content-Type": "application/json",
         "Accept": "application/json",
     })
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:  # nosec B310 - scheme validated above
-            raw = resp.read().decode("utf-8", errors="replace")
-            return json.loads(raw) if raw else {}
-    except urllib.error.HTTPError as exc:
-        # Surface the server's reason — a bare "HTTP Error 400" hides which field
-        # the Pulse API rejected, making contract drift undebuggable from CI logs.
-        detail = ""
+    # PLAT-4120: retry transient transport failures (network error / timeout /
+    # HTTP 5xx / 429) with backoff, so a momentary Pulse-API hiccup does not red the
+    # whole (non-blocking) security-ci run and false-page the lead via ORIG-11. A 4xx
+    # other than 429 is a genuine contract error -> raised immediately, never retried.
+    # This wraps only the transport; CRITICAL-finding blocking is unaffected.
+    attempts = 3
+    for attempt in range(1, attempts + 1):
         try:
-            detail = exc.read().decode("utf-8", errors="replace")[:1000]
-        except Exception:
-            pass
-        raise RuntimeError(f"{method} {url} -> HTTP {exc.code}: {detail or exc.reason}") from exc
+            with urllib.request.urlopen(req, timeout=15) as resp:  # nosec B310 - scheme validated above
+                raw = resp.read().decode("utf-8", errors="replace")
+                return json.loads(raw) if raw else {}
+        except urllib.error.HTTPError as exc:
+            # Surface the server's reason — a bare "HTTP Error 400" hides which field
+            # the Pulse API rejected, making contract drift undebuggable from CI logs.
+            detail = ""
+            try:
+                detail = exc.read().decode("utf-8", errors="replace")[:1000]
+            except Exception:
+                pass
+            if (exc.code == 429 or exc.code >= 500) and attempt < attempts:
+                time.sleep(2 ** attempt)
+                continue
+            raise RuntimeError(f"{method} {url} -> HTTP {exc.code}: {detail or exc.reason}") from exc
+        except urllib.error.URLError as exc:
+            # Network-level failure (DNS / connection refused / timeout) — transient.
+            if attempt < attempts:
+                time.sleep(2 ** attempt)
+                continue
+            raise RuntimeError(f"{method} {url} -> {exc.reason}") from exc
 
 
 def pulse_find_existing(api_base: str, token: str, source_id: str) -> dict[str, Any] | None:
