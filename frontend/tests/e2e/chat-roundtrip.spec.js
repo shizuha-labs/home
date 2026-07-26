@@ -5,20 +5,39 @@
  * composer ("Message <name>..."), NOT the dedicated /connect/messages route
  * (that surface is tracked separately as CON-265).
  *
- * Live credentials: prefer AGENT_USERNAME / AGENT_PASSWORD (fleet runtime).
- * CI fallback: TEST_USER from fixtures.js.
+ * Live sender credentials: prefer AGENT_USERNAME / AGENT_PASSWORD (fleet
+ * runtime). CI fallback: TEST_USER from fixtures.js.
+ *
+ * Live recipient credentials: E2E_RECIPIENT_USERNAME /
+ * E2E_RECIPIENT_PASSWORD. They must identify a different user who shares an
+ * organization with the sender. The second login is deliberate: a sender-only
+ * reload does not prove recipient delivery.
  *
  * Auth path that works in production: form login at /id/login?continue=/
  * (cookie injection alone is not sufficient — see CON-240 comments).
  */
 import { test, expect, TEST_USER } from './fixtures.js'
 
-const CREDS = {
+const SENDER_CREDS = {
   username: process.env.AGENT_USERNAME || process.env.E2E_USERNAME || TEST_USER.username,
   password: process.env.AGENT_PASSWORD || process.env.E2E_PASSWORD || TEST_USER.password,
 }
 
-async function formLoginToHome(page) {
+const RECIPIENT_CREDS = {
+  username: process.env.E2E_RECIPIENT_USERNAME,
+  password: process.env.E2E_RECIPIENT_PASSWORD,
+}
+
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function rows(body, key) {
+  if (Array.isArray(body)) return body
+  return body?.[key] || body?.results || []
+}
+
+async function formLoginToHome(page, creds) {
   await page.goto('/id/login?continue=/')
   await page.waitForSelector('input[type="password"]', { timeout: 20000 })
 
@@ -27,46 +46,91 @@ async function formLoginToHome(page) {
   for (let i = 0; i < n; i++) {
     const type = await inputs.nth(i).getAttribute('type')
     if (type === 'password') {
-      await inputs.nth(i).fill(CREDS.password)
+      await inputs.nth(i).fill(creds.password)
     } else if (type !== 'hidden' && type !== 'submit') {
-      await inputs.nth(i).fill(CREDS.username)
+      await inputs.nth(i).fill(creds.username)
     }
   }
+  const loginResponsePromise = page.waitForResponse(
+    (response) => response.url().includes('/id/api/auth/login/')
+      && response.request().method() === 'POST',
+    { timeout: 30000 },
+  )
   await page.locator('button[type="submit"], input[type="submit"]').first().click()
+  const loginResponse = await loginResponsePromise
+  expect(loginResponse.ok(), `${creds.username} form login`).toBeTruthy()
+  const loginBody = await loginResponse.json()
+  expect(loginBody.tokens?.access, `${creds.username} access token`).toBeTruthy()
+  expect(loginBody.user?.id, `${creds.username} user id`).toBeTruthy()
+
   await page.waitForURL((url) => !url.toString().includes('/id/login'), { timeout: 30000 })
   await page.goto('/')
   await page.waitForLoadState('domcontentloaded')
   // Chat sidebar hydrates async from Connect WS/API
   await page.waitForTimeout(8000)
   await expect(page.locator('input[type="password"]')).toHaveCount(0)
+  return {
+    access: loginBody.tokens.access,
+    user: loginBody.user,
+  }
 }
 
-async function openFirstPeerConversation(page) {
-  // Prefer a human/agent peer row under CONVERSATIONS; skip pure system noise when possible.
-  const opened = await page.evaluate(() => {
-    const preferred = ['Aoi', 'Reika', 'Hiro', 'System']
-    const nodes = [...document.querySelectorAll('button, a, div, li, span')].filter((el) => {
-      if (el.children.length > 12) return false
-      const rect = el.getBoundingClientRect()
-      if (rect.width < 40 || rect.height < 12) return false
-      const first = (el.innerText || '').trim().split('\n')[0]
-      return preferred.includes(first)
-    })
-    nodes.sort((a, b) => a.innerText.length - b.innerText.length)
-    for (const name of preferred) {
-      const hit = nodes.find((el) => (el.innerText || '').trim().split('\n')[0] === name)
-      if (hit) {
-        hit.click()
-        return name
-      }
-    }
-    return null
+async function getConversationMessages(page, access, conversationId) {
+  const response = await page.request.get(
+    `/connect/api/conversations/${conversationId}/messages/?limit=100`,
+    { headers: { Authorization: `Bearer ${access}` } },
+  )
+  expect(response.ok(), `messages API for ${conversationId}`).toBeTruthy()
+  return rows(await response.json(), 'messages')
+}
+
+async function findOrCreateDirectConversation(page, sender, recipient) {
+  const headers = { Authorization: `Bearer ${sender.access}` }
+  const listResponse = await page.request.get('/connect/api/conversations/?limit=100', { headers })
+  expect(listResponse.ok(), 'sender conversations API').toBeTruthy()
+
+  const expectedIds = [Number(sender.user.id), Number(recipient.user.id)].sort((a, b) => a - b)
+  let conversation = rows(await listResponse.json(), 'conversations').find((candidate) => {
+    if (candidate.conversation_type !== 'direct') return false
+    const participantIds = (candidate.participants || [])
+      .filter((participant) => !participant.has_left)
+      .map((participant) => Number(participant.user_id))
+      .sort((a, b) => a - b)
+    return participantIds.length === 2
+      && participantIds.every((id, index) => id === expectedIds[index])
   })
-  if (!opened) {
-    throw new Error('No conversation row found in dashboard sidebar')
+
+  if (!conversation) {
+    const createResponse = await page.request.post('/connect/api/conversations/', {
+      headers,
+      data: {
+        conversation_type: 'direct',
+        participant_ids: [Number(recipient.user.id)],
+      },
+    })
+    expect(
+      createResponse.ok(),
+      `create direct conversation for ${sender.user.username} and ${recipient.user.username}`,
+    ).toBeTruthy()
+    conversation = await createResponse.json()
   }
-  await page.waitForTimeout(4000)
-  return opened
+
+  const participantIds = (conversation.participants || [])
+    .filter((participant) => !participant.has_left)
+    .map((participant) => Number(participant.user_id))
+    .sort((a, b) => a - b)
+  expect(participantIds).toEqual(expectedIds)
+  return conversation
+}
+
+async function openConversationFromSidebar(page, conversationId, peerName) {
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  const peerPattern = new RegExp(`^${escapeRegex(peerName)}(?:\\n|$)`, 'i')
+  const conversationRow = page.locator('button').filter({ hasText: peerPattern }).first()
+  await expect(conversationRow).toBeVisible({ timeout: 20000 })
+  await conversationRow.click()
+  await expect(page).toHaveURL(new RegExp(`/c/${conversationId}/?$`), { timeout: 20000 })
+  return waitForThreadComposer(page)
 }
 
 async function waitForThreadComposer(page) {
@@ -100,75 +164,164 @@ async function clickComposerSend(page) {
   }
 }
 
+function messageBody(page, marker) {
+  return page.locator('p.whitespace-pre-wrap').filter({
+    hasText: new RegExp(`^${escapeRegex(marker)}$`),
+  })
+}
+
+async function assertRenderedTimestamp(page, marker, apiCreatedAt) {
+  const body = messageBody(page, marker)
+  await expect(body).toHaveCount(1)
+  const timestamp = body.locator(
+    'xpath=ancestor::div[contains(@class, "max-w-")][1]'
+      + '/div[contains(@class, "mt-0.5")]/span[1]',
+  )
+  await expect(timestamp).toBeVisible()
+
+  const expectedTime = await page.evaluate(
+    (createdAt) => new Date(createdAt).toLocaleTimeString(
+      undefined,
+      { hour: '2-digit', minute: '2-digit' },
+    ),
+    apiCreatedAt,
+  )
+  await expect(timestamp).toHaveText(expectedTime)
+}
+
+function assertChronologicalNeighbors(messages, index) {
+  expect(index).toBeGreaterThanOrEqual(0)
+  const currentTime = Date.parse(messages[index].created_at)
+  expect(Number.isFinite(currentTime)).toBeTruthy()
+
+  if (index > 0) {
+    expect(Date.parse(messages[index - 1].created_at)).toBeLessThanOrEqual(currentTime)
+  }
+  if (index + 1 < messages.length) {
+    expect(Date.parse(messages[index + 1].created_at)).toBeGreaterThanOrEqual(currentTime)
+  }
+}
+
 test.describe('CON-240 Connect chat send/receive (dashboard sidebar)', () => {
-  test('send message appears in thread and persists via Connect API', async ({ page, context }) => {
-    test.setTimeout(120_000)
+  test('sender and independent recipient see ordered, timestamped messages', async ({
+    page,
+    context,
+    browser,
+  }) => {
+    test.setTimeout(180_000)
+    expect(
+      RECIPIENT_CREDS.username,
+      'E2E_RECIPIENT_USERNAME is required for an independent recipient session',
+    ).toBeTruthy()
+    expect(
+      RECIPIENT_CREDS.password,
+      'E2E_RECIPIENT_PASSWORD is required for an independent recipient session',
+    ).toBeTruthy()
+    expect(RECIPIENT_CREDS.username).not.toBe(SENDER_CREDS.username)
 
-    await formLoginToHome(page)
-    const peer = await openFirstPeerConversation(page)
-    const composer = await waitForThreadComposer(page)
-    await expect(composer).toHaveAttribute('placeholder', new RegExp(`Message ${peer}`, 'i'))
-
-    const marker = `CON-240-e2e-${Date.now()}`
-    await composer.fill(marker)
-    await clickComposerSend(page)
-
-    // Optimistic / live render — marker also lands in the sidebar preview row,
-    // so assert the thread bubble specifically (whitespace-pre-wrap body).
-    await expect(
-      page.locator('p.whitespace-pre-wrap, p.m-0.whitespace-pre-wrap').filter({ hasText: marker }),
-    ).toBeVisible({ timeout: 15000 })
-    // Composer clears after successful send
-    await expect(composer).toHaveValue('')
-
-    // Persist check through Connect REST using the session cookie
-    const cookies = await context.cookies()
-    const access = cookies.find((c) => c.name === 'shizuha-access-token')
-    expect(access?.value, 'shizuha-access-token cookie after form login').toBeTruthy()
-
-    const convRes = await page.request.get('/connect/api/conversations/', {
-      headers: { Authorization: `Bearer ${access.value}` },
+    const recipientContext = await browser.newContext({
+      baseURL: process.env.BASE_URL || 'http://shizuha-nginx',
     })
-    expect(convRes.ok()).toBeTruthy()
-    const convBody = await convRes.json()
-    const conversations = Array.isArray(convBody)
-      ? convBody
-      : convBody.results || convBody.conversations || []
-    expect(conversations.length).toBeGreaterThan(0)
+    const recipientPage = await recipientContext.newPage()
+    try {
+      const [sender, recipient] = await Promise.all([
+        formLoginToHome(page, SENDER_CREDS),
+        formLoginToHome(recipientPage, RECIPIENT_CREDS),
+      ])
+      expect(Number(sender.user.id)).not.toBe(Number(recipient.user.id))
 
-    let persisted = null
-    for (const c of conversations.slice(0, 25)) {
-      const msgRes = await page.request.get(
-        `/connect/api/conversations/${c.id}/messages/?limit=30`,
-        { headers: { Authorization: `Bearer ${access.value}` } },
+      const conversation = await findOrCreateDirectConversation(page, sender, recipient)
+      const conversationId = conversation.id
+      const senderPeer = (conversation.participants || [])
+        .find((participant) => Number(participant.user_id) === Number(recipient.user.id))
+      const recipientPeer = (conversation.participants || [])
+        .find((participant) => Number(participant.user_id) === Number(sender.user.id))
+      expect(senderPeer?.user_name).toBeTruthy()
+      expect(recipientPeer?.user_name).toBeTruthy()
+
+      const [senderComposer] = await Promise.all([
+        openConversationFromSidebar(page, conversationId, senderPeer.user_name),
+        openConversationFromSidebar(recipientPage, conversationId, recipientPeer.user_name),
+      ])
+      await expect(senderComposer).toHaveAttribute(
+        'placeholder',
+        new RegExp(`Message ${escapeRegex(senderPeer.user_name)}`, 'i'),
       )
-      if (!msgRes.ok()) continue
-      const msgBody = await msgRes.json()
-      const items = Array.isArray(msgBody)
-        ? msgBody
-        : msgBody.messages || msgBody.results || []
-      const hit = items.find((m) => (m.content || '').includes(marker))
-      if (hit) {
-        persisted = {
-          conversationId: c.id,
-          messageId: hit.id,
-          content: hit.content,
-          created_at: hit.created_at,
-        }
-        break
-      }
-    }
-    expect(persisted, 'message must persist via Connect messages API').toBeTruthy()
-    expect(persisted.content).toContain(marker)
-    expect(persisted.created_at).toBeTruthy()
 
-    // Reload retention: reopen peer thread and still see the marker
-    await page.reload({ waitUntil: 'domcontentloaded' })
-    await page.waitForTimeout(6000)
-    await openFirstPeerConversation(page)
-    await page.waitForTimeout(3000)
-    await expect(
-      page.locator('p.whitespace-pre-wrap, p.m-0.whitespace-pre-wrap').filter({ hasText: marker }),
-    ).toBeVisible({ timeout: 15000 })
+      const senderCookies = await context.cookies()
+      const recipientCookies = await recipientContext.cookies()
+      expect(
+        senderCookies.some((cookie) => cookie.name === 'shizuha-access-token'),
+        'sender session cookie after form login',
+      ).toBeTruthy()
+      expect(
+        recipientCookies.some((cookie) => cookie.name === 'shizuha-access-token'),
+        'recipient session cookie after form login',
+      ).toBeTruthy()
+
+      const before = await getConversationMessages(
+        recipientPage,
+        recipient.access,
+        conversationId,
+      )
+      const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      const firstMarker = `CON-240-e2e-${runId}-1`
+      const secondMarker = `CON-240-e2e-${runId}-2`
+
+      for (const marker of [firstMarker, secondMarker]) {
+        await senderComposer.fill(marker)
+        await clickComposerSend(page)
+        await expect(messageBody(page, marker)).toBeVisible({ timeout: 15000 })
+        await expect(messageBody(recipientPage, marker)).toBeVisible({ timeout: 15000 })
+        await expect(senderComposer).toHaveValue('')
+      }
+
+      // Persistence is anchored to the exact two-participant conversation that
+      // both browser sessions opened; never scan unrelated conversations.
+      const persisted = await getConversationMessages(
+        recipientPage,
+        recipient.access,
+        conversationId,
+      )
+      const firstIndex = persisted.findIndex((message) => message.content === firstMarker)
+      const secondIndex = persisted.findIndex((message) => message.content === secondMarker)
+      expect(firstIndex).toBeGreaterThanOrEqual(0)
+      expect(secondIndex).toBeGreaterThan(firstIndex)
+      if (before.length > 0) {
+        const previousTailIndex = persisted.findIndex(
+          (message) => message.id === before[before.length - 1].id,
+        )
+        expect(previousTailIndex, 'pre-send adjacent tail remains before the markers')
+          .toBeGreaterThanOrEqual(0)
+        expect(previousTailIndex).toBeLessThan(firstIndex)
+      }
+      assertChronologicalNeighbors(persisted, firstIndex)
+      assertChronologicalNeighbors(persisted, secondIndex)
+
+      const firstMessage = persisted[firstIndex]
+      const secondMessage = persisted[secondIndex]
+      expect(Number(firstMessage.sender_id)).toBe(Number(sender.user.id))
+      expect(Number(secondMessage.sender_id)).toBe(Number(sender.user.id))
+      await assertRenderedTimestamp(recipientPage, firstMarker, firstMessage.created_at)
+      await assertRenderedTimestamp(recipientPage, secondMarker, secondMessage.created_at)
+
+      const renderedInOrder = await recipientPage.evaluate(
+        ({ first, second }) => {
+          const bodies = [...document.querySelectorAll('p.whitespace-pre-wrap')]
+          const firstIndexInDom = bodies.findIndex((node) => node.textContent === first)
+          const secondIndexInDom = bodies.findIndex((node) => node.textContent === second)
+          return firstIndexInDom >= 0 && secondIndexInDom > firstIndexInDom
+        },
+        { first: firstMarker, second: secondMarker },
+      )
+      expect(renderedInOrder, 'recipient DOM preserves send order').toBeTruthy()
+
+      // Both recipient-delivery markers survive a new browser document.
+      await recipientPage.reload({ waitUntil: 'domcontentloaded' })
+      await expect(messageBody(recipientPage, firstMarker)).toBeVisible({ timeout: 20000 })
+      await expect(messageBody(recipientPage, secondMarker)).toBeVisible({ timeout: 20000 })
+    } finally {
+      await recipientContext.close()
+    }
   })
 })
