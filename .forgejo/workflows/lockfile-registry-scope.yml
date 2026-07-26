@@ -1,0 +1,35 @@
+# PLAT-5031: lockfile scope->registry contract gate.
+#
+#   public package     -> registry.npmjs.org                        (public only)
+#   @shizuha/* package -> npm-cache.registry.svc.cluster.local:4873 (internal only)
+#
+# Runs on pull_request so a violation is caught BEFORE merge — a guard that only
+# runs post-merge cannot prevent reintroduction, which is the whole point.
+#
+# The checker is stdlib-only and parses JSON offline — no registry access, so it
+# cannot flake on cache or WAN health.
+name: lockfile-registry-scope
+on:
+  workflow_dispatch: {}
+  pull_request: {}
+  push:
+    branches: [main, master]
+concurrency:
+  group: lockfile-registry-scope-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  scope-contract:
+    # Home's existing pre-merge workflows run successfully on this lane.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate package-lock resolved hosts against the scope contract
+        run: |
+          set -euo pipefail
+          command -v python3 >/dev/null || {
+            apt-get -o Acquire::http::Proxy=http://apt-cache.registry.svc.cluster.local:3142 update -qq
+            apt-get -o Acquire::http::Proxy=http://apt-cache.registry.svc.cluster.local:3142 install -y -qq python3
+          }
+          # Exit 2 (nothing scanned) is a failure, not a pass — the checker
+          # refuses to report clean when it found no lockfile to inspect.
+          python3 scripts/check_lockfile_registry_scope.py frontend
