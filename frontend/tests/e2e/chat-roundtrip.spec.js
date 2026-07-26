@@ -59,19 +59,31 @@ async function formLoginToHome(page, creds) {
   await page.locator('button[type="submit"], input[type="submit"]').first().click()
   const loginResponse = await loginResponsePromise
   expect(loginResponse.ok(), `${creds.username} form login`).toBeTruthy()
-  const loginBody = await loginResponse.json()
-  expect(loginBody.tokens?.access, `${creds.username} access token`).toBeTruthy()
-  expect(loginBody.user?.id, `${creds.username} user id`).toBeTruthy()
-
   await page.waitForURL((url) => !url.toString().includes('/id/login'), { timeout: 30000 })
+
+  // Do not read the navigated-away login response body here. Chromium may
+  // release its Network request identifier as the form submission redirects,
+  // making Response.json() fail even though login and navigation succeeded.
+  // The post-login cookie and authenticated user endpoint are the durable
+  // browser-session boundary the rest of this journey actually consumes.
+  const cookies = await page.context().cookies()
+  const access = cookies.find((cookie) => cookie.name === 'shizuha-access-token')?.value
+  expect(access, `${creds.username} access-token cookie`).toBeTruthy()
+  const userResponse = await page.request.get('/id/api/auth/user/', {
+    headers: { Authorization: `Bearer ${access}` },
+  })
+  expect(userResponse.ok(), `${creds.username} authenticated user lookup`).toBeTruthy()
+  const user = await userResponse.json()
+  expect(user?.id, `${creds.username} user id`).toBeTruthy()
+
   await page.goto('/')
   await page.waitForLoadState('domcontentloaded')
   // Chat sidebar hydrates async from Connect WS/API
   await page.waitForTimeout(8000)
   await expect(page.locator('input[type="password"]')).toHaveCount(0)
   return {
-    access: loginBody.tokens.access,
-    user: loginBody.user,
+    access,
+    user,
   }
 }
 
