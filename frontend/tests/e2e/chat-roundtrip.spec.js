@@ -137,8 +137,14 @@ async function findOrCreateDirectConversation(page, sender, recipient) {
 
 async function openConversationFromSidebar(page, conversationId, peerName) {
   await page.reload({ waitUntil: 'domcontentloaded' })
-  const peerPattern = new RegExp(`^${escapeRegex(peerName)}(?:\\n|$)`, 'i')
-  const conversationRow = page.locator('button').filter({ hasText: peerPattern }).first()
+  // Anchor on the row's peer-name <p>, not the button's own text. Playwright
+  // matches a RegExp `hasText` against the element's innerText, and a sidebar
+  // row renders its avatar initials first ("MI\n\nMio"), so a `^<peerName>`
+  // pattern on the button never matches. The name paragraph is exact.
+  const peerPattern = new RegExp(`^${escapeRegex(peerName)}$`, 'i')
+  const conversationRow = page.locator('button')
+    .filter({ has: page.locator('p').filter({ hasText: peerPattern }) })
+    .first()
   await expect(conversationRow).toBeVisible({ timeout: 20000 })
   await conversationRow.click()
   await expect(page).toHaveURL(new RegExp(`/c/${conversationId}/?$`), { timeout: 20000 })
