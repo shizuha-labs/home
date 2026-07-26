@@ -14,11 +14,24 @@ on:
   workflow_dispatch: {}
   push:
     branches: [main, master]
+  pull_request:
+    paths:
+      - .forgejo/workflows/deploy-frontend.yml
+      - .forgejo/scripts/test-deploy-frontend-kaniko-retry.py
 concurrency:
   group: deploy-shizuha-home-frontend-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate exact-ref and bounded Kaniko recovery contract
+        run: python3 .forgejo/scripts/test-deploy-frontend-kaniko-retry.py
+
   build-and-deploy:
+    if: github.event_name != 'pull_request'
+    needs: contract
     runs-on: ubuntu-latest
     steps:
       - name: Checkout exact triggering revision for monotonic release guard
@@ -42,15 +55,21 @@ jobs:
           REG="registry.registry.svc.cluster.local:5000"
           echo "Multi-arch build shizuha-home-frontend:${FTAG} (amd64 + arm64)"
 
-          render_build_job() {  # $1=arch
+          render_build_job() {  # $1=arch $2=attempt $3=cache-enabled
             local ARCH="$1"
+            local ATTEMPT="$2"
+            local CACHE_ENABLED="$3"
             cat <<YAML
           apiVersion: batch/v1
           kind: Job
           metadata:
-            name: ci-build-home-frontend-${SHORT}-${ARCH}
+            name: ci-build-home-frontend-${SHORT}-${ARCH}-try${ATTEMPT}
             namespace: build
-            labels: { app: ci-build, service: home-frontend }
+            labels:
+              app: ci-build
+              service: home-frontend
+              attempt: "${ATTEMPT}"
+              cache-enabled: "${CACHE_ENABLED}"
           spec:
             backoffLimit: 0
             ttlSecondsAfterFinished: 300
@@ -79,7 +98,12 @@ jobs:
                         # Replace the shizuha-home submodule pointer with THIS repo at the pushed SHA
                         rm -rf /workspace/src/shizuha-home
                         git clone --depth=50 http://x-token-auth:\${GIT_PASSWORD}@forgejo-http.origin.svc.cluster.local/shizuha-labs/home.git /workspace/src/shizuha-home
-                        cd /workspace/src/shizuha-home && (git checkout ${{ github.sha }} 2>/dev/null || echo "sha not in shallow clone; building default HEAD")
+                        cd /workspace/src/shizuha-home
+                        if ! git checkout --detach ${{ github.sha }}; then
+                          git fetch --depth=1 origin ${{ github.sha }}
+                          git checkout --detach ${{ github.sha }}
+                        fi
+                        test "\$(git rev-parse HEAD)" = "${{ github.sha }}"
                     env:
                       - name: GIT_PASSWORD
                         valueFrom: { secretKeyRef: { name: forgejo-token, key: password } }
@@ -98,9 +122,9 @@ jobs:
                       - --registry-mirror=mirror-dockerhub.registry.svc.cluster.local:5000
                       - --build-arg=NPM_CONFIG_REGISTRY=http://npm-cache.registry.svc.cluster.local:4873/
                       - --build-arg=FRONTEND_PATH=shizuha-home
-                      - --cache=true
+                      - --cache=${CACHE_ENABLED}
                       - --cache-repo=${REG}/kaniko-cache/home-deploy-frontend-${ARCH}
-                      - --cache-copy-layers=true
+                      - --cache-copy-layers=${CACHE_ENABLED}
                       - --cache-ttl=336h
                       - --compressed-caching=false
                     volumeMounts: [{ mountPath: /workspace, name: workspace }]
@@ -108,27 +132,61 @@ jobs:
           YAML
           }
 
-          render_build_job amd64 | kubectl apply -f -
-          render_build_job arm64 | kubectl apply -f -
-
           wait_job() {
             local ARCH="$1"
-            local JOB="ci-build-home-frontend-${SHORT}-${ARCH}"
-            kubectl wait -n build --for=condition=complete "job/${JOB}" --timeout=1800s &
-            local WP=$!
-            while kill -0 "$WP" 2>/dev/null; do
+            local ATTEMPT="$2"
+            local JOB="ci-build-home-frontend-${SHORT}-${ARCH}-try${ATTEMPT}"
+            local POLL
+            for POLL in $(seq 1 360); do
+              if kubectl get "job/${JOB}" -n build -o jsonpath='{.status.succeeded}' | grep -q '[1-9]'; then
+                return 0
+              fi
               if kubectl get "job/${JOB}" -n build -o jsonpath='{.status.failed}' | grep -q '[1-9]'; then
-                echo "::error::kaniko frontend ${ARCH} build failed"
-                kubectl logs -n build "job/${JOB}" --all-containers --tail=80 || true
-                exit 1
+                return 1
               fi
               sleep 5
             done
-            wait "$WP"
+            echo "::error::kaniko frontend ${ARCH} try ${ATTEMPT} timed out after 1800s"
+            return 1
           }
-          wait_job amd64 &
+
+          build_arch() {
+            local ARCH="$1"
+            local FIRST_LOG="/tmp/home-frontend-${ARCH}-try1.log"
+            local RETRY_LOG="/tmp/home-frontend-${ARCH}-try2.log"
+
+            # Apply is intentional: an operator can safely redispatch the exact
+            # SHA while a terminal try1 Job is still inside its TTL window.
+            render_build_job "${ARCH}" 1 true | kubectl apply -f -
+            if wait_job "${ARCH}" 1; then
+              return 0
+            fi
+
+            kubectl logs -n build "job/ci-build-home-frontend-${SHORT}-${ARCH}-try1" \
+              --all-containers --tail=200 >"${FIRST_LOG}" 2>&1 || true
+            if ! grep -Fq 'failed to get filesystem from image: unexpected EOF' "${FIRST_LOG}"; then
+              echo "::error::kaniko frontend ${ARCH} build failed with a non-retryable error"
+              cat "${FIRST_LOG}"
+              return 1
+            fi
+
+            echo "::warning::kaniko frontend ${ARCH} hit a cached-filesystem unexpected EOF; retrying once with cache disabled"
+            cat "${FIRST_LOG}"
+            render_build_job "${ARCH}" 2 false | kubectl apply -f -
+            if wait_job "${ARCH}" 2; then
+              return 0
+            fi
+
+            kubectl logs -n build "job/ci-build-home-frontend-${SHORT}-${ARCH}-try2" \
+              --all-containers --tail=200 >"${RETRY_LOG}" 2>&1 || true
+            echo "::error::kaniko frontend ${ARCH} cache-disabled retry failed"
+            cat "${RETRY_LOG}"
+            return 1
+          }
+
+          build_arch amd64 &
           WAIT_AMD64_PID=$!
-          wait_job arm64 &
+          build_arch arm64 &
           WAIT_ARM64_PID=$!
           WAIT_FAILED=0
           wait "${WAIT_AMD64_PID}" || WAIT_FAILED=1
