@@ -132,22 +132,42 @@ jobs:
           YAML
           }
 
+          BUILD_GUARD_CONFIGMAP="origin-ci-build-guard-650fec631781"
+          BUILD_GUARD_SHA256="650fec631781edce0e4980f0fb07b12ab78b67b1faf780b214d12a40f9dddcf6"
+          BUILD_GUARD="${RUNNER_TEMP:-/tmp}/origin-ci-build-guard.py"
+          kubectl get "configmap/${BUILD_GUARD_CONFIGMAP}" -n origin \
+            -o jsonpath='{.data.guard\.py}' >"$BUILD_GUARD"
+          echo "${BUILD_GUARD_SHA256}  ${BUILD_GUARD}" | sha256sum -c -
+          cleanup_build_attempts() {
+            python3 "$BUILD_GUARD" cleanup --namespace build \
+              --job "ci-build-home-frontend-${SHORT}-amd64-try1" \
+              --job "ci-build-home-frontend-${SHORT}-amd64-try2" \
+              --job "ci-build-home-frontend-${SHORT}-arm64-try1" \
+              --job "ci-build-home-frontend-${SHORT}-arm64-try2"
+          }
+          cleanup_on_failure() {
+            rc=$?
+            if [ "$rc" -ne 0 ]; then cleanup_build_attempts || true; fi
+            exit "$rc"
+          }
+          trap cleanup_on_failure EXIT INT TERM
+          python3 "$BUILD_GUARD" preflight --arch amd64 --arch arm64
+          cleanup_build_attempts
+
           wait_job() {
             local ARCH="$1"
             local ATTEMPT="$2"
             local JOB="ci-build-home-frontend-${SHORT}-${ARCH}-try${ATTEMPT}"
-            local POLL
-            for POLL in $(seq 1 360); do
-              if kubectl get "job/${JOB}" -n build -o jsonpath='{.status.succeeded}' | grep -q '[1-9]'; then
-                return 0
-              fi
-              if kubectl get "job/${JOB}" -n build -o jsonpath='{.status.failed}' | grep -q '[1-9]'; then
-                return 1
-              fi
-              sleep 5
-            done
-            echo "::error::kaniko frontend ${ARCH} try ${ATTEMPT} timed out after 1800s"
-            return 1
+            local GUARD_LOG="/tmp/home-frontend-${ARCH}-try${ATTEMPT}-guard.log"
+            local WAIT_RC=0
+            python3 "$BUILD_GUARD" wait-jobs --namespace build \
+              --job "${ARCH}=${JOB}" --timeout-seconds 1800 \
+              --preserve-failed-jobs 2> >(tee "$GUARD_LOG" >&2) || WAIT_RC=$?
+            if [ "$WAIT_RC" -eq 0 ]; then return 0; fi
+            if grep -Fq 'SHIZUHA_BUILD_SCHEDULING_REASON' "$GUARD_LOG"; then
+              return 70
+            fi
+            return "$WAIT_RC"
           }
 
           build_arch() {
@@ -158,9 +178,10 @@ jobs:
             # Apply is intentional: an operator can safely redispatch the exact
             # SHA while a terminal try1 Job is still inside its TTL window.
             render_build_job "${ARCH}" 1 true | kubectl apply -f -
-            if wait_job "${ARCH}" 1; then
-              return 0
-            fi
+            local WAIT_RC=0
+            wait_job "${ARCH}" 1 || WAIT_RC=$?
+            if [ "$WAIT_RC" -eq 0 ]; then return 0; fi
+            if [ "$WAIT_RC" -eq 70 ]; then return "$WAIT_RC"; fi
 
             kubectl logs -n build "job/ci-build-home-frontend-${SHORT}-${ARCH}-try1" \
               --all-containers --tail=200 >"${FIRST_LOG}" 2>&1 || true
@@ -173,9 +194,10 @@ jobs:
             echo "::warning::kaniko frontend ${ARCH} hit a cached-filesystem unexpected EOF; retrying once with cache disabled"
             cat "${FIRST_LOG}"
             render_build_job "${ARCH}" 2 false | kubectl apply -f -
-            if wait_job "${ARCH}" 2; then
-              return 0
-            fi
+            WAIT_RC=0
+            wait_job "${ARCH}" 2 || WAIT_RC=$?
+            if [ "$WAIT_RC" -eq 0 ]; then return 0; fi
+            if [ "$WAIT_RC" -eq 70 ]; then return "$WAIT_RC"; fi
 
             kubectl logs -n build "job/ci-build-home-frontend-${SHORT}-${ARCH}-try2" \
               --all-containers --tail=200 >"${RETRY_LOG}" 2>&1 || true
@@ -194,6 +216,7 @@ jobs:
           if [ "${WAIT_FAILED}" -ne 0 ]; then
             exit 1
           fi
+          trap - EXIT INT TERM
 
           cat <<YAML | kubectl apply -f -
           apiVersion: batch/v1
