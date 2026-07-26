@@ -58,7 +58,10 @@ class Settings:
 
     # Best-effort in-process cache. Fresh hits avoid fan-out work; stale hits are
     # served only when a source fails, so the page remains useful during brownouts.
-    CACHE_TTL_SECONDS: float = float(os.environ.get("HOME_BFF_CACHE_TTL", "15"))
+    # Bumped default 15→30s: home dashboard was re-fanning to Pulse (org-progress
+    # 40–50s, items list 100s under DISTINCT pile-up) every 15s per open tab ×
+    # backend replicas, starving MCP/API. Still short enough for a live feel.
+    CACHE_TTL_SECONDS: float = float(os.environ.get("HOME_BFF_CACHE_TTL", "30"))
     STALE_TTL_SECONDS: float = float(os.environ.get("HOME_BFF_STALE_TTL", "300"))
 
     # VEN-97 AuditLead intent records: no payment/fulfillment, minimal PII.
