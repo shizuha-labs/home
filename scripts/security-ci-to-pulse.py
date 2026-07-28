@@ -665,7 +665,28 @@ def main() -> int:
         old = by_id.get(f.source_id)
         if not old or SEV_RANK[f.severity] > SEV_RANK[old.severity]:
             by_id[f.source_id] = f
-    all_findings = sorted(by_id.values(), key=lambda f: (-SEV_RANK[f.severity], f.tool, f.path, f.line or 0))
+    raw_identities = sorted(
+        by_id.values(),
+        key=lambda f: (-SEV_RANK[f.severity], f.tool, f.path, f.line or 0),
+    )
+
+    # PLAT-5289: suppressions must be evaluated against the same stable
+    # identities that are filed/upserted. Dependency scanners mint per-advisory
+    # identities, while consolidate_dependency_findings() mints the final
+    # package identity consumed by Pulse and the findings ledger. Normalize all
+    # severities before the allowlist pass so low/medium dependency suppressions
+    # receive the same coverage as high/critical ones. Code SAST findings are
+    # passthrough identities, preserving their existing allowlist behaviour.
+    all_findings = sorted(
+        consolidate_dependency_findings(raw_identities, args.repo),
+        key=lambda f: (-SEV_RANK[f.severity], f.tool, f.path, f.line or 0),
+    )
+    if len(all_findings) != len(raw_identities):
+        print(
+            f"security-ci: normalized {len(raw_identities)} raw finding(s) → "
+            f"{len(all_findings)} stable finding identity/identities after "
+            "per-package dedup (PLAT-2893)"
+        )
 
     entries = load_allowlist(args.allowlist)
     findings: list[Finding] = []
@@ -712,13 +733,10 @@ def main() -> int:
     file_min = SEV_RANK[os.environ.get("SECURITY_CI_MIN_FILE_SEVERITY", "high")]
     below = [f for f in findings if SEV_RANK[f.severity] < file_min]
     at_or_above = [f for f in findings if SEV_RANK[f.severity] >= file_min]
-    # PLAT-2893: collapse N-advisories-for-one-package into ONE task per package
-    # (osv/trivy dep CVEs) before filing; code SAST findings pass through.
-    pre_consolidation = len(at_or_above)
-    to_file = consolidate_dependency_findings(at_or_above, args.repo)
-    if len(to_file) != pre_consolidation:
-        print(f"security-ci: consolidated {pre_consolidation} finding(s) → {len(to_file)} "
-              f"task(s) after per-package dedup (PLAT-2893)")
+    # Findings already carry their final filing identities. Do not consolidate
+    # again after severity filtering: doing so would make allowlist coverage
+    # depend on SECURITY_CI_MIN_FILE_SEVERITY.
+    to_file = at_or_above
     if below:
         print(f"security-ci: {len(below)} finding(s) below the filing threshold — tracked in summary only, not filed to Pulse")
 
