@@ -13,6 +13,7 @@ import { useVoiceInput, useVoiceConversation, speakText } from '../hooks/useVoic
 import { useHomeSummary } from '../hooks/useHomeSummary'
 import { useHomeActivity } from '../hooks/useHomeActivity'
 import { getAccessToken, handleUnauthorized } from '../utils/auth'
+import { stripMarkdown } from '../utils/sanitize'
 
 function getAuthToken() {
   return getAccessToken()
@@ -440,7 +441,7 @@ function ChatHomeInner() {
                         </span>
                       )}
                     </div>
-                    <p className="text-xs text-gray-400 dark:text-gray-500 truncate">{conv.last_message_preview || ''}</p>
+                    <p className="text-xs text-gray-400 dark:text-gray-500 truncate">{stripMarkdown(conv.last_message_preview) || ''}</p>
                   </div>
                 </button>
               )
@@ -552,7 +553,7 @@ function ChatHomeInner() {
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-gray-400 dark:text-gray-500 truncate">{conv.last_message_preview || ''}</p>
+                  <p className="text-xs text-gray-400 dark:text-gray-500 truncate">{stripMarkdown(conv.last_message_preview) || ''}</p>
                 </div>
               </button>
             )
