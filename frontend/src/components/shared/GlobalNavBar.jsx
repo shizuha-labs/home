@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useLocation } from 'react-router-dom'
-import { LayoutDashboard, Cpu, ListChecks, Shield, Search, Menu, X, LogOut } from 'lucide-react'
+import { LayoutDashboard, Cpu, ListChecks, Shield, Search, Menu, X, LogOut, MessageSquare } from 'lucide-react'
 import ThemeToggle from '../ThemeToggle'
 import { AppSwitcher } from '@shizuha/ui'
 import { useAuth } from '../../contexts/AuthContext'
@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   // Logged-in users clicking Agents expect THEIR agents, not the hive
   // landing (operator 2026-07-10) — deep-link straight to the fleet list.
   { label: 'Agents', href: '/hive/agents', icon: Cpu, surface: 'hive', match: '/hive' },
+  { label: 'Conversations', href: '/c', icon: MessageSquare, surface: 'connect', match: '/c' },
   { label: 'Work', href: '/pulse', icon: ListChecks, surface: 'pulse' },
   { label: 'Admin', href: '/admin', icon: Shield, surface: 'admin' },
 ]
