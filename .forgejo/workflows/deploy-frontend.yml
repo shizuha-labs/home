@@ -27,12 +27,6 @@ jobs:
       # "Exit handler never called"; production already builds on Node 20.
       image: node:20-bookworm
     steps:
-      - name: Install checkout runtime
-        shell: bash
-        run: |
-          set -euo pipefail
-          apt-get -o Acquire::http::Proxy=http://apt-cache.registry.svc.cluster.local:3142 update -qq
-          apt-get -o Acquire::http::Proxy=http://apt-cache.registry.svc.cluster.local:3142 install -y -qq --no-install-recommends ca-certificates git
       - name: Checkout exact Home revision
         uses: actions/checkout@v4
         with:
