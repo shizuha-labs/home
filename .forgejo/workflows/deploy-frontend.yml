@@ -28,6 +28,7 @@ jobs:
       image: node:20-bookworm
     steps:
       - name: Install checkout runtime
+        shell: bash
         run: |
           set -euo pipefail
           apt-get -o Acquire::http::Proxy=http://apt-cache.registry.svc.cluster.local:3142 update -qq
@@ -44,6 +45,7 @@ jobs:
           path: stack/shizuha-home
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Lint, production build, and route privacy guards
+        shell: bash
         run: |
           set -euo pipefail
           # package-lock.json records the developer-facing cache host. Replace
