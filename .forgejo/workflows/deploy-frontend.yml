@@ -27,28 +27,32 @@ jobs:
       # "Exit handler never called"; production already builds on Node 20.
       image: node:20-bookworm
     steps:
-      - name: Assemble exact Home revision with shared packages
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
+      - name: Install checkout runtime
         run: |
           set -euo pipefail
           apt-get -o Acquire::http::Proxy=http://apt-cache.registry.svc.cluster.local:3142 update -qq
           apt-get -o Acquire::http::Proxy=http://apt-cache.registry.svc.cluster.local:3142 install -y -qq --no-install-recommends ca-certificates git
-          git clone --depth=1 "http://x-access-token:${GITHUB_TOKEN}@forgejo-http.origin.svc.cluster.local/shizuha-labs/shizuha-stack.git" /workspace
-          rm -rf /workspace/shizuha-home
-          git clone --depth=50 "http://x-access-token:${GITHUB_TOKEN}@forgejo-http.origin.svc.cluster.local/shizuha-labs/home.git" /workspace/shizuha-home
-          cd /workspace/shizuha-home
-          git checkout "${GITHUB_SHA}"
+      - name: Checkout shared package sources
+        uses: actions/checkout@v4
+        with:
+          repository: shizuha-labs/shizuha-stack
+          path: stack
+          fetch-depth: 1
+      - name: Checkout exact Home revision
+        uses: actions/checkout@v4
+        with:
+          path: stack/shizuha-home
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Lint, production build, and route privacy guards
         run: |
           set -euo pipefail
           # package-lock.json records the developer-facing cache host. Replace
           # it with the runner-local registry so CI never depends on Tailscale.
-          cd /workspace/packages/shizuha-ui
+          cd "$GITHUB_WORKSPACE/stack/packages/shizuha-ui"
           npm install --omit=dev --replace-registry-host=always --no-audit --no-fund
-          cd /workspace/packages/shizuha-chat
+          cd "$GITHUB_WORKSPACE/stack/packages/shizuha-chat"
           npm install --omit=dev --replace-registry-host=always --no-audit --no-fund
-          cd /workspace/shizuha-home/frontend
+          cd "$GITHUB_WORKSPACE/stack/shizuha-home/frontend"
           npm ci --replace-registry-host=always --no-audit --no-fund
           npm run lint
           npm run build
