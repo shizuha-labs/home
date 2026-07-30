@@ -42,8 +42,14 @@ jobs:
       - name: Lint, production build, and route privacy guards
         run: |
           set -euo pipefail
+          # package-lock.json records the developer-facing cache host. Replace
+          # it with the runner-local registry so CI never depends on Tailscale.
+          cd /workspace/packages/shizuha-ui
+          npm install --omit=dev --replace-registry-host=always --no-audit --no-fund
+          cd /workspace/packages/shizuha-chat
+          npm install --omit=dev --replace-registry-host=always --no-audit --no-fund
           cd /workspace/shizuha-home/frontend
-          npm ci --no-audit --no-fund
+          npm ci --replace-registry-host=always --no-audit --no-fund
           npm run lint
           npm run build
           node scripts/booksCompliance.guardrail.test.mjs
