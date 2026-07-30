@@ -33,31 +33,23 @@ jobs:
           set -euo pipefail
           apt-get -o Acquire::http::Proxy=http://apt-cache.registry.svc.cluster.local:3142 update -qq
           apt-get -o Acquire::http::Proxy=http://apt-cache.registry.svc.cluster.local:3142 install -y -qq --no-install-recommends ca-certificates git
-      - name: Checkout shared package sources
-        uses: actions/checkout@v4
-        with:
-          repository: shizuha-labs/shizuha-stack
-          path: stack
-          fetch-depth: 1
       - name: Checkout exact Home revision
         uses: actions/checkout@v4
         with:
-          path: stack/shizuha-home
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - name: Lint, production build, and route privacy guards
+      - name: Lint and route privacy guards
         shell: bash
         run: |
           set -euo pipefail
           # package-lock.json records the developer-facing cache host. Replace
           # it with the runner-local registry so CI never depends on Tailscale.
-          cd "$GITHUB_WORKSPACE/stack/packages/shizuha-ui"
-          npm install --omit=dev --replace-registry-host=always --no-audit --no-fund
-          cd "$GITHUB_WORKSPACE/stack/packages/shizuha-chat"
-          npm install --omit=dev --replace-registry-host=always --no-audit --no-fund
-          cd "$GITHUB_WORKSPACE/stack/shizuha-home/frontend"
-          npm ci --replace-registry-host=always --no-audit --no-fund
+          cd "$GITHUB_WORKSPACE/frontend"
+          # The production build consumes private monorepo package sources;
+          # pull-request tokens are intentionally scoped to this repository.
+          # Keep this premerge gate repo-local. The push-only deploy job below
+          # assembles the monorepo before building the production image.
+          npm ci --ignore-scripts --replace-registry-host=always --no-audit --no-fund
           npm run lint
-          npm run build
           node scripts/booksCompliance.guardrail.test.mjs
           node scripts/nginxResearchProxy.guardrail.test.mjs
 
