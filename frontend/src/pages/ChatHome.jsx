@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { ConnectChatProvider, ChatLayout, MessageList, MessageInput, Avatar, NewChatModal, useConnectChat } from '@shizuha/chat'
 import { SHIZUHA_APPS, useEnabledServices } from '@shizuha/ui'
@@ -74,7 +74,9 @@ function AppsDrawer({ isOpen, onClose }) {
 function ChatHomeInner() {
   const { user } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
   const { conversationId: urlConversationId } = useParams()
+  const isConversationIndex = location.pathname === '/c' && !urlConversationId
   const {
     conversations,
     activeConversationId,
@@ -500,7 +502,87 @@ function ChatHomeInner() {
 
   return (
     <div className="flex h-full">
-      {/* Sidebar */}
+      {/* Mobile conversation index — /c must be a real destination, not the
+          same home theater with its desktop-only sidebar still hidden. */}
+      {isConversationIndex && (
+        <section
+          className="flex min-w-0 flex-1 flex-col bg-gray-50/80 dark:bg-gray-900/50 md:hidden"
+          aria-labelledby="mobile-conversations-heading"
+        >
+          <div className="flex items-center justify-between border-b border-gray-200/60 px-4 py-3 dark:border-gray-800/60">
+            <h1 id="mobile-conversations-heading" className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+              Conversations
+            </h1>
+            <button
+              onClick={() => setShowNewChat(true)}
+              className="relative rounded-lg p-2 text-gray-500 transition-colors hover:bg-brand-50 hover:text-brand-600 dark:text-gray-400 dark:hover:bg-brand-950/30 dark:hover:text-brand-400"
+              aria-label="Start a new conversation"
+            >
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              {pendingRequestCount > 0 && (
+                <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white">
+                  {pendingRequestCount}
+                </span>
+              )}
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-2">
+            {conversations.map((conv) => {
+              const other = conv.participants?.find(p => p.user_id !== user?.id)
+              const name = conv.conversation_type === 'group'
+                ? conv.name || 'Group'
+                : other?.user_name || conv.participant_names?.[0] || 'Chat'
+              const hasUnread = conv.unread_count > 0
+              return (
+                <button
+                  key={conv.id}
+                  onClick={() => {
+                    setActiveConversation(conv.id)
+                    navigate(`/c/${conv.id}`)
+                  }}
+                  className="mb-0.5 flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition-all hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 dark:hover:bg-gray-800"
+                  aria-label={`Open conversation with ${name}`}
+                >
+                  <Avatar
+                    name={name}
+                    size="sm"
+                    isOnline={other ? onlineUsers.has(other.user_id) : false}
+                    showStatus={conv.conversation_type === 'direct'}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className={`truncate text-sm ${hasUnread ? 'font-semibold text-gray-900 dark:text-gray-100' : 'text-gray-700 dark:text-gray-300'}`}>
+                        {name}
+                      </p>
+                      {hasUnread && (
+                        <span className="flex h-5 min-w-5 flex-shrink-0 items-center justify-center rounded-full bg-brand-600 px-1.5 text-[10px] font-bold text-white">
+                          {conv.unread_count > 99 ? '99+' : conv.unread_count}
+                        </span>
+                      )}
+                    </div>
+                    <p className="truncate text-xs text-gray-400 dark:text-gray-500">{conv.last_message_preview || 'No messages yet'}</p>
+                  </div>
+                </button>
+              )
+            })}
+            {conversations.length === 0 && (
+              <div className="px-4 py-12 text-center">
+                <p className="text-sm font-medium text-gray-700 dark:text-gray-300">No conversations yet</p>
+                <button
+                  onClick={() => setShowNewChat(true)}
+                  className="mt-3 rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-700"
+                >
+                  Start a conversation
+                </button>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* Desktop sidebar */}
       <div className="hidden md:flex md:w-72 lg:w-80 flex-shrink-0 flex-col bg-gray-50/80 dark:bg-gray-900/50 border-r border-gray-200/60 dark:border-gray-800/60">
         <div className="flex items-center justify-between px-4 py-3">
           <span className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Conversations</span>
@@ -567,7 +649,7 @@ function ChatHomeInner() {
 
       {/* Main — same visual language as Hero. Scrolls: the live theater below
           grows with the org's activity (HIVE-602). */}
-      <div className="flex-1 flex flex-col items-center justify-start relative overflow-y-auto bg-gradient-to-br from-brand-50 via-white to-purple-50 dark:from-gray-900 dark:via-gray-950 dark:to-purple-950">
+      <div className={`${isConversationIndex ? 'hidden md:flex' : 'flex'} flex-1 flex-col items-center justify-start relative overflow-y-auto bg-gradient-to-br from-brand-50 via-white to-purple-50 dark:from-gray-900 dark:via-gray-950 dark:to-purple-950`}>
         {/* Background gradient lives ON the scroll container: as an absolute
             inset-0 child it only covered the first viewport, so scrolling
             revealed the bare page background (black in dark mode) below it
