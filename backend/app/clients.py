@@ -173,8 +173,18 @@ async def fetch_tasks_by_status(client: httpx.AsyncClient, bearer: str,
     any_ok = False
     any_forbidden = False
     for scope in scopes:
-        params = {"limit": "200", "mode": "task", "is_active": "true",
-                  **_scope_params(scope)}
+        # PLAT pulse-meltdown 2026-07-26: limit=200 + permission_hint default
+        # pulled full DISTINCT task rows + a second unscoped COUNT, each 30–100s
+        # under load, and Home's 2.5s client timeout left zombie queries running
+        # on Pulse. Widget only needs status/status_category for bucketing —
+        # keep the page small and skip the diagnostic second COUNT.
+        params = {
+            "limit": "50",
+            "mode": "task",
+            "is_active": "true",
+            "permission_hint": "false",
+            **_scope_params(scope),
+        }
         try:
             resp = await client.get(
                 f"{settings.PULSE_API_URL}/api/items/",
