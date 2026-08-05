@@ -231,51 +231,182 @@ speakText.stop = () => {
 // listen (VAD auto-stop) → transcribe (grok STT) → onUtterance(text) → parent
 // sends to Shizuha → notifyReply(text) speaks it (kokoro TTS) → resume listen.
 // Voice-only; the mini-chat strip shows the rolling text alongside.
+//
+// CON-296: never silently retry-storm. Mic hard-fails (no device / permission)
+// surface guidance with zero auto-retry. Server/stream failures get a small
+// bounded exponential backoff, then a manual-retry error state. Every failed
+// attempt fully disposes WS / AudioContext / mic tracks via startStreamingStt.
+
+/** Max automatic reconnects after a server/stream failure (not counting the first try). */
+export const VOICE_STREAM_MAX_RETRIES = 3
+/** Base backoff for stream retries; doubles each attempt (500 → 1000 → 2000 ms). */
+export const VOICE_STREAM_BASE_BACKOFF_MS = 500
+
+const MIC_ERROR_MESSAGES = {
+  no_mic: 'No microphone found. Connect a mic or type instead.',
+  permission_denied: 'Microphone permission denied. Allow mic access in your browser settings, then try again.',
+}
+
+const STREAM_UNAVAILABLE_MESSAGE = 'Voice is temporarily unavailable. Try again in a moment.'
+
+/**
+ * Classify a streaming-STT / getUserMedia failure for UX + retry policy.
+ * @returns {'no_mic'|'permission_denied'|'stream_unavailable'}
+ */
+export function classifyVoiceError(error) {
+  const name = String(error?.name || '')
+  const message = String(error?.message || '').toLowerCase()
+
+  // getUserMedia DOMExceptions (and legacy webkit aliases)
+  if (
+    name === 'NotFoundError'
+    || name === 'DevicesNotFoundError'
+    || message.includes('requested device not found')
+    || message.includes('no microphone')
+  ) {
+    return 'no_mic'
+  }
+  if (
+    name === 'NotAllowedError'
+    || name === 'PermissionDeniedError'
+    || name === 'SecurityError'
+    || message.includes('permission denied')
+    || message.includes('not allowed')
+  ) {
+    return 'permission_denied'
+  }
+
+  // Everything else (stream_unavailable, WS drop, missing token, …) is a
+  // transient server/stream class — bounded retry, then manual retry.
+  return 'stream_unavailable'
+}
 
 export function useVoiceConversation({ onUtterance } = {}) {
-  const [callState, setCallState] = useState('idle') // idle | listening | thinking | speaking
+  // idle | connecting | listening | thinking | speaking | error
+  const [callState, setCallState] = useState('idle')
+  // { kind, message, canRetry } | null — only set when callState === 'error'
+  const [callError, setCallError] = useState(null)
   const activeRef = useRef(false)
   const streamingRef = useRef(null)
   const onUtteranceRef = useRef(onUtterance)
   onUtteranceRef.current = onUtterance
   const listenOnceRef = useRef(null)
+  const streamAttemptsRef = useRef(0) // failed stream attempts in the current call
+  const retryTimerRef = useRef(null)
+  const silenceTimerRef = useRef(null)
+
+  const clearTimers = useCallback(() => {
+    if (retryTimerRef.current != null) {
+      window.clearTimeout(retryTimerRef.current)
+      retryTimerRef.current = null
+    }
+    if (silenceTimerRef.current != null) {
+      window.clearTimeout(silenceTimerRef.current)
+      silenceTimerRef.current = null
+    }
+  }, [])
 
   const teardownCapture = useCallback(() => {
     streamingRef.current?.cancel()
     streamingRef.current = null
   }, [])
 
+  const failCall = useCallback((kind, message, canRetry) => {
+    activeRef.current = false
+    clearTimers()
+    teardownCapture()
+    speakText.stop()
+    streamAttemptsRef.current = 0
+    setCallError({ kind, message, canRetry: !!canRetry })
+    setCallState('error')
+  }, [clearTimers, teardownCapture])
+
+  const scheduleStreamRetry = useCallback(() => {
+    const failed = streamAttemptsRef.current + 1
+    streamAttemptsRef.current = failed
+    if (failed > VOICE_STREAM_MAX_RETRIES) {
+      failCall('stream_unavailable', STREAM_UNAVAILABLE_MESSAGE, true)
+      return
+    }
+    // Still in the call — show connecting while we back off.
+    setCallState('connecting')
+    setCallError(null)
+    const delay = VOICE_STREAM_BASE_BACKOFF_MS * (2 ** (failed - 1))
+    if (retryTimerRef.current != null) window.clearTimeout(retryTimerRef.current)
+    retryTimerRef.current = window.setTimeout(() => {
+      retryTimerRef.current = null
+      if (activeRef.current) listenOnceRef.current?.()
+    }, delay)
+  }, [failCall])
+
   const listenOnce = useCallback(() => {
     if (!activeRef.current) return
-    setCallState('listening')
+    clearTimers()
+    setCallError(null)
+    setCallState('connecting')
     let utteranceDelivered = false
     try {
       const controller = startStreamingStt({
         token: getAccessToken(),
+        onState: (state) => {
+          if (!activeRef.current) return
+          // Promote connecting → listening once the stream is live. Ignore
+          // 'idle'/'transcribing' here — conversation owns those transitions.
+          if (state === 'listening') {
+            // A live listen means the stream path worked; reset the failure budget.
+            streamAttemptsRef.current = 0
+            setCallState('listening')
+          } else if (state === 'connecting') {
+            setCallState('connecting')
+          }
+        },
         onPartial: () => {},
         onFinal: (text) => {
           streamingRef.current = null
           if (!activeRef.current || !text.trim()) return
           utteranceDelivered = true
+          streamAttemptsRef.current = 0
           setCallState('thinking')
           onUtteranceRef.current?.(text.trim())
         },
         onDone: () => {
+          // Successful stream close with no utterance (silence) — re-arm listen
+          // once. This is the conversation loop, not a failure path, so it does
+          // not consume the stream-retry budget.
           if (activeRef.current && !utteranceDelivered) {
-            window.setTimeout(() => listenOnceRef.current?.(), 250)
+            if (silenceTimerRef.current != null) window.clearTimeout(silenceTimerRef.current)
+            silenceTimerRef.current = window.setTimeout(() => {
+              silenceTimerRef.current = null
+              if (activeRef.current) listenOnceRef.current?.()
+            }, 250)
           }
         },
-        onError: () => {
+        onError: (error) => {
           streamingRef.current = null
-          if (activeRef.current) window.setTimeout(() => listenOnceRef.current?.(), 400)
+          // startStreamingStt already disposed WS/AudioContext/mic tracks.
+          if (!activeRef.current) return
+          const kind = classifyVoiceError(error)
+          if (kind === 'no_mic' || kind === 'permission_denied') {
+            // Hard fail — never auto-retry mic/permission errors (CON-296 A).
+            failCall(kind, MIC_ERROR_MESSAGES[kind], false)
+            return
+          }
+          // Server/stream failure — bounded exponential backoff (CON-296 B).
+          scheduleStreamRetry()
         },
       })
       streamingRef.current = controller
-    } catch {
-      activeRef.current = false
-      setCallState('idle')
+    } catch (error) {
+      streamingRef.current = null
+      if (!activeRef.current) return
+      const kind = classifyVoiceError(error)
+      if (kind === 'no_mic' || kind === 'permission_denied') {
+        failCall(kind, MIC_ERROR_MESSAGES[kind], false)
+      } else {
+        scheduleStreamRetry()
+      }
     }
-  }, [])
+  }, [clearTimers, failCall, scheduleStreamRetry])
   listenOnceRef.current = listenOnce
 
   // Parent calls this when Shizuha's reply text arrives → speak, then re-listen.
@@ -289,17 +420,47 @@ export function useVoiceConversation({ onUtterance } = {}) {
   const startCall = useCallback(() => {
     if (activeRef.current) return
     activeRef.current = true
+    streamAttemptsRef.current = 0
+    setCallError(null)
     listenOnceRef.current?.()
   }, [])
 
   const endCall = useCallback(() => {
     activeRef.current = false
+    clearTimers()
     teardownCapture()
     speakText.stop()
+    streamAttemptsRef.current = 0
+    setCallError(null)
     setCallState('idle')
-  }, [teardownCapture])
+  }, [clearTimers, teardownCapture])
 
-  useEffect(() => () => { activeRef.current = false; teardownCapture(); speakText.stop() }, [teardownCapture])
+  /** Manual retry after a terminal stream_unavailable error (or user re-tap). */
+  const retryCall = useCallback(() => {
+    activeRef.current = false
+    clearTimers()
+    teardownCapture()
+    speakText.stop()
+    streamAttemptsRef.current = 0
+    setCallError(null)
+    activeRef.current = true
+    listenOnceRef.current?.()
+  }, [clearTimers, teardownCapture])
 
-  return { callState, startCall, endCall, notifyReply, isCallActive: () => activeRef.current }
+  useEffect(() => () => {
+    activeRef.current = false
+    clearTimers()
+    teardownCapture()
+    speakText.stop()
+  }, [clearTimers, teardownCapture])
+
+  return {
+    callState,
+    callError,
+    startCall,
+    endCall,
+    retryCall,
+    notifyReply,
+    isCallActive: () => activeRef.current,
+  }
 }

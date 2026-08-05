@@ -251,15 +251,23 @@ function ChatHomeInner() {
   // speak the reply → listen again. onUtterance fires when the caller finishes
   // an utterance; we send it to Shizuha and the reply is spoken by the effect
   // below once it streams in.
-  const { callState, startCall, endCall, notifyReply, isCallActive } = useVoiceConversation({
+  const { callState, callError, startCall, endCall, retryCall, notifyReply, isCallActive } = useVoiceConversation({
     onUtterance: (text) => { sendToShizuha(text) },
   })
-  const callActive = callState !== 'idle'
+  // Active = mid-call only. 'error' is a terminal surface with guidance/retry, not "on call".
+  const callActive = callState !== 'idle' && callState !== 'error'
+  const callFailed = callState === 'error'
 
   const toggleCall = useCallback(() => {
     if (isCallActive()) { endCall(); return }
+    if (callState === 'error') {
+      // Re-tap after a hard fail: mic errors dismiss; stream errors manual-retry.
+      if (callError?.canRetry) retryCall()
+      else endCall()
+      return
+    }
     startCall()
-  }, [isCallActive, startCall, endCall])
+  }, [isCallActive, startCall, endCall, retryCall, callState, callError])
 
   // Speak Shizuha's newest message. During a live call this drives the loop
   // (speak → re-listen via notifyReply); otherwise it honors the speak toggle.
@@ -660,11 +668,26 @@ function ChatHomeInner() {
                 )}
                 <button
                   onClick={toggleCall}
-                  title={callActive ? 'End voice call' : 'Start a hands-free voice call with Shizuha'}
+                  title={
+                    callActive
+                      ? 'End voice call'
+                      : callFailed
+                        ? (callError?.canRetry ? 'Retry voice call' : (callError?.message || 'Voice unavailable'))
+                        : 'Start a hands-free voice call with Shizuha'
+                  }
+                  aria-label={
+                    callActive
+                      ? 'End voice call'
+                      : callFailed
+                        ? (callError?.canRetry ? 'Retry voice call' : 'Dismiss voice error')
+                        : 'Start a hands-free voice call with Shizuha'
+                  }
                   className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors shadow-sm ${
                     callActive
                       ? 'bg-emerald-500 text-white animate-pulse'
-                      : 'bg-gray-100 text-gray-500 hover:bg-emerald-50 hover:text-emerald-600 dark:bg-gray-800 dark:text-gray-400 dark:hover:text-emerald-400'
+                      : callFailed
+                        ? 'bg-amber-500 text-white'
+                        : 'bg-gray-100 text-gray-500 hover:bg-emerald-50 hover:text-emerald-600 dark:bg-gray-800 dark:text-gray-400 dark:hover:text-emerald-400'
                   }`}
                 >
                   {callActive ? (
@@ -702,10 +725,41 @@ function ChatHomeInner() {
                 speakEnabled={speakReplies}
                 onToggleSpeak={toggleSpeakReplies}
                 callState={callState}
+                callError={callError}
                 onToggleCall={toggleCall}
+                onRetryCall={retryCall}
+                onDismissCallError={endCall}
               />
             )}
           </div>
+
+          {/* CON-296: voice-call failure guidance when mini-chat isn't open yet */}
+          {callFailed && callError?.message && !(miniConvId && activeConversationId === miniConvId) && (
+            <div
+              role="alert"
+              data-testid="voice-call-error"
+              className="mt-2 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-100"
+            >
+              <span className="flex-1 leading-relaxed">{callError.message}</span>
+              {callError.canRetry ? (
+                <button
+                  type="button"
+                  onClick={retryCall}
+                  className="shrink-0 rounded-lg bg-amber-500 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-white hover:bg-amber-600"
+                >
+                  Retry
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={endCall}
+                  className="shrink-0 rounded-lg px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-800/80 hover:bg-amber-100 dark:text-amber-200 dark:hover:bg-amber-900/40"
+                >
+                  Dismiss
+                </button>
+              )}
+            </div>
+          )}
 
           {/* HIVE-602: the live theater — agents visibly working, events
               streaming in, projects moving. The show. */}
