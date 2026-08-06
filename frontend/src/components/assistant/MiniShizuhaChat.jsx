@@ -22,15 +22,21 @@ export default function MiniShizuhaChat({
   speakEnabled,
   onToggleSpeak,
   callState = 'idle',
+  callError = null,
   onToggleCall,
+  onRetryCall,
+  onDismissCallError,
 }) {
   const scrollRef = useRef(null)
-  const callActive = callState !== 'idle'
+  // 'error' is a terminal guidance surface, not an active call (CON-296).
+  const callActive = callState !== 'idle' && callState !== 'error'
+  const callFailed = callState === 'error'
   const callLabel =
-    callState === 'listening' ? 'Listening…'
-      : callState === 'thinking' ? 'Thinking…'
-        : callState === 'speaking' ? 'Speaking…'
-          : ''
+    callState === 'connecting' ? 'Connecting…'
+      : callState === 'listening' ? 'Listening…'
+        : callState === 'thinking' ? 'Thinking…'
+          : callState === 'speaking' ? 'Speaking…'
+            : ''
 
   // Rolling window: latest 3 messages, newest at the bottom.
   const visible = useMemo(() => {
@@ -57,6 +63,13 @@ export default function MiniShizuhaChat({
             </span>
             {callLabel || 'On call'}
           </span>
+        ) : callFailed ? (
+          <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-amber-600 dark:text-amber-400">
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-amber-500" />
+            </span>
+            Voice unavailable
+          </span>
         ) : (
           <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-gray-400 dark:text-gray-500">
             <span className="relative flex h-1.5 w-1.5">
@@ -70,10 +83,18 @@ export default function MiniShizuhaChat({
           {typeof onToggleCall === 'function' && (
             <button
               onClick={onToggleCall}
-              title={callActive ? 'End voice call' : 'Start a hands-free voice call'}
+              title={
+                callActive
+                  ? 'End voice call'
+                  : callFailed
+                    ? (callError?.canRetry ? 'Retry voice call' : 'Dismiss voice error')
+                    : 'Start a hands-free voice call'
+              }
               className={`rounded-lg p-1.5 transition-colors ${callActive
                 ? 'text-white bg-emerald-500 animate-pulse'
-                : 'text-gray-400 hover:text-emerald-600 dark:hover:text-emerald-400'}`}
+                : callFailed
+                  ? 'text-white bg-amber-500'
+                  : 'text-gray-400 hover:text-emerald-600 dark:hover:text-emerald-400'}`}
             >
               <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M6.62 10.79a15.05 15.05 0 006.59 6.59l2.2-2.2a1 1 0 011.02-.24 11.36 11.36 0 003.56.57 1 1 0 011 1V20a1 1 0 01-1 1A17 17 0 013 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.24.2 2.45.57 3.56a1 1 0 01-.24 1.02l-2.21 2.21z" />
@@ -111,6 +132,34 @@ export default function MiniShizuhaChat({
           </button>
         </div>
       </div>
+
+      {/* CON-296: voice-call failure guidance inside the mini-chat surface */}
+      {callFailed && callError?.message && (
+        <div
+          role="alert"
+          data-testid="voice-call-error"
+          className="mx-3 mb-1 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-100"
+        >
+          <span className="flex-1 leading-relaxed">{callError.message}</span>
+          {callError.canRetry && typeof onRetryCall === 'function' ? (
+            <button
+              type="button"
+              onClick={onRetryCall}
+              className="shrink-0 rounded-lg bg-amber-500 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-white hover:bg-amber-600"
+            >
+              Retry
+            </button>
+          ) : typeof onDismissCallError === 'function' ? (
+            <button
+              type="button"
+              onClick={onDismissCallError}
+              className="shrink-0 rounded-lg px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-800/80 hover:bg-amber-100 dark:text-amber-200 dark:hover:bg-amber-900/40"
+            >
+              Dismiss
+            </button>
+          ) : null}
+        </div>
+      )}
 
       {/* Rolling message window — capped height, newest pinned to bottom, a
           soft top fade sells the "rolling" read. */}
