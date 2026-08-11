@@ -60,11 +60,20 @@ jobs:
         run: |
           set -euo pipefail
           python .forgejo/scripts/test-hive708-release-reassert.py
+          # PLAT-5821: install from the locked uv project (backend/pyproject.toml
+          # + backend/uv.lock) — the single source of truth. `uv sync --locked`
+          # enforces the committed lock (cryptography 50.0.0) instead of
+          # re-resolving open `>=` ranges to the range floor.
           python -m pip install --quiet --no-cache-dir \
             --index-url "${PIP_INDEX_URL:-http://pip-cache.registry.svc.cluster.local/simple/}" \
             --trusted-host "${PIP_TRUSTED_HOST:-pip-cache.registry.svc.cluster.local}" \
-            -r backend/requirements.txt
+            uv==0.11.26
           cd backend
+          # Runner-global uv index overrides would rewrite the lock's canonical
+          # PyPI provenance to the internal cache and make --locked fail.
+          env -u UV_INDEX_URL -u UV_DEFAULT_INDEX -u UV_INSECURE_HOST uv lock --check
+          env -u UV_INDEX_URL -u UV_DEFAULT_INDEX -u UV_INSECURE_HOST uv sync --locked --extra dev
+          . .venv/bin/activate
           # Keep this trust-boundary gate limited to organization-isolation
           # invariants. Unrelated SSE capacity/lifecycle coverage runs in the
           # service test lane and must not make this authz proof nondeterministic.
