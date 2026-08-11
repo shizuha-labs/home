@@ -252,3 +252,33 @@ jobs:
           done
           kubectl annotate -n shizuha deploy/shizuha-home-frontend shizuha.io/last-successful-sha="${{ github.sha }}" --overwrite
           kubectl get pods -n shizuha -l app.kubernetes.io/name=shizuha-home-frontend
+
+          # FRG-34 live gate: nginx's directory canonicalization runs behind
+          # ingress TLS termination. A bad absolute redirect therefore exposes
+          # signup traffic over cleartext even though the entry URL was HTTPS.
+          REDIRECT_HEADERS="$(mktemp)"
+          REDIRECT_STATUS="$(curl --silent --show-error --connect-timeout 10 --max-time 30 \
+            --header 'Cache-Control: no-cache' \
+            --output /dev/null --dump-header "${REDIRECT_HEADERS}" \
+            --write-out '%{http_code}' https://shizuha.com/forge)"
+          case "${REDIRECT_STATUS}" in
+            301|302|307|308) ;;
+            *) echo "::error::/forge returned ${REDIRECT_STATUS}, expected a canonical redirect"; exit 1 ;;
+          esac
+          REDIRECT_LOCATION="$(awk 'tolower($1) == "location:" {gsub("\\r", "", $2); print $2; exit}' "${REDIRECT_HEADERS}")"
+          case "${REDIRECT_LOCATION}" in
+            /forge/|https://shizuha.com/forge/) ;;
+            *) echo "::error::/forge emitted unsafe Location: ${REDIRECT_LOCATION:-<missing>}"; exit 1 ;;
+          esac
+
+          readarray -t FINAL_RESULT < <(curl --silent --show-error --connect-timeout 10 --max-time 30 \
+            --location --proto-redir '=https' --max-redirs 3 \
+            --output /dev/null --write-out '%{url_effective}\n%{http_code}\n' \
+            https://shizuha.com/forge)
+          test "${FINAL_RESULT[0]}" = 'https://shizuha.com/forge/' || {
+            echo "::error::/forge redirect chain ended at ${FINAL_RESULT[0]}"; exit 1;
+          }
+          test "${FINAL_RESULT[1]}" = '200' || {
+            echo "::error::/forge final HTTPS response was ${FINAL_RESULT[1]}"; exit 1;
+          }
+          echo "FRG-34 live redirect gate: ${REDIRECT_STATUS} ${REDIRECT_LOCATION} -> ${FINAL_RESULT[0]} (${FINAL_RESULT[1]})"
