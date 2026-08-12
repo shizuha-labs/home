@@ -193,8 +193,17 @@ export default function OrgProgressCharts({ orgs, orgId, onOrgChange, range, onR
   const openTotal = groups.active + groups.waiting + groups.todo + groups.dropped
 
   const bottlenecks = useMemo(() => {
+    // "Slowest stages" = flow bottlenecks only. Parking holds (scheduled calendar
+    // work, blocked waiting on upstream, backlog) intentionally sit for days/weeks
+    // and must not dominate the chart as if the org is stuck in-progress.
     const rows = (data?.throughput || [])
-      .filter((r) => !DONE.has(String(r.status).toLowerCase()) && (r.avg_dwell_seconds || 0) > 0)
+      .filter((r) => {
+        const s = String(r.status || '').toLowerCase()
+        if (DONE.has(s) || DROPPED.has(s) || WAITING.has(s)) return false
+        if (r.is_parking) return false
+        if (s === 'backlog' || s === 'waiting_external') return false
+        return (r.avg_dwell_seconds || 0) > 0
+      })
       .sort((a, b) => (b.avg_dwell_seconds || 0) - (a.avg_dwell_seconds || 0))
       .slice(0, 5)
     const max = Math.max(1, ...rows.map((r) => r.avg_dwell_seconds || 0))
