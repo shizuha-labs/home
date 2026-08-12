@@ -1,0 +1,42 @@
+# Tooling note: generate/update uv.lock with uv 0.11.26; the backend Dockerfile
+# pins the same uv version.
+# PLAT-1302 / PLAT-5821: pyproject.toml + uv.lock are the single source of truth
+# for the home BFF Python deps. The build installs resolved, pinned versions via
+# `uv sync --locked` so OSV/Trivy scan the actually-deployed versions, and the
+# cryptography floor is raised to >=50 (GHSA-g6cj-pr64-35w5 / PYSEC-2026-3552,
+# Bleichenbacher PKCS#7 oracle — fixed 50.0.0) so the lock resolves to a fixed
+# version instead of the vulnerable <50 cap.
+[project]
+name = "home-backend"
+version = "0.1.0"
+description = "Shizuha Home BFF — thin stateless async fan-out (FastAPI + uvicorn)"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "fastapi>=0.110,<1",
+  "uvicorn[standard]>=0.29,<1",
+  "httpx>=0.27,<1",
+  "idna>=3.18,<4",
+  # RS256/JWKS verification of shizuha-id user tokens (PyJWT's RSAAlgorithm
+  # needs the cryptography backend; without it every RS256 token is rejected).
+  "PyJWT>=2.13.0,<3",
+  # HIVE-603 Redis Streams for activity feed.
+  "redis[hiredis]>=5.1,<6",
+  # PLAT-5821: raised floor — cryptography <50 carries GHSA-g6cj-pr64-35w5
+  # (Bleichenbacher PKCS#7 oracle, fixed 50.0.0). The lock pins the fixed 50.x.
+  "cryptography>=50",
+]
+
+[project.optional-dependencies]
+dev = [
+  "Pygments>=2.20.0,<3",
+  "pytest>=9.0.3,<10",
+  "pytest-asyncio>=1.4,<2",
+]
+
+[tool.uv]
+package = false
+# PLAT-2050: dependency cooldown — ignore versions published in the last 7 days
+# (supply-chain hardening; a freshly-published malicious/broken release is not
+# resolved until it has been public a week). cryptography 50.0.0 (2026-07-31) is
+# outside the cooldown window so it resolves normally.
+exclude-newer = "7 days"
