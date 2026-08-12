@@ -8,7 +8,7 @@
     "build": "vite build && node scripts/generate-route-html.mjs",
     "preview": "vite preview",
     "lint": "eslint src --report-unused-disable-directives --max-warnings 0",
-    "prebuild": "node scripts/check-local-packages.mjs"
+    "prebuild": "node scripts/check-local-packages.mjs && node scripts/nginxResearchProxy.guardrail.test.mjs"
   },
   "dependencies": {
     "@shizuha/chat": "file:../../packages/shizuha-chat",
