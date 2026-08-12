@@ -1217,3 +1217,55 @@ def test_activity_recent_aggregate_with_empty_since_by_org():
     assert r.status_code == 200
     body = r.json()
     assert len(body["events"]) >= 2  # events from both orgs
+
+
+# ---- PLAT-5298: bounded activity poll serves stale cache, never a 504 -------
+
+def test_activity_budget_timeout_falls_back_to_stale(monkeypatch):
+    """A slow-but-succeeding downstream fan-out must not blow past the nginx
+    /api/home/ read timeout into a 504: the handler bounds the whole gather and
+    serves the last-good cached widget on expiry."""
+    import time as _time
+    from app.cache import cache_key, widget_cache, _Entry
+    from app.schema import Widget
+
+    widget_cache.clear()
+    token = _token(memberships={"1": "admin"})
+    payload = token.split(".")[1]
+    payload += "=" * (-len(payload) % 4)
+    claims = json.loads(base64.urlsafe_b64decode(payload))
+    uid = claims.get("user_id") or 7
+    memberships = {1: "admin"}
+    # The request carries no org_id -> aggregate mode (scope_org None).
+    feed_key = cache_key("live_feed", uid, None, memberships)
+    agents_key = cache_key("agents_live", uid, None, memberships)
+
+    # Prime last-good values in the cache.
+    widget_cache._store[feed_key] = _Entry(
+        widget=Widget.ok_(data=[{"item_key": "STALE-PLAT-1", "at": "2026-07-10T00:00:00Z"}]),
+        stored_at=_time.monotonic(),
+    )
+    widget_cache._store[agents_key] = _Entry(
+        widget=Widget.ok_(data=[{"name": "Steady", "status": "running"}]),
+        stored_at=_time.monotonic(),
+    )
+
+    async def _slow(_client, _bearer, org_ids=None, since=None, limit=60):
+        await asyncio.sleep(30)  # way over the budget + nginx window
+        return Widget.ok_(data=[])
+
+    async def _slow_agents(_client, _bearer, _org_id=None):
+        await asyncio.sleep(30)
+        return Widget.ok_(data=[])
+
+    monkeypatch.setattr("app.main.fetch_live_feed", _slow)
+    monkeypatch.setattr("app.main.fetch_agents_live", _slow_agents)
+    monkeypatch.setattr("app.main.ACTIVITY_FETCH_BUDGET_SECONDS", 0.05)
+
+    resp = client.get("/api/home/activity", headers=_auth(token))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["widgets"]["feed"]["status"] == "stale"
+    assert body["widgets"]["feed"]["data"][0]["item_key"] == "STALE-PLAT-1"
+    assert body["widgets"]["agents"]["status"] == "stale"
+    assert body["widgets"]["agents"]["data"][0]["name"] == "Steady"
