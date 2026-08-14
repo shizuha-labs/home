@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { ConnectChatProvider, ChatLayout, MessageList, MessageInput, Avatar, NewChatModal, useConnectChat } from '@shizuha/chat'
@@ -9,6 +9,14 @@ import CockpitPeek from '../components/dashboard/CockpitPeek'
 import OrgProgressCharts from '../components/dashboard/OrgProgressCharts'
 import CommandPalette from '../components/assistant/CommandPalette'
 import MiniShizuhaChat from '../components/assistant/MiniShizuhaChat'
+import HomeAgentPicker from '../components/assistant/HomeAgentPicker'
+import {
+  agentConversations,
+  findAgentConversation,
+  readHomeAgentPref,
+  suggestedHomeAgentUsername,
+  writeHomeAgentPref,
+} from '../hooks/useHomeAgentPreference'
 import { useVoiceInput, useVoiceConversation, speakText } from '../hooks/useVoice'
 import { useHomeSummary } from '../hooks/useHomeSummary'
 import { useHomeActivity } from '../hooks/useHomeActivity'
@@ -98,6 +106,7 @@ function ChatHomeInner() {
   // the home page. When set, the Shizuha conversation is ACTIVE in the provider
   // (messages stream in) but we render a rolling strip instead of navigating.
   const [miniConvId, setMiniConvId] = useState(null)
+  const [homeAgent, setHomeAgent] = useState(() => readHomeAgentPref())
   const [speakReplies, setSpeakReplies] = useState(() => localStorage.getItem('shizuha_speak_replies') === '1')
   const lastSpokenIdRef = useRef(null)
   const [showApps, setShowApps] = useState(false)
@@ -190,52 +199,99 @@ function ChatHomeInner() {
     if (!activeConversationId) textareaRef.current?.focus()
   }, [activeConversationId])
 
+  const pickerOptions = useMemo(
+    () => agentConversations(conversations, user?.id),
+    [conversations, user?.id],
+  )
+  const effectiveHomeAgent = homeAgent || suggestedHomeAgentUsername(user)
+  const selectedPicker = pickerOptions.find(
+    (row) => String(row.username).toLowerCase() === String(effectiveHomeAgent).toLowerCase(),
+  )
+
+  const chooseHomeAgent = useCallback((row) => {
+    const username = writeHomeAgentPref(row?.username)
+    setHomeAgent(username)
+    if (row?.conversationId) {
+      setMiniConvId(row.conversationId)
+      setActiveConversation(row.conversationId)
+    }
+  }, [setActiveConversation])
+
+  const searchHomeAgents = useCallback(async (q) => {
+    const token = getAuthToken()
+    const headers = { Authorization: `Bearer ${token}` }
+    const ql = q.toLowerCase()
+    try {
+      const idRes = await fetch('/id/api/auth/users/all/', { headers })
+      if (idRes.ok) {
+        const data = await idRes.json()
+        return (data.users ?? [])
+          .filter((u) => u.id !== user?.id)
+          .map((u) => ({
+            userId: u.id,
+            username: u.username,
+            displayName: u.first_name || u.username,
+            email: u.email,
+          }))
+          .filter((u) => {
+            const blob = `${u.displayName} ${u.username} ${u.email || ''}`.toLowerCase()
+            return blob.includes(ql)
+          })
+          .slice(0, 12)
+      }
+    } catch { /* not staff */ }
+    try {
+      const res = await fetch(`/connect/api/search/people/?q=${encodeURIComponent(q)}`, { headers })
+      if (!res.ok) return []
+      const data = await res.json()
+      return (data.results ?? data ?? []).slice(0, 12).map((u) => ({
+        userId: u.id || u.user_id,
+        username: u.username,
+        displayName: u.first_name || u.display_name || u.username,
+        email: u.email,
+      }))
+    } catch {
+      return []
+    }
+  }, [user?.id])
+
   const sendToShizuha = useCallback(async (message) => {
     if (!message.trim() || isSending) return
+    const targetUsername = homeAgent || suggestedHomeAgentUsername(user)
+    if (!targetUsername) {
+      return
+    }
     setIsSending(true)
     try {
-      // Mini chat already live: just send on the active conversation.
+      // Mini chat already live on the chosen agent: just send.
       if (miniConvId && activeConversationId === miniConvId) {
-        sendMessage(message)
-        return
-      }
-      let shizuhaConv = conversations.find(c =>
-        c.participants?.some(p => p.user_name === 'Shizuha' || p.agent_role)
-      )
-      if (!shizuhaConv) {
-        const token = getAuthToken()
-        // HIVE-620/624: every user has their OWN personal "Shizuha" agent — a real
-        // k3s fleet agent (SCLI) owned by them, isolated to their org. Get-or-create
-        // it and DM its Connect user directly (it's a member of the user's personal
-        // org, so the shared-org gate passes with no tenancy exemption).
-        const ensureResp = await fetch('/hive/api/v1/fleet/personal-agent', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        })
-        if (handleUnauthorized(ensureResp)) return
-        if (ensureResp.ok) {
-          const agent = await ensureResp.json()
-          if (agent.agent_user_id) {
-            shizuhaConv = await createDirectConversation(agent.agent_user_id)
-          }
+        const live = findAgentConversation(conversations, targetUsername)
+        if (live && live.id === miniConvId) {
+          sendMessage(message)
+          return
         }
       }
-      if (shizuhaConv) {
-        // Store pending message; the existing pending-message effect sends it
-        // once the conversation is active + connected (works without navigating).
+      let dest = findAgentConversation(conversations, targetUsername)
+      if (!dest) {
+        const token = getAuthToken()
+        const matches = await searchHomeAgents(targetUsername)
+        const hit = matches.find((m) => String(m.username).toLowerCase() === targetUsername.toLowerCase())
+        if (hit?.userId) {
+          dest = await createDirectConversation(hit.userId, { name: hit.displayName, email: hit.email })
+        }
+      }
+      if (dest) {
         sessionStorage.setItem('shizuha_pending_message', JSON.stringify({
-          conversationId: shizuhaConv.id,
+          conversationId: dest.id,
           content: message,
         }))
-        // Operator 2026-07-11: STAY on the home page — open the inline mini
-        // chat instead of navigating to the full /c/:id view.
-        setMiniConvId(shizuhaConv.id)
-        setActiveConversation(shizuhaConv.id)
+        setMiniConvId(dest.id)
+        setActiveConversation(dest.id)
       }
     } finally {
       setIsSending(false)
     }
-  }, [activeConversationId, conversations, createDirectConversation, isSending, miniConvId, sendMessage, setActiveConversation])
+  }, [activeConversationId, conversations, createDirectConversation, homeAgent, isSending, miniConvId, searchHomeAgents, sendMessage, setActiveConversation, user])
 
   const closeMiniChat = useCallback(() => {
     setMiniConvId(null)
@@ -632,6 +688,13 @@ function ChatHomeInner() {
           <p className="text-lg text-gray-600 dark:text-gray-400 text-center mb-2">
             {getGreeting()}{firstName ? `, ${firstName}` : ''}.
           </p>
+          <HomeAgentPicker
+            selectedUsername={effectiveHomeAgent}
+            selectedLabel={selectedPicker?.displayName || effectiveHomeAgent}
+            options={pickerOptions}
+            onSelect={chooseHomeAgent}
+            onSearch={searchHomeAgents}
+          />
           {liveAgents.length > 0 && (
             <p className="flex items-center justify-center gap-2 text-sm text-gray-500 dark:text-gray-400 mb-6">
               <span className="relative flex h-2 w-2">
@@ -665,7 +728,7 @@ function ChatHomeInner() {
                   e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`
                 }}
                 onKeyDown={handleKeyDown}
-                placeholder="Ask Shizuha anything..."
+                placeholder={effectiveHomeAgent ? `Ask ${selectedPicker?.displayName || effectiveHomeAgent}…` : 'Choose an agent above, then ask…'}
                 rows={2}
                 disabled={isSending}
                 className="w-full px-5 py-4 pb-12 text-base bg-transparent text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 outline-none resize-none max-h-40"
@@ -737,7 +800,7 @@ function ChatHomeInner() {
                 </button>
                 <button
                   onClick={handleSubmit}
-                  disabled={!inputValue.trim() || isSending}
+                  disabled={!inputValue.trim() || isSending || !effectiveHomeAgent}
                   className="w-9 h-9 rounded-xl bg-brand-600 hover:bg-brand-700 text-white flex items-center justify-center disabled:opacity-25 disabled:cursor-not-allowed transition-colors shadow-sm"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -755,6 +818,7 @@ function ChatHomeInner() {
                 typingUsers={typingUsers}
                 currentUserId={user?.id}
                 isLoading={isLoadingMessages}
+                agentLabel={selectedPicker?.displayName || effectiveHomeAgent || 'Agent'}
                 onOpenFull={openFullFromMini}
                 onClose={closeMiniChat}
                 speakEnabled={speakReplies}

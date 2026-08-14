@@ -1,0 +1,82 @@
+/**
+ * Per-user default home chat agent.
+ *
+ * The homepage used to hardcode the CoS agent named "Shizuha" (Admin Ops).
+ * That seat is governance/escalation, not a personal or customer concierge.
+ * Preference is local until ID/Connect grows a profile field.
+ */
+export const HOME_AGENT_PREF_KEY = 'shizuha_home_agent'
+
+export function readHomeAgentPref() {
+  try {
+    return String(localStorage.getItem(HOME_AGENT_PREF_KEY) || '').trim()
+  } catch {
+    return ''
+  }
+}
+
+export function writeHomeAgentPref(username) {
+  const value = String(username || '').trim()
+  try {
+    if (value) localStorage.setItem(HOME_AGENT_PREF_KEY, value)
+    else localStorage.removeItem(HOME_AGENT_PREF_KEY)
+  } catch {
+    /* private mode */
+  }
+  return value
+}
+
+/** CEO default once Hina exists. Everyone else starts unset (picker), not Admin Ops. */
+export function suggestedHomeAgentUsername(user) {
+  const email = String(user?.email || '').toLowerCase()
+  if (email === 'hothritik1@gmail.com' || email === 'hritik@shizuha.com') return 'hina'
+  return ''
+}
+
+export function participantMatchesAgent(participant, username) {
+  if (!participant || !username) return false
+  const want = String(username).toLowerCase()
+  const names = [
+    participant.user_name,
+    participant.username,
+    participant.name,
+    participant.email,
+  ]
+  return names.some((n) => String(n || '').toLowerCase() === want
+    || String(n || '').toLowerCase().split('@')[0] === want)
+}
+
+export function findAgentConversation(conversations, username) {
+  if (!username || !Array.isArray(conversations)) return null
+  return conversations.find((c) =>
+    c?.conversation_type !== 'group'
+    && (c.participants || []).some((p) => participantMatchesAgent(p, username)),
+  ) || null
+}
+
+export function agentConversations(conversations, currentUserId) {
+  if (!Array.isArray(conversations)) return []
+  const seen = new Set()
+  const out = []
+  for (const conv of conversations) {
+    if (conv?.conversation_type === 'group') continue
+    const other = (conv.participants || []).find((p) => p.user_id !== currentUserId)
+    const looksAgent = Boolean(
+      other?.agent_role
+      || other?.is_agent
+      || String(other?.email || '').endsWith('@shizuha.com')
+      || String(other?.email || '').includes('@agents.'),
+    )
+    if (!other || !looksAgent) continue
+    const username = String(other.username || other.user_name || '').trim()
+    if (!username || seen.has(username.toLowerCase())) continue
+    seen.add(username.toLowerCase())
+    out.push({
+      username,
+      displayName: other.user_name || other.name || username,
+      userId: other.user_id,
+      conversationId: conv.id,
+    })
+  }
+  return out
+}

@@ -17,6 +17,7 @@ export default function MiniShizuhaChat({
   typingUsers,
   currentUserId,
   isLoading,
+  agentLabel = 'Agent',
   onOpenFull,
   onClose,
   speakEnabled,
@@ -76,7 +77,7 @@ export default function MiniShizuhaChat({
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-400 opacity-75" />
               <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-brand-500" />
             </span>
-            Shizuha — live
+            {agentLabel} — live
           </span>
         )}
         <div className="flex items-center gap-1">
