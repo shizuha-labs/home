@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react'
+import LiveWaveformIcon from './LiveWaveformIcon'
 
 /**
  * MiniShizuhaChat — HIVE home inline chat (operator 2026-07-11).
@@ -86,20 +87,25 @@ export default function MiniShizuhaChat({
               onClick={onToggleCall}
               title={
                 callActive
-                  ? 'End voice call'
+                  ? 'End Live'
                   : callFailed
-                    ? (callError?.canRetry ? 'Retry voice call' : 'Dismiss voice error')
-                    : 'Start a hands-free voice call'
+                    ? (callError?.canRetry ? 'Retry Live' : 'Dismiss voice error')
+                    : 'Start Live voice'
+              }
+              aria-label={
+                callActive
+                  ? 'End Live'
+                  : callFailed
+                    ? (callError?.canRetry ? 'Retry Live' : 'Dismiss voice error')
+                    : 'Start Live voice'
               }
               className={`rounded-lg p-1.5 transition-colors ${callActive
-                ? 'text-white bg-emerald-500 animate-pulse'
+                ? 'text-white bg-neutral-900 dark:bg-white dark:text-neutral-900'
                 : callFailed
                   ? 'text-white bg-amber-500'
-                  : 'text-gray-400 hover:text-emerald-600 dark:hover:text-emerald-400'}`}
+                  : 'text-gray-400 hover:text-brand-600 dark:hover:text-brand-400'}`}
             >
-              <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M6.62 10.79a15.05 15.05 0 006.59 6.59l2.2-2.2a1 1 0 011.02-.24 11.36 11.36 0 003.56.57 1 1 0 011 1V20a1 1 0 01-1 1A17 17 0 013 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.24.2 2.45.57 3.56a1 1 0 01-.24 1.02l-2.21 2.21z" />
-              </svg>
+              <LiveWaveformIcon className="h-3.5 w-3.5" active={callActive} />
             </button>
           )}
           {typeof onToggleSpeak === 'function' && (

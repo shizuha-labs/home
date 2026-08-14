@@ -286,7 +286,11 @@ export function useVoiceConversation({ onUtterance } = {}) {
   const [callState, setCallState] = useState('idle')
   // { kind, message, canRetry } | null — only set when callState === 'error'
   const [callError, setCallError] = useState(null)
+  const [muted, setMuted] = useState(false)
+  const [lastHeard, setLastHeard] = useState('')
   const activeRef = useRef(false)
+  const mutedRef = useRef(false)
+  const speakingRef = useRef(false)
   const streamingRef = useRef(null)
   const onUtteranceRef = useRef(onUtterance)
   onUtteranceRef.current = onUtterance
@@ -313,6 +317,7 @@ export function useVoiceConversation({ onUtterance } = {}) {
 
   const failCall = useCallback((kind, message, canRetry) => {
     activeRef.current = false
+    speakingRef.current = false
     clearTimers()
     teardownCapture()
     speakText.stop()
@@ -340,34 +345,40 @@ export function useVoiceConversation({ onUtterance } = {}) {
   }, [failCall])
 
   const listenOnce = useCallback(() => {
-    if (!activeRef.current) return
+    if (!activeRef.current || mutedRef.current) return
     clearTimers()
     setCallError(null)
-    setCallState('connecting')
+    if (!speakingRef.current) setCallState('connecting')
     let utteranceDelivered = false
     try {
       const controller = startStreamingStt({
         token: getAccessToken(),
         onState: (state) => {
-          if (!activeRef.current) return
+          if (!activeRef.current || mutedRef.current) return
           // Promote connecting → listening once the stream is live. Ignore
           // 'idle'/'transcribing' here — conversation owns those transitions.
           if (state === 'listening') {
             // A live listen means the stream path worked; reset the failure budget.
             streamAttemptsRef.current = 0
-            setCallState('listening')
-          } else if (state === 'connecting') {
+            if (!speakingRef.current) setCallState('listening')
+          } else if (state === 'connecting' && !speakingRef.current) {
             setCallState('connecting')
           }
         },
         onPartial: () => {},
         onFinal: (text) => {
           streamingRef.current = null
-          if (!activeRef.current || !text.trim()) return
+          if (!activeRef.current || mutedRef.current || !text.trim()) return
           utteranceDelivered = true
           streamAttemptsRef.current = 0
+          const heard = text.trim()
+          setLastHeard(heard)
+          if (speakingRef.current) {
+            speakingRef.current = false
+            speakText.stop()
+          }
           setCallState('thinking')
-          onUtteranceRef.current?.(text.trim())
+          onUtteranceRef.current?.(heard)
         },
         onDone: () => {
           // Successful stream close with no utterance (silence) — re-arm listen
@@ -410,38 +421,65 @@ export function useVoiceConversation({ onUtterance } = {}) {
   listenOnceRef.current = listenOnce
 
   // Parent calls this when Shizuha's reply text arrives → speak, then re-listen.
+  // Live keeps the mic open so the caller can barge in (ChatGPT Live duplex).
   const notifyReply = useCallback(async (text) => {
     if (!activeRef.current || !text) return
+    speakingRef.current = true
     setCallState('speaking')
+    if (!mutedRef.current && !streamingRef.current) listenOnceRef.current?.()
     await speakText(text)
-    if (activeRef.current) listenOnceRef.current?.()
+    speakingRef.current = false
+    if (activeRef.current && !mutedRef.current) listenOnceRef.current?.()
   }, [])
 
   const startCall = useCallback(() => {
     if (activeRef.current) return
     activeRef.current = true
+    mutedRef.current = false
+    speakingRef.current = false
     streamAttemptsRef.current = 0
+    setMuted(false)
+    setLastHeard('')
     setCallError(null)
     listenOnceRef.current?.()
   }, [])
 
   const endCall = useCallback(() => {
     activeRef.current = false
+    mutedRef.current = false
+    speakingRef.current = false
     clearTimers()
     teardownCapture()
     speakText.stop()
     streamAttemptsRef.current = 0
+    setMuted(false)
+    setLastHeard('')
     setCallError(null)
     setCallState('idle')
   }, [clearTimers, teardownCapture])
 
+  const toggleMute = useCallback(() => {
+    if (!activeRef.current) return
+    const next = !mutedRef.current
+    mutedRef.current = next
+    setMuted(next)
+    if (next) {
+      teardownCapture()
+    } else {
+      listenOnceRef.current?.()
+    }
+  }, [teardownCapture])
+
   /** Manual retry after a terminal stream_unavailable error (or user re-tap). */
   const retryCall = useCallback(() => {
     activeRef.current = false
+    mutedRef.current = false
+    speakingRef.current = false
     clearTimers()
     teardownCapture()
     speakText.stop()
     streamAttemptsRef.current = 0
+    setMuted(false)
     setCallError(null)
     activeRef.current = true
     listenOnceRef.current?.()
@@ -449,6 +487,8 @@ export function useVoiceConversation({ onUtterance } = {}) {
 
   useEffect(() => () => {
     activeRef.current = false
+    mutedRef.current = false
+    speakingRef.current = false
     clearTimers()
     teardownCapture()
     speakText.stop()
@@ -457,9 +497,12 @@ export function useVoiceConversation({ onUtterance } = {}) {
   return {
     callState,
     callError,
+    muted,
+    lastHeard,
     startCall,
     endCall,
     retryCall,
+    toggleMute,
     notifyReply,
     isCallActive: () => activeRef.current,
   }

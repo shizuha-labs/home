@@ -149,6 +149,44 @@ def test_agents_live_maps_fields_and_leads_with_working():
     assert w.data[1]["status"] == "stopped"
 
 
+def test_talk_agents_finds_hina_by_username(monkeypatch):
+    widget_cache.clear()
+    from app.schema import Widget
+
+    async def _fake_agents(_client, _bearer, _org_id=None):
+        return Widget.ok_(data=[{
+            "name": "Hina",
+            "username": "hina",
+            "email": "hina@shizuha.com",
+            "role": "Executive Assistant",
+            "teams": ["ceo-decisions"],
+            "status": "pending",
+            "identity_user_id": 42,
+            "user_id": 42,
+        }])
+
+    monkeypatch.setattr("app.clients.fetch_agents_live", _fake_agents)
+    resp = client.get("/api/home/talk-agents?q=hina", headers=_auth(_token()))
+    assert resp.status_code == 200
+    rows = resp.json()["results"]
+    assert rows[0]["username"] == "hina"
+    assert rows[0]["userId"] == 42
+
+
+def test_agents_live_maps_identity_user_id():
+    def handler(request):
+        return httpx.Response(200, json={"results": [
+            {"agent_username": "hina", "display_name": "Hina",
+             "identity_user_id": 42, "status": "pending"},
+        ]})
+    async def go():
+        async with _mock_client(handler) as c:
+            return await clients.fetch_agents_live(c, "t")
+    w = _run(go())
+    assert w.data[0]["identity_user_id"] == 42
+    assert w.data[0]["email"] == "hina@shizuha.com"
+
+
 def test_agents_live_unauthorized_on_403():
     def handler(request):
         return httpx.Response(403, json={})

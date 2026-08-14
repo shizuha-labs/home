@@ -33,6 +33,7 @@ from .auth import Caller, resolve_scope_org, verify_caller
 from .cache import cache_key, widget_cache
 from .clients import (
     fetch_agent_activity, fetch_agent_peek, fetch_agents_live, fetch_alerts,
+    fetch_talk_agents,
     fetch_financial_snapshot, fetch_live_feed, fetch_org_map, fetch_org_progress,
     fetch_org_refs, fetch_recent_conversations, fetch_task_peek, fetch_tasks_by_status,
 )
@@ -229,6 +230,22 @@ async def home_activity(
 
 
 # ── HIVE-602 cockpit drill-downs — on-demand, uncached, caller-scoped ────────
+
+@app.get("/api/home/talk-agents")
+async def home_talk_agents(
+    caller: Caller = Depends(verify_caller),
+    q: str = Query(default="", max_length=80),
+    org_id: Optional[int] = Query(default=None),
+):
+    """Search fleet agents the caller can talk to from home."""
+    scope_org = resolve_scope_org(caller, org_id)
+    async with httpx.AsyncClient() as client:
+        results = await fetch_talk_agents(client, caller.bearer, q, scope_org)
+    return {
+        "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "results": results,
+    }
+
 
 @app.get("/api/home/agent")
 async def home_agent_peek(

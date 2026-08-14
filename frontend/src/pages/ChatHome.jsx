@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import { ConnectChatProvider, ChatLayout, MessageList, MessageInput, Avatar, NewChatModal, useConnectChat } from '@shizuha/chat'
+import { ConnectChatProvider, MessageList, MessageInput, Avatar, NewChatModal, useConnectChat } from '@shizuha/chat'
 import { SHIZUHA_APPS, useEnabledServices } from '@shizuha/ui'
 import CommandCenterDashboard from '../components/dashboard/CommandCenterDashboard'
 import LiveTheater from '../components/dashboard/LiveTheater'
@@ -10,9 +10,13 @@ import OrgProgressCharts from '../components/dashboard/OrgProgressCharts'
 import CommandPalette from '../components/assistant/CommandPalette'
 import MiniShizuhaChat from '../components/assistant/MiniShizuhaChat'
 import HomeAgentPicker from '../components/assistant/HomeAgentPicker'
+import ConversationSidebar from '../components/assistant/ConversationSidebar'
+import LiveVoiceOverlay from '../components/assistant/LiveVoiceOverlay'
+import LiveWaveformIcon from '../components/assistant/LiveWaveformIcon'
 import {
   agentConversations,
   findAgentConversation,
+  mergeAgentSearchHits,
   readHomeAgentPref,
   suggestedHomeAgentUsername,
   writeHomeAgentPref,
@@ -21,7 +25,6 @@ import { useVoiceInput, useVoiceConversation, speakText } from '../hooks/useVoic
 import { useHomeSummary } from '../hooks/useHomeSummary'
 import { useHomeActivity } from '../hooks/useHomeActivity'
 import { getAccessToken, handleUnauthorized } from '../utils/auth'
-import { sanitizeMessagePreview } from '../utils/messagePreview'
 
 function getAuthToken() {
   return getAccessToken()
@@ -107,6 +110,7 @@ function ChatHomeInner() {
   // (messages stream in) but we render a rolling strip instead of navigating.
   const [miniConvId, setMiniConvId] = useState(null)
   const [homeAgent, setHomeAgent] = useState(() => readHomeAgentPref())
+  const [sendError, setSendError] = useState('')
   const [speakReplies, setSpeakReplies] = useState(() => localStorage.getItem('shizuha_speak_replies') === '1')
   const lastSpokenIdRef = useRef(null)
   const [showApps, setShowApps] = useState(false)
@@ -128,9 +132,14 @@ function ChatHomeInner() {
     agentsWidget.status === 'ok' || agentsWidget.status === 'stale'
       ? (agentsWidget.data || []).filter((a) => a.status === 'running')
       : []
-  const allAgents =
-    agentsWidget.status === 'ok' || agentsWidget.status === 'stale'
-      ? agentsWidget.data || [] : []
+  const allAgents = useMemo(
+    () => (
+      agentsWidget.status === 'ok' || agentsWidget.status === 'stale'
+        ? agentsWidget.data || []
+        : []
+    ),
+    [agentsWidget.status, agentsWidget.data],
+  )
   // HIVE-602 cockpit peeks: drill into agents/orgs/tasks without leaving home.
   const [peekStack, setPeekStack] = useState([])
   const pushPeek = (p) => setPeekStack((st) => [...st.slice(-4), p])
@@ -221,47 +230,69 @@ function ChatHomeInner() {
     const token = getAuthToken()
     const headers = { Authorization: `Bearer ${token}` }
     const ql = q.toLowerCase()
-    try {
-      const idRes = await fetch('/id/api/auth/users/all/', { headers })
-      if (idRes.ok) {
-        const data = await idRes.json()
-        return (data.users ?? [])
-          .filter((u) => u.id !== user?.id)
-          .map((u) => ({
-            userId: u.id,
+    const localAgents = (allAgents || [])
+      .filter((a) => {
+        const blob = `${a.name || ''} ${a.username || ''} ${a.email || ''} ${(a.role || '')}`.toLowerCase()
+        return blob.includes(ql)
+      })
+      .map((a) => ({
+        userId: a.user_id || a.identity_user_id || null,
+        username: a.username,
+        displayName: a.name || a.username,
+        email: a.email || (a.username ? `${a.username}@shizuha.com` : ''),
+      }))
+    const fetches = [
+      fetch(`/api/home/talk-agents?q=${encodeURIComponent(q)}`, { headers })
+        .then(async (res) => {
+          if (!res.ok) return []
+          const data = await res.json()
+          return data.results ?? data.agents ?? []
+        })
+        .catch(() => []),
+      fetch('/id/api/auth/users/all/', { headers })
+        .then(async (idRes) => {
+          if (!idRes.ok) return []
+          const data = await idRes.json()
+          return (data.users ?? [])
+            .filter((u) => u.id !== user?.id)
+            .map((u) => ({
+              userId: u.id,
+              username: u.username,
+              displayName: u.first_name || u.username,
+              email: u.email,
+            }))
+            .filter((u) => {
+              const blob = `${u.displayName} ${u.username} ${u.email || ''}`.toLowerCase()
+              return blob.includes(ql)
+            })
+        })
+        .catch(() => []),
+      fetch(`/connect/api/search/people/?q=${encodeURIComponent(q)}`, { headers })
+        .then(async (res) => {
+          if (!res.ok) return []
+          const data = await res.json()
+          return (data.results ?? data ?? []).map((u) => ({
+            userId: u.id || u.user_id,
             username: u.username,
-            displayName: u.first_name || u.username,
+            displayName: u.first_name || u.display_name || u.username,
             email: u.email,
           }))
-          .filter((u) => {
-            const blob = `${u.displayName} ${u.username} ${u.email || ''}`.toLowerCase()
-            return blob.includes(ql)
-          })
-          .slice(0, 12)
-      }
-    } catch { /* not staff */ }
-    try {
-      const res = await fetch(`/connect/api/search/people/?q=${encodeURIComponent(q)}`, { headers })
-      if (!res.ok) return []
-      const data = await res.json()
-      return (data.results ?? data ?? []).slice(0, 12).map((u) => ({
-        userId: u.id || u.user_id,
-        username: u.username,
-        displayName: u.first_name || u.display_name || u.username,
-        email: u.email,
-      }))
-    } catch {
-      return []
-    }
-  }, [user?.id])
+        })
+        .catch(() => []),
+    ]
+    const [hiveHits, idHits, connectHits] = await Promise.all(fetches)
+    return mergeAgentSearchHits(localAgents, hiveHits, idHits, connectHits).slice(0, 16)
+  }, [allAgents, user?.id])
 
   const sendToShizuha = useCallback(async (message) => {
     if (!message.trim() || isSending) return
     const targetUsername = homeAgent || suggestedHomeAgentUsername(user)
     if (!targetUsername) {
+      setSendError('Choose an agent above, then ask.')
       return
     }
     setIsSending(true)
+    setSendError('')
     try {
       // Mini chat already live on the chosen agent: just send.
       if (miniConvId && activeConversationId === miniConvId) {
@@ -273,11 +304,13 @@ function ChatHomeInner() {
       }
       let dest = findAgentConversation(conversations, targetUsername)
       if (!dest) {
-        const token = getAuthToken()
         const matches = await searchHomeAgents(targetUsername)
         const hit = matches.find((m) => String(m.username).toLowerCase() === targetUsername.toLowerCase())
         if (hit?.userId) {
           dest = await createDirectConversation(hit.userId, { name: hit.displayName, email: hit.email })
+        } else if (hit) {
+          setSendError(`${hit.displayName || targetUsername} is not on Shizuha ID yet, so a chat cannot start.`)
+          return
         }
       }
       if (dest) {
@@ -287,6 +320,8 @@ function ChatHomeInner() {
         }))
         setMiniConvId(dest.id)
         setActiveConversation(dest.id)
+      } else {
+        setSendError(`Couldn't find ${targetUsername} in chat or the fleet.`)
       }
     } finally {
       setIsSending(false)
@@ -309,9 +344,14 @@ function ChatHomeInner() {
   // speak the reply → listen again. onUtterance fires when the caller finishes
   // an utterance; we send it to Shizuha and the reply is spoken by the effect
   // below once it streams in.
-  const { callState, callError, startCall, endCall, retryCall, notifyReply, isCallActive } = useVoiceConversation({
+  const { callState, callError, muted, lastHeard, startCall, endCall, retryCall, toggleMute, notifyReply, isCallActive } = useVoiceConversation({
     onUtterance: (text) => { sendToShizuha(text) },
   })
+  const lastAgentReply = useMemo(() => {
+    const list = Array.isArray(messages) ? messages : []
+    const last = [...list].reverse().find((m) => m.sender_id !== user?.id)
+    return last?.content || ''
+  }, [messages, user?.id])
   // Active = mid-call only. 'error' is a terminal surface with guidance/retry, not "on call".
   const callActive = callState !== 'idle' && callState !== 'error'
   const callFailed = callState === 'error'
@@ -407,6 +447,26 @@ function ChatHomeInner() {
     }
   }, [createDirectConversation, setActiveConversation, navigate])
 
+  const startAgentFromSearch = useCallback(async (row) => {
+    if (!row) return
+    writeHomeAgentPref(row.username)
+    setHomeAgent(row.username)
+    if (row.conversationId) {
+      setMiniConvId(row.conversationId)
+      setActiveConversation(row.conversationId)
+      return
+    }
+    if (!row.userId) {
+      setSendError(`${row.displayName || row.username} is not on Shizuha ID yet, so a chat cannot start.`)
+      return
+    }
+    const dest = await createDirectConversation(row.userId, { name: row.displayName, email: row.email })
+    if (dest) {
+      setMiniConvId(dest.id)
+      setActiveConversation(dest.id)
+    }
+  }, [createDirectConversation, setActiveConversation])
+
   const handleNavigateConversation = useCallback((id) => {
     if (id) navigate(`/c/${id}`, { replace: true })
     else navigate('/', { replace: true })
@@ -434,100 +494,21 @@ function ChatHomeInner() {
     return (
       <>
       <div className="flex h-full">
-        {/* Same branded sidebar */}
-        <div className="hidden md:flex md:w-72 lg:w-80 flex-shrink-0 flex-col bg-gray-50/80 dark:bg-gray-900/50 border-r border-gray-200/60 dark:border-gray-800/60">
-          <div className="flex items-center justify-between px-4 py-3">
-            <span className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Conversations</span>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => setShowNewChat(true)}
-                className="relative p-1.5 rounded-lg text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950/30 transition-colors"
-                title="New chat"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-                {pendingRequestCount > 0 && (
-                  <span className="absolute -top-0.5 -right-0.5 min-w-[0.875rem] h-3.5 px-1 flex items-center justify-center rounded-full bg-red-500 text-white text-[9px] font-bold">
-                    {pendingRequestCount}
-                  </span>
-                )}
-              </button>
-              <button
-                onClick={() => { navigate('/'); setActiveConversation(null) }}
-                className="p-1.5 rounded-lg text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950/30 transition-colors"
-                title="Home"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
-                </svg>
-              </button>
-            </div>
-          </div>
-          <div className="flex-1 overflow-y-auto px-2">
-            {conversations.map((conv) => {
-              const other = conv.participants?.find(p => p.user_id !== user?.id)
-              const name = conv.conversation_type === 'group'
-                ? conv.name || 'Group'
-                : other?.user_name || conv.participant_names?.[0] || 'Chat'
-              const hasUnread = conv.unread_count > 0
-              const isActive = conv.id === activeConversationId
-              return (
-                <button
-                  key={conv.id}
-                  onClick={() => {
-                    setActiveConversation(conv.id)
-                    navigate(`/c/${conv.id}`, { replace: true })
-                  }}
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 mb-0.5 rounded-lg text-left transition-all ${
-                    isActive
-                      ? 'bg-brand-50 dark:bg-brand-950/30'
-                      : 'hover:bg-white dark:hover:bg-gray-800'
-                  }`}
-                >
-                  <Avatar
-                    name={name}
-                    size="sm"
-                    isOnline={other ? onlineUsers.has(other.user_id) : false}
-                    showStatus={conv.conversation_type === 'direct'}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between">
-                      <p className={`text-sm truncate ${
-                        isActive ? 'font-semibold text-brand-700 dark:text-brand-300'
-                        : hasUnread ? 'font-semibold text-gray-900 dark:text-gray-100'
-                        : 'text-gray-600 dark:text-gray-400'
-                      }`}>
-                        {name}
-                      </p>
-                      {hasUnread && !isActive && (
-                        <span className="flex-shrink-0 ml-1 min-w-[1.25rem] h-5 px-1.5 flex items-center justify-center rounded-full bg-brand-600 text-white text-[10px] font-bold">
-                          {conv.unread_count > 99 ? '99+' : conv.unread_count}
-                        </span>
-                      )}
-                    </div>
-                    {(() => {
-                      const preview = sanitizeMessagePreview(conv.last_message_preview || '')
-                      return (
-                        <p
-                          className="text-xs text-gray-400 dark:text-gray-500 truncate"
-                          data-testid="conversation-preview"
-                        >
-                          {preview.chip && (
-                            <span className="mr-1 inline-block rounded bg-gray-100 dark:bg-gray-800 px-1 py-px text-[10px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                              {preview.chip}
-                            </span>
-                          )}
-                          {preview.text || ''}
-                        </p>
-                      )
-                    })()}
-                  </div>
-                </button>
-              )
-            })}
-          </div>
-        </div>
+        <ConversationSidebar
+          conversations={conversations}
+          activeConversationId={activeConversationId}
+          currentUserId={user?.id}
+          onlineUsers={onlineUsers}
+          pendingRequestCount={pendingRequestCount}
+          onSelectConversation={(id) => {
+            setActiveConversation(id)
+            navigate(`/c/${id}`, { replace: true })
+          }}
+          onNewChat={() => setShowNewChat(true)}
+          onHome={() => { navigate('/'); setActiveConversation(null) }}
+          onSearchAgents={searchHomeAgents}
+          onStartAgent={startAgentFromSearch}
+        />
 
         {/* Chat area with branded background */}
         <div className="flex-1 flex flex-col min-w-0 bg-white dark:bg-gray-950">
@@ -577,92 +558,41 @@ function ChatHomeInner() {
         apiBase="/connect/api"
         getAuthToken={getAuthToken}
         currentUserId={user?.id}
+        extraSearch={searchHomeAgents}
       />
+      {(callActive || callFailed) && (
+        <LiveVoiceOverlay
+          agentLabel={activeName}
+          callState={callState}
+          muted={muted}
+          lastHeard={lastHeard}
+          lastReply={lastAgentReply}
+          error={callError?.message || sendError || null}
+          onToggleMute={toggleMute}
+          onEnd={endCall}
+          onRetry={callError?.canRetry ? retryCall : undefined}
+        />
+      )}
       </>
     )
   }
 
   return (
     <div className="flex h-full">
-      {/* Sidebar */}
-      <div className="hidden md:flex md:w-72 lg:w-80 flex-shrink-0 flex-col bg-gray-50/80 dark:bg-gray-900/50 border-r border-gray-200/60 dark:border-gray-800/60">
-        <div className="flex items-center justify-between px-4 py-3">
-          <span className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Conversations</span>
-          <button
-            onClick={() => setShowNewChat(true)}
-            className="relative p-1.5 rounded-lg text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950/30 transition-colors"
-            title="New chat / Connect requests"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-            {pendingRequestCount > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 min-w-[0.875rem] h-3.5 px-1 flex items-center justify-center rounded-full bg-red-500 text-white text-[9px] font-bold">
-                {pendingRequestCount}
-              </span>
-            )}
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto px-2">
-          {conversations.slice(0, 12).map((conv) => {
-            const other = conv.participants?.find(p => p.user_id !== user?.id)
-            const name = conv.conversation_type === 'group'
-              ? conv.name || 'Group'
-              : other?.user_name || conv.participant_names?.[0] || 'Chat'
-            const hasUnread = conv.unread_count > 0
-            return (
-              <button
-                key={conv.id}
-                onClick={() => {
-                  setActiveConversation(conv.id)
-                  navigate(`/c/${conv.id}`)
-                }}
-                className="w-full flex items-center gap-3 px-3 py-2.5 mb-0.5 rounded-lg text-left hover:bg-white dark:hover:bg-gray-800 transition-all"
-              >
-                <Avatar
-                  name={name}
-                  size="sm"
-                  isOnline={other ? onlineUsers.has(other.user_id) : false}
-                  showStatus={conv.conversation_type === 'direct'}
-                />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between">
-                    <p className={`text-sm truncate ${hasUnread ? 'font-semibold text-gray-900 dark:text-gray-100' : 'text-gray-600 dark:text-gray-400'}`}>
-                      {name}
-                    </p>
-                    {hasUnread && (
-                      <span className="flex-shrink-0 ml-1 min-w-[1.25rem] h-5 px-1.5 flex items-center justify-center rounded-full bg-brand-600 text-white text-[10px] font-bold">
-                        {conv.unread_count > 99 ? '99+' : conv.unread_count}
-                      </span>
-                    )}
-                  </div>
-                  {(() => {
-                    const preview = sanitizeMessagePreview(conv.last_message_preview || '')
-                    return (
-                      <p
-                        className="text-xs text-gray-400 dark:text-gray-500 truncate"
-                        data-testid="conversation-preview"
-                      >
-                        {preview.chip && (
-                          <span className="mr-1 inline-block rounded bg-gray-100 dark:bg-gray-800 px-1 py-px text-[10px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                            {preview.chip}
-                          </span>
-                        )}
-                        {preview.text || ''}
-                      </p>
-                    )
-                  })()}
-                </div>
-              </button>
-            )
-          })}
-          {conversations.length > 12 && (
-            <button onClick={() => navigate('/c')} className="w-full py-2 text-xs text-brand-600 dark:text-brand-400 hover:text-brand-700 font-medium">
-              View all {conversations.length} conversations
-            </button>
-          )}
-        </div>
-      </div>
+      <ConversationSidebar
+        conversations={conversations}
+        activeConversationId={activeConversationId}
+        currentUserId={user?.id}
+        onlineUsers={onlineUsers}
+        pendingRequestCount={pendingRequestCount}
+        onSelectConversation={(id) => {
+          setActiveConversation(id)
+          navigate(`/c/${id}`)
+        }}
+        onNewChat={() => setShowNewChat(true)}
+        onSearchAgents={searchHomeAgents}
+        onStartAgent={startAgentFromSearch}
+      />
 
       {/* Main — same visual language as Hero. Scrolls: the live theater below
           grows with the org's activity (HIVE-602). */}
@@ -768,35 +698,27 @@ function ChatHomeInner() {
                   onClick={toggleCall}
                   title={
                     callActive
-                      ? 'End voice call'
+                      ? 'End Live'
                       : callFailed
-                        ? (callError?.canRetry ? 'Retry voice call' : (callError?.message || 'Voice unavailable'))
-                        : 'Start a hands-free voice call with Shizuha'
+                        ? (callError?.canRetry ? 'Retry Live' : (callError?.message || 'Voice unavailable'))
+                        : `Start Live with ${selectedPicker?.displayName || effectiveHomeAgent || 'agent'}`
                   }
                   aria-label={
                     callActive
-                      ? 'End voice call'
+                      ? 'End Live'
                       : callFailed
-                        ? (callError?.canRetry ? 'Retry voice call' : 'Dismiss voice error')
-                        : 'Start a hands-free voice call with Shizuha'
+                        ? (callError?.canRetry ? 'Retry Live' : 'Dismiss voice error')
+                        : 'Start Live voice'
                   }
                   className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors shadow-sm ${
                     callActive
-                      ? 'bg-emerald-500 text-white animate-pulse'
+                      ? 'bg-neutral-900 text-white dark:bg-white dark:text-neutral-900'
                       : callFailed
                         ? 'bg-amber-500 text-white'
-                        : 'bg-gray-100 text-gray-500 hover:bg-emerald-50 hover:text-emerald-600 dark:bg-gray-800 dark:text-gray-400 dark:hover:text-emerald-400'
+                        : 'bg-gray-100 text-gray-500 hover:bg-brand-50 hover:text-brand-600 dark:bg-gray-800 dark:text-gray-400 dark:hover:text-brand-400'
                   }`}
                 >
-                  {callActive ? (
-                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M6.62 10.79a15.05 15.05 0 006.59 6.59l2.2-2.2a1 1 0 011.02-.24 11.36 11.36 0 003.56.57 1 1 0 011 1V20a1 1 0 01-1 1A17 17 0 013 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.24.2 2.45.57 3.56a1 1 0 01-.24 1.02l-2.21 2.21z" transform="rotate(135 12 12)" />
-                    </svg>
-                  ) : (
-                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M6.62 10.79a15.05 15.05 0 006.59 6.59l2.2-2.2a1 1 0 011.02-.24 11.36 11.36 0 003.56.57 1 1 0 011 1V20a1 1 0 01-1 1A17 17 0 013 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.24.2 2.45.57 3.56a1 1 0 01-.24 1.02l-2.21 2.21z" />
-                    </svg>
-                  )}
+                  <LiveWaveformIcon className="w-4 h-4" active={callActive} />
                 </button>
                 <button
                   onClick={handleSubmit}
@@ -809,6 +731,11 @@ function ChatHomeInner() {
                 </button>
               </div>
             </div>
+            {sendError && (
+              <p className="mt-2 text-center text-xs text-amber-700 dark:text-amber-300" data-testid="home-send-error">
+                {sendError}
+              </p>
+            )}
 
             {/* Inline mini chat (operator 2026-07-11): rolling 2-3 line strip —
                 talk with Shizuha without leaving the home page. */}
@@ -899,7 +826,22 @@ function ChatHomeInner() {
         apiBase="/connect/api"
         getAuthToken={getAuthToken}
         currentUserId={user?.id}
+        extraSearch={searchHomeAgents}
       />
+
+      {(callActive || callFailed) && (
+        <LiveVoiceOverlay
+          agentLabel={selectedPicker?.displayName || effectiveHomeAgent || 'Agent'}
+          callState={callState}
+          muted={muted}
+          lastHeard={lastHeard}
+          lastReply={lastAgentReply}
+          error={callError?.message || sendError || null}
+          onToggleMute={toggleMute}
+          onEnd={endCall}
+          onRetry={callError?.canRetry ? retryCall : undefined}
+        />
+      )}
 
       {/* Apps drawer */}
       <AppsDrawer isOpen={showApps} onClose={() => setShowApps(false)} />

@@ -16,6 +16,7 @@ import {
   VOICE_STREAM_MAX_RETRIES,
 } from '../hooks/useVoice'
 import MiniShizuhaChat from '../components/assistant/MiniShizuhaChat'
+import LiveVoiceOverlay from '../components/assistant/LiveVoiceOverlay'
 
 vi.mock('../utils/auth', () => ({
   getAccessToken: vi.fn(() => 'test-token'),
@@ -325,5 +326,22 @@ describe('MiniShizuhaChat — voice failure surface', () => {
     expect(screen.getByTestId('voice-call-error')).toHaveTextContent(/temporarily unavailable/i)
     screen.getByRole('button', { name: /retry/i }).click()
     expect(onRetry).toHaveBeenCalledOnce()
+  })
+
+  it('renders the ChatGPT Live overlay with Live label and waveform control', () => {
+    render(
+      <LiveVoiceOverlay
+        agentLabel="Hina"
+        callState="listening"
+        muted={false}
+        lastHeard="hello"
+        onToggleMute={() => {}}
+        onEnd={() => {}}
+      />,
+    )
+    expect(screen.getByTestId('live-voice-overlay')).toBeInTheDocument()
+    expect(screen.getByText('Live')).toBeInTheDocument()
+    expect(screen.getByLabelText('End Live')).toBeInTheDocument()
+    expect(screen.getByText(/Live with Hina/i)).toBeInTheDocument()
   })
 })

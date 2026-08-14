@@ -54,6 +54,42 @@ export function findAgentConversation(conversations, username) {
   ) || null
 }
 
+export function conversationMatchesQuery(conversation, query, currentUserId) {
+  const q = String(query || '').trim().toLowerCase()
+  if (!q || !conversation) return true
+  const other = (conversation.participants || []).find((p) => p.user_id !== currentUserId)
+  const blob = [
+    conversation.name,
+    conversation.last_message_preview,
+    ...(conversation.participant_names || []),
+    other?.user_name,
+    other?.username,
+    other?.name,
+    other?.email,
+  ].map((v) => String(v || '').toLowerCase()).join(' ')
+  return blob.includes(q)
+}
+
+export function mergeAgentSearchHits(...lists) {
+  const seen = new Set()
+  const out = []
+  for (const list of lists) {
+    for (const row of list || []) {
+      const username = String(row?.username || '').trim()
+      const userId = row?.userId || row?.user_id || row?.id
+      if (!username || seen.has(username.toLowerCase())) continue
+      seen.add(username.toLowerCase())
+      out.push({
+        userId: userId || null,
+        username,
+        displayName: row.displayName || row.display_name || row.first_name || username,
+        email: row.email || `${username}@shizuha.com`,
+      })
+    }
+  }
+  return out
+}
+
 export function agentConversations(conversations, currentUserId) {
   if (!Array.isArray(conversations)) return []
   const seen = new Set()

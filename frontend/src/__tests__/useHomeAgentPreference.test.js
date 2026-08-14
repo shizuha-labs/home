@@ -1,7 +1,9 @@
 import { describe, expect, it, beforeEach } from 'vitest'
 import {
   agentConversations,
+  conversationMatchesQuery,
   findAgentConversation,
+  mergeAgentSearchHits,
   participantMatchesAgent,
   readHomeAgentPref,
   suggestedHomeAgentUsername,
@@ -55,5 +57,25 @@ describe('home agent preference', () => {
       },
     ], 1)
     expect(listed.map((a) => a.username)).toEqual(['cora'])
+  })
+
+  it('matches a conversation search against username or display name', () => {
+    const conv = {
+      id: 'c1',
+      conversation_type: 'direct',
+      participant_names: ['Hina'],
+      participants: [{ user_id: 2, user_name: 'Hina', username: 'hina' }],
+    }
+    expect(conversationMatchesQuery(conv, 'hina', 1)).toBe(true)
+    expect(conversationMatchesQuery(conv, 'cora', 1)).toBe(false)
+  })
+
+  it('merges hive/id/connect hits without dropping hina', () => {
+    const merged = mergeAgentSearchHits(
+      [{ username: 'hina', displayName: 'Hina', userId: 42 }],
+      [{ username: 'hina', displayName: 'Hina duplicate' }, { username: 'cora', userId: 9 }],
+    )
+    expect(merged.map((row) => row.username)).toEqual(['hina', 'cora'])
+    expect(merged[0].userId).toBe(42)
   })
 })
