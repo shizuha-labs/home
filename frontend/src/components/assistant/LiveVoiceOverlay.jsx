@@ -47,12 +47,12 @@ export default function LiveVoiceOverlay({
         role="region"
         aria-label="Live voice"
         aria-live="polite"
-        className="pointer-events-auto flex w-full max-w-[min(100%,28rem)] items-center gap-3 rounded-2xl border border-white/10 bg-neutral-950/82 px-3 py-2 text-white shadow-[0_18px_50px_rgba(0,0,0,0.35)] backdrop-blur-xl"
+        className="pointer-events-auto flex w-full max-w-[24rem] items-center gap-3 rounded-2xl border border-white/10 bg-gray-950 px-3 py-2 text-white shadow-[0_18px_50px_rgba(0,0,0,0.35)]"
       >
         <div className={`relative shrink-0 transition-transform duration-500 ${orbScale}`}>
           <div className={`absolute -inset-2 rounded-full bg-gradient-to-br ${orbTone} opacity-50 blur-md`} />
           <div className={`relative h-11 w-11 rounded-full bg-gradient-to-br ${orbTone} shadow-[0_0_24px_rgba(129,140,248,0.45)]`}>
-            <div className="absolute inset-[18%] rounded-full bg-neutral-950/70 backdrop-blur-sm" />
+            <div className="absolute inset-[18%] rounded-full bg-gray-950/70 backdrop-blur-sm" />
           </div>
         </div>
 

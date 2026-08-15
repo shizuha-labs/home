@@ -437,6 +437,7 @@ describe('MiniShizuhaChat — voice failure surface', () => {
     expect(hud).toHaveAttribute('data-mode', 'hud')
     expect(hud).toHaveClass('pointer-events-none')
     expect(hud.className).not.toMatch(/\binset-0\b/)
+    expect(screen.getByRole('region', { name: /live voice/i })).toHaveClass('bg-gray-950')
     expect(screen.getByRole('region', { name: /live voice/i })).toBeInTheDocument()
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(screen.getByText('Live')).toBeInTheDocument()
