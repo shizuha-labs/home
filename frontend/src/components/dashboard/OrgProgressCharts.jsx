@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { Activity, AlertTriangle, CheckCircle2, TrendingUp, Timer, RefreshCw } from 'lucide-react'
 import { useOrgProgress } from '../../hooks/useOrgProgress'
+import { isSlowestStageRow } from './orgProgressStages'
 
 /**
  * Org-progress dashboard: is the org making progress, and is anything badly
@@ -24,7 +25,7 @@ const RANGES = [
 
 // Status-slug → semantic group (drives the donut + colouring).
 const DONE = new Set(['completed', 'done', 'resolved', 'closed', 'merged', 'applied'])
-const DROPPED = new Set(['cancelled', 'canceled', 'rejected', 'duplicate', 'wont_fix', 'failed', 'expired', 'deferred'])
+const DROPPED = new Set(['cancelled', 'canceled', 'rejected', 'duplicate', 'wont_fix', 'failed', 'expired', 'deferred', 'change_rejected'])
 const WAITING = new Set(['blocked', 'scheduled'])
 const ACTIVE = new Set(['in_progress', 'in_review', 'implementing', 'review', 'verification', 'awaiting_merge', 'accepted', 'rfc_design', 'rfc_implementation', 'under_review', 'documenting'])
 
@@ -197,13 +198,7 @@ export default function OrgProgressCharts({ orgs, orgId, onOrgChange, range, onR
     // work, blocked waiting on upstream, backlog) intentionally sit for days/weeks
     // and must not dominate the chart as if the org is stuck in-progress.
     const rows = (data?.open_dwell || data?.throughput || [])
-      .filter((r) => {
-        const s = String(r.status || '').toLowerCase()
-        if (DONE.has(s) || DROPPED.has(s) || WAITING.has(s)) return false
-        if (r.is_parking) return false
-        if (s === 'backlog' || s === 'waiting_external') return false
-        return (r.avg_dwell_seconds || 0) > 0
-      })
+      .filter(isSlowestStageRow)
       .sort((a, b) => (b.avg_dwell_seconds || 0) - (a.avg_dwell_seconds || 0))
       .slice(0, 5)
     const max = Math.max(1, ...rows.map((r) => r.avg_dwell_seconds || 0))
