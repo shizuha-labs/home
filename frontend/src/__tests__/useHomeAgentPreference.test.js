@@ -6,6 +6,7 @@ import {
   mergeAgentSearchHits,
   participantMatchesAgent,
   readHomeAgentPref,
+  resolveHomeAgentUsername,
   suggestedHomeAgentUsername,
   writeHomeAgentPref,
 } from '../hooks/useHomeAgentPreference'
@@ -19,8 +20,15 @@ describe('home agent preference', () => {
     expect(suggestedHomeAgentUsername({ email: 'someone@example.com' })).toBe('')
   })
 
-  it('suggests hina for the CEO mailbox', () => {
-    expect(suggestedHomeAgentUsername({ email: 'hothritik1@gmail.com' })).toBe('hina')
+  it('suggests ena for the CEO mailbox', () => {
+    expect(suggestedHomeAgentUsername({ email: 'hothritik1@gmail.com' })).toBe('ena')
+    expect(suggestedHomeAgentUsername({ email: 'hritik@shizuha.com' })).toBe('ena')
+  })
+
+  it('does not keep a retired Hina/Aya pick as the live default', () => {
+    expect(resolveHomeAgentUsername('hina', { email: 'hothritik1@gmail.com' })).toBe('ena')
+    expect(resolveHomeAgentUsername('aya', { email: 'hritik@shizuha.com' })).toBe('ena')
+    expect(resolveHomeAgentUsername('yuna', { email: 'hothritik1@gmail.com' })).toBe('yuna')
   })
 
   it('round-trips localStorage', () => {

@@ -18,7 +18,8 @@ import {
   findAgentConversation,
   mergeAgentSearchHits,
   readHomeAgentPref,
-  suggestedHomeAgentUsername,
+  resolveHomeAgentUsername,
+  RETIRED_HOME_AGENTS,
   writeHomeAgentPref,
 } from '../hooks/useHomeAgentPreference'
 import { useVoiceInput, useVoiceConversation, speakText, speakDelta, nextSpokenSentences, spokenCovers, waitSpeakIdle } from '../hooks/useVoice'
@@ -214,7 +215,15 @@ function ChatHomeInner() {
     () => agentConversations(conversations, user?.id),
     [conversations, user?.id],
   )
-  const effectiveHomeAgent = homeAgent || suggestedHomeAgentUsername(user)
+  const effectiveHomeAgent = resolveHomeAgentUsername(homeAgent, user)
+  useEffect(() => {
+    const raw = String(homeAgent || '').trim().toLowerCase()
+    if (raw && RETIRED_HOME_AGENTS.has(raw)) {
+      const next = resolveHomeAgentUsername('', user)
+      writeHomeAgentPref(next)
+      setHomeAgent(next)
+    }
+  }, [homeAgent, user])
   const selectedPicker = pickerOptions.find(
     (row) => String(row.username).toLowerCase() === String(effectiveHomeAgent).toLowerCase(),
   )
@@ -288,7 +297,7 @@ function ChatHomeInner() {
 
   const sendToShizuha = useCallback(async (message) => {
     if (!message.trim() || isSending) return
-    const targetUsername = homeAgent || suggestedHomeAgentUsername(user)
+    const targetUsername = resolveHomeAgentUsername(homeAgent, user)
     if (!targetUsername) {
       setSendError('Choose an agent above, then ask.')
       return

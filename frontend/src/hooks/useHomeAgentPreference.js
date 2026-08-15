@@ -26,11 +26,21 @@ export function writeHomeAgentPref(username) {
   return value
 }
 
-/** CEO default once Hina exists. Everyone else starts unset (picker), not Admin Ops. */
+/** Grok-build seats we stopped for realtime; never auto-select them. */
+export const RETIRED_HOME_AGENTS = new Set(['hina', 'aya'])
+
+/** CEO default is the Grok/SCLI talk seat (Ena). Everyone else starts unset. */
 export function suggestedHomeAgentUsername(user) {
   const email = String(user?.email || '').toLowerCase()
-  if (email === 'hothritik1@gmail.com' || email === 'hritik@shizuha.com') return 'hina'
+  if (email === 'hothritik1@gmail.com' || email === 'hritik@shizuha.com') return 'ena'
   return ''
+}
+
+/** Prefer stored pick, but never land Live on a retired/stopped seat. */
+export function resolveHomeAgentUsername(preferred, user) {
+  const raw = String(preferred || '').trim().toLowerCase()
+  if (raw && !RETIRED_HOME_AGENTS.has(raw)) return raw
+  return suggestedHomeAgentUsername(user) || 'ena'
 }
 
 export function participantMatchesAgent(participant, username) {
