@@ -21,7 +21,7 @@ import {
   suggestedHomeAgentUsername,
   writeHomeAgentPref,
 } from '../hooks/useHomeAgentPreference'
-import { useVoiceInput, useVoiceConversation, speakText, speakDelta, nextSpokenSentences } from '../hooks/useVoice'
+import { useVoiceInput, useVoiceConversation, speakText, speakDelta, nextSpokenSentences, spokenCovers, waitSpeakIdle } from '../hooks/useVoice'
 import { useHomeSummary } from '../hooks/useHomeSummary'
 import { useHomeActivity } from '../hooks/useHomeActivity'
 import { getAccessToken, handleUnauthorized } from '../utils/auth'
@@ -296,10 +296,11 @@ function ChatHomeInner() {
     setIsSending(true)
     setSendError('')
     try {
-      // Mini chat already live on the chosen agent: just send.
-      if (miniConvId && activeConversationId === miniConvId) {
+      // Already on this thread (/c/:id or mini-chat): send now. The pending-
+      // message hop is only for opening a new conversation from home.
+      if (activeConversationId) {
         const live = findAgentConversation(conversations, targetUsername)
-        if (live && live.id === miniConvId) {
+        if (!live || live.id === activeConversationId) {
           sendMessage(message)
           return
         }
@@ -346,8 +347,11 @@ function ChatHomeInner() {
   // speak the reply → listen again. onUtterance fires when the caller finishes
   // an utterance; we send it to Shizuha and the reply is spoken by the effect
   // below once it streams in.
-  const { callState, callError, muted, lastHeard, startCall, endCall, retryCall, toggleMute, notifyReply, isCallActive } = useVoiceConversation({
-    onUtterance: (text) => { sendToShizuha(text) },
+  const { callState, callError, muted, lastHeard, startCall, endCall, retryCall, toggleMute, notifyReply, resumeListen, isCallActive } = useVoiceConversation({
+    onUtterance: (text) => {
+      if (activeConversationId) sendMessage(text)
+      else sendToShizuha(text)
+    },
   })
   // Streaming STT types into the compose box as the caller speaks.
   useEffect(() => {
@@ -374,14 +378,18 @@ function ChatHomeInner() {
   }, [isCallActive, startCall, endCall, retryCall, callState, callError])
 
   // Speak tokens as they stream in (Grok TTS websocket). Fallback: full
-  // message once persisted, same as Hina/Aya unary path.
+  // message once persisted. Persist must NOT reset the spoken prefix or the
+  // same reply is synthesized twice (double voice) and each notifyReply
+  // used to open another mic (duplicate user turns).
   const spokenStreamRef = useRef('')
   const lastLiveStreamRef = useRef('')
+  const voiceConvId = miniConvId || ((callActive || speakReplies) ? activeConversationId : null)
   useEffect(() => {
-    if (!miniConvId || activeConversationId !== miniConvId) return
+    if (!voiceConvId || activeConversationId !== voiceConvId) return
     if (!speakReplies && !callActive) return
-    const live = streamingByConv?.[miniConvId] || ''
+    const live = streamingByConv?.[voiceConvId] || ''
     const prev = lastLiveStreamRef.current
+    if (live && !prev) spokenStreamRef.current = ''
     const ended = !live && !!prev
     const source = live || (ended ? prev : '')
     if (!source) return
@@ -394,30 +402,30 @@ function ChatHomeInner() {
     if (!sentences.length) return
     spokenStreamRef.current = spoken
     for (const sentence of sentences) {
-      if (callActive) notifyReply(sentence)
-      else void speakDelta(sentence)
+      void speakDelta(sentence)
     }
-  }, [streamingByConv, speakReplies, callActive, notifyReply, miniConvId, activeConversationId])
+  }, [streamingByConv, speakReplies, callActive, voiceConvId, activeConversationId])
 
-  // Speak Shizuha's newest message. During a live call this drives the loop
-  // (speak → re-listen via notifyReply); otherwise it honors the speak toggle.
+  // Persist is the end of the turn. Speak only leftover text. Re-listen once.
   useEffect(() => {
-    if (!miniConvId || activeConversationId !== miniConvId) return
+    if (!voiceConvId || activeConversationId !== voiceConvId) return
     const list = Array.isArray(messages) ? messages : []
     const last = list[list.length - 1]
     if (!last || last.sender_id === user?.id) return
     const key = last.id || last.client_message_id
     if (!key || lastSpokenIdRef.current === key) return
-    const alreadyStreamed = spokenStreamRef.current && last.content && last.content.startsWith(spokenStreamRef.current.trim())
     lastSpokenIdRef.current = key
-    spokenStreamRef.current = ''
-    if (alreadyStreamed) return
-    if (callActive) {
-      notifyReply(last.content)
-    } else if (speakReplies) {
-      speakText(last.content)
+    const leftover = spokenCovers(last.content, spokenStreamRef.current)
+      ? ''
+      : String(last.content || '').trim()
+    lastLiveStreamRef.current = ''
+    if (!leftover) {
+      if (callActive) void waitSpeakIdle().then(() => resumeListen())
+      return
     }
-  }, [messages, speakReplies, callActive, notifyReply, miniConvId, activeConversationId, user?.id])
+    if (callActive) notifyReply(leftover)
+    else if (speakReplies) speakText(leftover)
+  }, [messages, speakReplies, callActive, notifyReply, resumeListen, voiceConvId, activeConversationId, user?.id])
 
   const toggleSpeakReplies = useCallback(() => {
     setSpeakReplies((v) => {

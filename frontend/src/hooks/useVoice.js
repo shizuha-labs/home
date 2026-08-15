@@ -284,6 +284,27 @@ export function finishSpeakStream() {
   }
 }
 
+export function waitSpeakIdle() {
+  return speakQueue.then(() => undefined)
+}
+
+export function normalizeUtterance(text) {
+  return String(text || '').replace(/\s+/g, ' ').trim().toLowerCase()
+}
+
+export function isDuplicateUtterance(next, prev, now, prevAt, windowMs = 2500) {
+  const a = normalizeUtterance(next)
+  const b = normalizeUtterance(prev)
+  if (!a || !b || a !== b) return false
+  return now - prevAt < windowMs
+}
+
+export function spokenCovers(full, spoken) {
+  const a = String(full || '').replace(/\s+/g, ' ').trim()
+  const b = String(spoken || '').replace(/\s+/g, ' ').trim()
+  return !!b && a.startsWith(b)
+}
+
 export function nextSpokenSentences(buffer, alreadySpoken, { flushRemainder = false } = {}) {
   const out = []
   let rest = String(buffer || '')
@@ -384,6 +405,7 @@ export function useVoiceConversation({ onUtterance } = {}) {
   const streamAttemptsRef = useRef(0) // failed stream attempts in the current call
   const retryTimerRef = useRef(null)
   const silenceTimerRef = useRef(null)
+  const lastUtteranceRef = useRef({ text: '', at: 0 })
 
   const clearTimers = useCallback(() => {
     if (retryTimerRef.current != null) {
@@ -459,9 +481,15 @@ export function useVoiceConversation({ onUtterance } = {}) {
         onFinal: (text) => {
           streamingRef.current = null
           if (!activeRef.current || mutedRef.current || !text.trim()) return
+          const heard = text.trim()
+          const now = Date.now()
+          if (isDuplicateUtterance(heard, lastUtteranceRef.current.text, now, lastUtteranceRef.current.at)) {
+            utteranceDelivered = true
+            return
+          }
+          lastUtteranceRef.current = { text: heard, at: now }
           utteranceDelivered = true
           streamAttemptsRef.current = 0
-          const heard = text.trim()
           setLastHeard(heard)
           if (speakingRef.current) {
             speakingRef.current = false
@@ -510,17 +538,25 @@ export function useVoiceConversation({ onUtterance } = {}) {
   }, [clearTimers, failCall, scheduleStreamRetry])
   listenOnceRef.current = listenOnce
 
-  // Parent calls this when Shizuha's reply text arrives → speak, then re-listen.
-  // Live keeps the mic open so the caller can barge in (ChatGPT Live duplex).
+  // Speak a reply, then re-listen. Mic stays DOWN while TTS plays: HTML Audio
+  // is not in the WebRTC graph, so browser AEC cannot cancel it. Leaving the
+  // mic open doubled Ena's voice and re-finalized the same user utterance
+  // across overlapping STT sessions.
+  const resumeListen = useCallback(() => {
+    if (!activeRef.current || mutedRef.current || speakingRef.current) return
+    if (!streamingRef.current) listenOnceRef.current?.()
+  }, [])
+
   const notifyReply = useCallback(async (text) => {
     if (!activeRef.current || !text) return
     speakingRef.current = true
     setCallState('speaking')
-    if (!mutedRef.current && !streamingRef.current) listenOnceRef.current?.()
+    teardownCapture()
     await speakDelta(text)
+    await waitSpeakIdle()
     speakingRef.current = false
-    if (activeRef.current && !mutedRef.current) listenOnceRef.current?.()
-  }, [])
+    resumeListen()
+  }, [teardownCapture, resumeListen])
 
   const startCall = useCallback(() => {
     if (activeRef.current) return
@@ -528,6 +564,7 @@ export function useVoiceConversation({ onUtterance } = {}) {
     mutedRef.current = false
     speakingRef.current = false
     streamAttemptsRef.current = 0
+    lastUtteranceRef.current = { text: '', at: 0 }
     setMuted(false)
     setLastHeard('')
     setCallError(null)
@@ -543,6 +580,7 @@ export function useVoiceConversation({ onUtterance } = {}) {
     teardownCapture()
     speakText.stop()
     streamAttemptsRef.current = 0
+    lastUtteranceRef.current = { text: '', at: 0 }
     setMuted(false)
     setLastHeard('')
     setCallError(null)
@@ -595,6 +633,7 @@ export function useVoiceConversation({ onUtterance } = {}) {
     retryCall,
     toggleMute,
     notifyReply,
+    resumeListen,
     isCallActive: () => activeRef.current,
   }
 }

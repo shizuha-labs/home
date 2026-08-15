@@ -11,7 +11,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, renderHook, screen } from '@testing-library/react'
 import {
   classifyVoiceError,
+  isDuplicateUtterance,
   nextSpokenSentences,
+  spokenCovers,
   useVoiceConversation,
   VOICE_STREAM_BASE_BACKOFF_MS,
   VOICE_STREAM_MAX_RETRIES,
@@ -76,6 +78,22 @@ describe('classifyVoiceError', () => {
   })
 })
 
+describe('isDuplicateUtterance', () => {
+  it('ignores the same utterance inside the window', () => {
+    expect(isDuplicateUtterance('I hear you twice.', 'I hear you twice.', 2000, 500, 2500)).toBe(true)
+    expect(isDuplicateUtterance('I hear you twice.', 'I hear you twice.', 4000, 500, 2500)).toBe(false)
+    expect(isDuplicateUtterance('hello', 'goodbye', 800, 500, 2500)).toBe(false)
+  })
+})
+
+describe('spokenCovers', () => {
+  it('treats a spoken prefix as already covered after whitespace normalize', () => {
+    expect(spokenCovers('Hey Hritik. All good here.', 'Hey Hritik.')).toBe(true)
+    expect(spokenCovers('Hey Hritik. All good here.', '  Hey   Hritik.  ')).toBe(true)
+    expect(spokenCovers('Hey Hritik.', 'Something else.')).toBe(false)
+  })
+})
+
 describe('nextSpokenSentences', () => {
   it('flushes complete sentences and remembers the spoken prefix', () => {
     const first = nextSpokenSentences('Hello there. More', '')
@@ -94,6 +112,34 @@ describe('nextSpokenSentences', () => {
     expect(mid.sentences).toEqual([])
     const done = nextSpokenSentences('almost there', mid.spoken, { flushRemainder: true })
     expect(done.sentences).toEqual(['almost there'])
+  })
+})
+
+describe('useVoiceConversation — utterance dedupe', () => {
+  it('does not re-send the same final transcript within the window', () => {
+    const onUtterance = vi.fn()
+    const { result } = renderHook(() => useVoiceConversation({ onUtterance }))
+    act(() => {
+      result.current.startCall()
+    })
+    const opts = startStreamingStt.mock.calls.at(-1)[0]
+    act(() => {
+      opts.onFinal?.("I'm actually hearing a voice twice.")
+      opts.onFinal?.("I'm actually hearing a voice twice.")
+    })
+    expect(onUtterance).toHaveBeenCalledTimes(1)
+  })
+
+  it('cancels the mic when a reply starts speaking', async () => {
+    const { result } = renderHook(() => useVoiceConversation())
+    act(() => {
+      result.current.startCall()
+    })
+    const first = startStreamingStt.mock.results[0]?.value
+    await act(async () => {
+      await result.current.notifyReply('pong.')
+    })
+    expect(first.cancel).toHaveBeenCalled()
   })
 })
 
