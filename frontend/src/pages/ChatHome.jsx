@@ -556,6 +556,15 @@ function ChatHomeInner() {
             </button>
             <Avatar name={activeName} size="sm" />
             <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{activeName}</h3>
+            {callActive && (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-emerald-600 dark:text-emerald-400">
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                </span>
+                {muted ? 'Muted' : (callState === 'speaking' ? 'Speaking' : callState === 'thinking' ? 'Thinking' : 'Live')}
+              </span>
+            )}
             {!isConnected && (
               <span className="flex items-center gap-1 text-xs text-amber-500 ml-auto">
                 <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />

@@ -414,20 +414,55 @@ describe('MiniShizuhaChat — voice failure surface', () => {
     expect(onRetry).toHaveBeenCalledOnce()
   })
 
-  it('renders the ChatGPT Live overlay with Live label and waveform control', () => {
+  it('renders a non-blocking live HUD that leaves dashboard and compose usable', () => {
+    const onDash = vi.fn()
     render(
-      <LiveVoiceOverlay
-        agentLabel="Hina"
-        callState="listening"
-        muted={false}
-        lastHeard="hello"
-        onToggleMute={() => {}}
-        onEnd={() => {}}
-      />,
+      <div>
+        <nav>
+          <button type="button" onClick={onDash}>Dashboard</button>
+        </nav>
+        <textarea aria-label="Message Ena" />
+        <LiveVoiceOverlay
+          agentLabel="Hina"
+          callState="listening"
+          muted={false}
+          lastHeard="hello"
+          onToggleMute={() => {}}
+          onEnd={() => {}}
+        />
+      </div>,
     )
-    expect(screen.getByTestId('live-voice-overlay')).toBeInTheDocument()
+    const hud = screen.getByTestId('live-voice-overlay')
+    expect(hud).toBeInTheDocument()
+    expect(hud).toHaveAttribute('data-mode', 'hud')
+    expect(hud).toHaveClass('pointer-events-none')
+    expect(hud.className).not.toMatch(/\binset-0\b/)
+    expect(screen.getByRole('region', { name: /live voice/i })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).toBeNull()
     expect(screen.getByText('Live')).toBeInTheDocument()
     expect(screen.getByLabelText('End Live')).toBeInTheDocument()
     expect(screen.getByText(/Live with Hina/i)).toBeInTheDocument()
+    expect(screen.getByText('hello')).toBeInTheDocument()
+    screen.getByRole('button', { name: 'Dashboard' }).click()
+    expect(onDash).toHaveBeenCalledOnce()
+    const compose = screen.getByLabelText('Message Ena')
+    compose.focus()
+    expect(document.activeElement).toBe(compose)
+  })
+
+  it('shows Retry on the live HUD when the call fails', () => {
+    const onRetry = vi.fn()
+    render(
+      <LiveVoiceOverlay
+        agentLabel="Yuna"
+        callState="error"
+        error="Voice is temporarily unavailable."
+        onToggleMute={() => {}}
+        onEnd={() => {}}
+        onRetry={onRetry}
+      />,
+    )
+    screen.getByRole('button', { name: /retry/i }).click()
+    expect(onRetry).toHaveBeenCalledOnce()
   })
 })

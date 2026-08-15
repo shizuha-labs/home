@@ -1,8 +1,9 @@
 import LiveWaveformIcon from './LiveWaveformIcon'
 
 /**
- * ChatGPT Live-style overlay: orb, Live label, mute + end.
- * Transcript stays in the same chat underneath; this is the voice surface.
+ * Compact live-voice HUD. Talk, type, and keep dashboard + chat visible
+ * at once — never a fullscreen cover. Wrapper is pointer-events-none so
+ * clicks and keyboard reach the page; only the chip is interactive.
  */
 export default function LiveVoiceOverlay({
   agentLabel = 'Agent',
@@ -31,88 +32,93 @@ export default function LiveVoiceOverlay({
     callState === 'speaking' ? 'scale-110'
       : callState === 'listening' && !muted ? 'scale-105'
         : 'scale-100'
+  const caption = error
+    || lastHeard
+    || lastReply
+    || 'Talk, type, and watch the dashboard at once.'
 
   return (
     <div
-      className="fixed inset-0 z-[80] flex flex-col items-center justify-between bg-neutral-950/92 px-6 py-10 text-white backdrop-blur-xl"
+      className="pointer-events-none fixed inset-x-0 top-[4.25rem] z-[55] flex justify-center px-3 sm:justify-end sm:px-5"
       data-testid="live-voice-overlay"
-      role="dialog"
-      aria-label="Live voice"
+      data-mode="hud"
     >
-      <div className="flex w-full max-w-md items-center justify-between pt-2">
-        <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em]">
-          <span className="relative flex h-1.5 w-1.5">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
-          </span>
-          Live
-        </span>
-        <span className="truncate text-sm text-white/70">{agentLabel}</span>
-      </div>
-
-      <div className="flex flex-1 flex-col items-center justify-center gap-8">
-        <div className={`relative transition-transform duration-500 ${orbScale}`}>
-          <div className={`absolute -inset-10 rounded-full bg-gradient-to-br ${orbTone} opacity-40 blur-3xl`} />
-          <div className={`relative h-44 w-44 rounded-full bg-gradient-to-br ${orbTone} shadow-[0_0_80px_rgba(129,140,248,0.45)]`}>
+      <div
+        role="region"
+        aria-label="Live voice"
+        aria-live="polite"
+        className="pointer-events-auto flex w-full max-w-[min(100%,28rem)] items-center gap-3 rounded-2xl border border-white/10 bg-neutral-950/82 px-3 py-2 text-white shadow-[0_18px_50px_rgba(0,0,0,0.35)] backdrop-blur-xl"
+      >
+        <div className={`relative shrink-0 transition-transform duration-500 ${orbScale}`}>
+          <div className={`absolute -inset-2 rounded-full bg-gradient-to-br ${orbTone} opacity-50 blur-md`} />
+          <div className={`relative h-11 w-11 rounded-full bg-gradient-to-br ${orbTone} shadow-[0_0_24px_rgba(129,140,248,0.45)]`}>
             <div className="absolute inset-[18%] rounded-full bg-neutral-950/70 backdrop-blur-sm" />
           </div>
         </div>
-        <div className="text-center">
-          <p className="text-lg font-medium tracking-tight">{muted ? 'Muted' : label}</p>
-          <p className="mt-2 max-w-sm text-sm text-white/55">
-            {error
-              || lastHeard
-              || lastReply
-              || 'Talk naturally — Hina hears you while she speaks.'}
+
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.2em]">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
+              </span>
+              Live
+            </span>
+            <span className="truncate text-sm font-medium tracking-tight">
+              {muted ? 'Muted' : label}
+            </span>
+            <span className="hidden truncate text-xs text-white/55 sm:inline">{agentLabel}</span>
+          </div>
+          <p className="mt-0.5 truncate text-xs text-white/55">{caption}</p>
+          <p className="mt-0.5 flex items-center gap-1 text-[10px] uppercase tracking-[0.18em] text-white/35">
+            <LiveWaveformIcon className="h-3 w-3" active={!muted && callState !== 'error'} />
+            Live with {agentLabel}
           </p>
         </div>
-      </div>
 
-      <div className="flex w-full max-w-sm items-center justify-center gap-6 pb-4">
-        <button
-          type="button"
-          onClick={onToggleMute}
-          className={`flex h-14 w-14 items-center justify-center rounded-full transition ${
-            muted ? 'bg-white text-neutral-900' : 'bg-white/15 text-white hover:bg-white/25'
-          }`}
-          aria-label={muted ? 'Unmute' : 'Mute'}
-          title={muted ? 'Unmute' : 'Mute'}
-        >
-          {muted ? (
-            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.75 5.25v13.5m-7.5-9.75H4.5v6h3.75L12 19.5V4.5L8.25 9zM19.5 9l-4.5 6" />
-            </svg>
-          ) : (
-            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
-            </svg>
-          )}
-        </button>
-        {callState === 'error' && typeof onRetry === 'function' ? (
+        <div className="flex shrink-0 items-center gap-1.5">
           <button
             type="button"
-            onClick={onRetry}
-            className="flex h-14 min-w-[3.5rem] items-center justify-center rounded-full bg-amber-400 px-4 text-sm font-semibold text-neutral-900"
+            onClick={onToggleMute}
+            className={`flex h-10 w-10 items-center justify-center rounded-full transition ${
+              muted ? 'bg-white text-neutral-900' : 'bg-white/15 text-white hover:bg-white/25'
+            }`}
+            aria-label={muted ? 'Unmute' : 'Mute'}
+            title={muted ? 'Unmute' : 'Mute'}
           >
-            Retry
+            {muted ? (
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.75 5.25v13.5m-7.5-9.75H4.5v6h3.75L12 19.5V4.5L8.25 9zM19.5 9l-4.5 6" />
+              </svg>
+            ) : (
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+              </svg>
+            )}
           </button>
-        ) : null}
-        <button
-          type="button"
-          onClick={onEnd}
-          className="flex h-14 w-14 items-center justify-center rounded-full bg-white text-neutral-900 hover:bg-white/90"
-          aria-label="End Live"
-          title="End Live"
-        >
-          <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
+          {callState === 'error' && typeof onRetry === 'function' ? (
+            <button
+              type="button"
+              onClick={onRetry}
+              className="flex h-10 items-center justify-center rounded-full bg-amber-400 px-3 text-xs font-semibold text-neutral-900"
+            >
+              Retry
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={onEnd}
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-neutral-900 hover:bg-white/90"
+            aria-label="End Live"
+            title="End Live"
+          >
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
       </div>
-      <p className="flex items-center gap-1.5 text-[11px] uppercase tracking-[0.2em] text-white/40">
-        <LiveWaveformIcon className="h-3.5 w-3.5" active={!muted && callState !== 'error'} />
-        Live with {agentLabel}
-      </p>
     </div>
   )
 }
