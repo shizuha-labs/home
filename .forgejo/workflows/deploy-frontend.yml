@@ -164,13 +164,13 @@ jobs:
 
             kubectl logs -n build "job/ci-build-home-frontend-${SHORT}-${ARCH}-try1" \
               --all-containers --tail=200 >"${FIRST_LOG}" 2>&1 || true
-            if ! grep -Fq 'failed to get filesystem from image: unexpected EOF' "${FIRST_LOG}"; then
+            if ! grep -Eq 'failed to get filesystem from image: unexpected EOF|npm error code ETIMEDOUT|npm error network|ETIMEDOUT' "${FIRST_LOG}"; then
               echo "::error::kaniko frontend ${ARCH} build failed with a non-retryable error"
               cat "${FIRST_LOG}"
               return 1
             fi
 
-            echo "::warning::kaniko frontend ${ARCH} hit a cached-filesystem unexpected EOF; retrying once with cache disabled"
+            echo "::warning::kaniko frontend ${ARCH} hit a transient cache/network error; retrying once with cache disabled"
             cat "${FIRST_LOG}"
             render_build_job "${ARCH}" 2 false | kubectl apply -f -
             if wait_job "${ARCH}" 2; then

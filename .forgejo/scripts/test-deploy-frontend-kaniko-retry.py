@@ -24,6 +24,7 @@ def main() -> None:
     require('render_build_job "${ARCH}" 1 true | kubectl apply -f -')
     require('render_build_job "${ARCH}" 2 false | kubectl apply -f -')
     require("failed to get filesystem from image: unexpected EOF")
+    require("npm error code ETIMEDOUT")
     require("retrying once with cache disabled")
     require("cache-disabled retry failed")
     require("--cache=${CACHE_ENABLED}")
