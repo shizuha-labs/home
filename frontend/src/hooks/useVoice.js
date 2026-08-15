@@ -173,6 +173,107 @@ speakText.stop = () => {
     currentAudio = null
   }
   if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel()
+  stopSpeakStream()
+}
+
+// ── Streaming TTS (Grok WS via /voice/api/tts/stream, Kokoro backup) ────────
+let speakWs = null
+let speakReady = null
+let speakQueue = Promise.resolve()
+
+function playAudioChunk(b64, mime = 'audio/mpeg') {
+  const binary = atob(b64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  const blob = new Blob([bytes], { type: mime })
+  const url = URL.createObjectURL(blob)
+  const audio = new Audio(url)
+  currentAudio = audio
+  return new Promise((resolve) => {
+    audio.onended = () => { URL.revokeObjectURL(url); if (currentAudio === audio) currentAudio = null; resolve() }
+    audio.onerror = () => { URL.revokeObjectURL(url); if (currentAudio === audio) currentAudio = null; resolve() }
+    audio.play().catch(() => resolve())
+  })
+}
+
+function stopSpeakStream() {
+  if (speakWs) {
+    try { speakWs.close() } catch { /* noop */ }
+    speakWs = null
+  }
+  speakReady = null
+}
+
+export function startSpeakStream({ voice } = {}) {
+  if (speakWs && speakWs.readyState === WebSocket.OPEN) return speakReady
+  stopSpeakStream()
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const ws = new WebSocket(`${proto}//${window.location.host}/voice/api/tts/stream`)
+  speakWs = ws
+  speakReady = new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), 4000)
+    ws.onopen = () => {
+      ws.send(JSON.stringify({
+        type: 'start',
+        token: getAccessToken(),
+        voice: voice || 'ara',
+        language: 'en',
+      }))
+    }
+    ws.onmessage = (event) => {
+      let msg
+      try { msg = JSON.parse(event.data) } catch { return }
+      if (msg.type === 'ready') {
+        clearTimeout(timer)
+        resolve(true)
+      } else if (msg.type === 'audio.delta' && msg.delta) {
+        speakQueue = speakQueue.then(() => playAudioChunk(msg.delta, msg.mime || 'audio/mpeg'))
+      }
+    }
+    ws.onerror = () => { clearTimeout(timer); resolve(false) }
+    ws.onclose = () => {
+      if (speakWs === ws) speakWs = null
+      clearTimeout(timer)
+      resolve(false)
+    }
+  })
+  return speakReady
+}
+
+export async function speakDelta(text) {
+  const clean = String(text || '').replace(/\s+/g, ' ').trim()
+  if (!clean) return
+  const ready = await startSpeakStream()
+  if (!ready || !speakWs || speakWs.readyState !== WebSocket.OPEN) {
+    await speakText(clean)
+    return
+  }
+  speakWs.send(JSON.stringify({ type: 'text.delta', delta: clean + ' ' }))
+  speakWs.send(JSON.stringify({ type: 'text.done' }))
+}
+
+export function finishSpeakStream() {
+  if (speakWs && speakWs.readyState === WebSocket.OPEN) {
+    try { speakWs.send(JSON.stringify({ type: 'text.done' })) } catch { /* noop */ }
+  }
+}
+
+export function nextSpokenSentences(buffer, alreadySpoken) {
+  const out = []
+  let rest = String(buffer || '')
+  const spoken = alreadySpoken || ''
+  if (spoken && rest.startsWith(spoken)) rest = rest.slice(spoken.length)
+  const re = /[\s\S]*?[.!?…](?:["')\]]+)?(?=\s|$)/g
+  let m
+  let consumed = spoken
+  while ((m = re.exec(rest)) !== null) {
+    const sentence = m[0].trim()
+    if (sentence.length >= 8) {
+      out.push(sentence)
+      consumed += m[0]
+    }
+  }
+  return { sentences: out, spoken: consumed }
 }
 
 // ── Hands-free voice conversation loop (operator 2026-07-11) ─────────────────

@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, renderHook, screen } from '@testing-library/react'
 import {
   classifyVoiceError,
+  nextSpokenSentences,
   useVoiceConversation,
   VOICE_STREAM_BASE_BACKOFF_MS,
   VOICE_STREAM_MAX_RETRIES,
@@ -72,6 +73,15 @@ describe('classifyVoiceError', () => {
     expect(classifyVoiceError({ name: 'stream_unavailable', message: 'refused' })).toBe('stream_unavailable')
     expect(classifyVoiceError(new Error('websocket closed'))).toBe('stream_unavailable')
     expect(classifyVoiceError(null)).toBe('stream_unavailable')
+  })
+})
+
+describe('nextSpokenSentences', () => {
+  it('flushes complete sentences and remembers the spoken prefix', () => {
+    const first = nextSpokenSentences('Hello there. More', '')
+    expect(first.sentences).toEqual(['Hello there.'])
+    const second = nextSpokenSentences('Hello there. More to come!', first.spoken)
+    expect(second.sentences).toEqual(['More to come!'])
   })
 })
 
