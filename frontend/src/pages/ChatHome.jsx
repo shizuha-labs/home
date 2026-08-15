@@ -347,6 +347,10 @@ function ChatHomeInner() {
   const { callState, callError, muted, lastHeard, startCall, endCall, retryCall, toggleMute, notifyReply, isCallActive } = useVoiceConversation({
     onUtterance: (text) => { sendToShizuha(text) },
   })
+  // Streaming STT types into the compose box as the caller speaks.
+  useEffect(() => {
+    if (callState === 'listening' && lastHeard) setInputValue(lastHeard)
+  }, [callState, lastHeard])
   const lastAgentReply = useMemo(() => {
     const list = Array.isArray(messages) ? messages : []
     const last = [...list].reverse().find((m) => m.sender_id !== user?.id)

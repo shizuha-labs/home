@@ -75,6 +75,24 @@ describe('classifyVoiceError', () => {
   })
 })
 
+describe('useVoiceConversation — streaming STT captions', () => {
+  it('types partial transcripts into lastHeard as the user speaks', () => {
+    const { result } = renderHook(() => useVoiceConversation())
+    act(() => {
+      result.current.startCall()
+    })
+    const opts = startStreamingStt.mock.calls.at(-1)[0]
+    act(() => {
+      opts.onPartial?.('hello there')
+    })
+    expect(result.current.lastHeard).toBe('hello there')
+    act(() => {
+      opts.onPartial?.('hello there Hina')
+    })
+    expect(result.current.lastHeard).toBe('hello there Hina')
+  })
+})
+
 describe('useVoiceConversation — CON-296 failure paths', () => {
   it('A: NotFoundError hard-fails with guidance and never auto-retries', () => {
     const { result } = renderHook(() => useVoiceConversation())

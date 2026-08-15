@@ -5,12 +5,9 @@ import { startStreamingStt } from '../utils/streamingStt'
 /**
  * Voice layer for the home mini-chat (operator 2026-07-11).
  *
- * Layered strategy so voice works immediately AND upgrades transparently:
- *  1. Self-hosted voice service (when deployed): POST /voice/api/stt
- *     (audio/webm → {text}) and POST /voice/api/tts ({text} → audio stream).
- *     Planned models: faster-whisper large-v3-turbo (STT) + Kokoro-82M (TTS),
- *     both on our own GPUs — nothing leaves the platform.
- *  2. Browser fallback: SpeechRecognition (STT) + speechSynthesis (TTS).
+ * STT is streaming only (operator 2026-08-15): type on screen as the
+ * caller speaks. Batch /voice/api/stt upload is gone. TTS still goes
+ * through /voice/api/tts (Cortex/Grok first, Kokoro backup).
  *
  * The service probe is cached per session; a 404/503 silently selects the
  * browser path, so shipping the frontend first is safe.
@@ -37,8 +34,6 @@ export function useVoiceInput({ onTranscript } = {}) {
   const [micState, setMicState] = useState('idle') // idle | connecting | listening | transcribing
   const recognitionRef = useRef(null)
   const streamingRef = useRef(null)
-  const mediaRecorderRef = useRef(null)
-  const chunksRef = useRef([])
   const onTranscriptRef = useRef(onTranscript)
   onTranscriptRef.current = onTranscript
 
@@ -51,10 +46,6 @@ export function useVoiceInput({ onTranscript } = {}) {
     recognitionRef.current = null
     streamingRef.current?.stop()
     streamingRef.current = null
-    const mr = mediaRecorderRef.current
-    if (mr && mr.state !== 'inactive') {
-      try { mr.stop() } catch { /* already stopped */ }
-    }
   }, [])
 
   const cancelAll = useCallback(() => {
@@ -62,13 +53,6 @@ export function useVoiceInput({ onTranscript } = {}) {
     recognitionRef.current = null
     streamingRef.current?.cancel()
     streamingRef.current = null
-    const mr = mediaRecorderRef.current
-    if (mr && mr.state !== 'inactive') {
-      mr.onstop = null
-      try { mr.stop() } catch { /* already stopped */ }
-      mr.stream?.getTracks().forEach((track) => track.stop())
-    }
-    mediaRecorderRef.current = null
   }, [])
 
   const startBrowserRecognition = useCallback(() => {
@@ -98,39 +82,6 @@ export function useVoiceInput({ onTranscript } = {}) {
     setMicState('listening')
   }, [])
 
-  const startServerRecording = useCallback(async () => {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    const mr = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm' })
-    mediaRecorderRef.current = mr
-    chunksRef.current = []
-    mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data) }
-    mr.onstop = async () => {
-      stream.getTracks().forEach((t) => t.stop())
-      mediaRecorderRef.current = null
-      const blob = new Blob(chunksRef.current, { type: mr.mimeType })
-      chunksRef.current = []
-      if (blob.size < 1000) { setMicState('idle'); return } // too short — ignore
-      setMicState('transcribing')
-      try {
-        const form = new FormData()
-        form.append('audio', blob, 'speech.webm')
-        const res = await fetch('/voice/api/stt', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${getAccessToken()}` },
-          body: form,
-        })
-        if (res.ok) {
-          const data = await res.json()
-          const text = (data.text || '').trim()
-          if (text) onTranscriptRef.current?.(text, { final: true })
-        }
-      } catch { /* transcription failed — leave input untouched */ }
-      setMicState('idle')
-    }
-    mr.start()
-    setMicState('listening')
-  }, [])
-
   const startServerStreaming = useCallback(() => {
     const controller = startStreamingStt({
       token: getAccessToken(),
@@ -140,16 +91,13 @@ export function useVoiceInput({ onTranscript } = {}) {
         streamingRef.current = null
         onTranscriptRef.current?.(text, { final: true })
       },
-      onError: (_error, { ready }) => {
+      onError: () => {
         streamingRef.current = null
         setMicState('idle')
-        // The batch upload path remains the fail-soft fallback while the
-        // streaming route/provider is unavailable.
-        if (!ready) startServerRecording().catch(() => setMicState('idle'))
       },
     })
     streamingRef.current = controller
-  }, [startServerRecording])
+  }, [])
 
   const toggleMic = useCallback(async () => {
     if (micState === 'connecting' || micState === 'listening') { stopAll(); return }
@@ -365,7 +313,11 @@ export function useVoiceConversation({ onUtterance } = {}) {
             setCallState('connecting')
           }
         },
-        onPartial: () => {},
+        onPartial: (text) => {
+          if (!activeRef.current || mutedRef.current) return
+          const heard = String(text || '').trim()
+          if (heard) setLastHeard(heard)
+        },
         onFinal: (text) => {
           streamingRef.current = null
           if (!activeRef.current || mutedRef.current || !text.trim()) return
