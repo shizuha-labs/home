@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Avatar } from '@shizuha/chat'
 import { sanitizeMessagePreview } from '../../utils/messagePreview'
 import { conversationMatchesQuery } from '../../hooks/useHomeAgentPreference'
+import { conversationPeerName } from '../../utils/conversationLabel'
 
 /**
  * Home conversation rail: search existing chats AND start a chat with a
@@ -114,9 +115,7 @@ export default function ConversationSidebar({
       <div className="flex-1 overflow-y-auto px-2">
         {filtered.map((conv) => {
           const other = conv.participants?.find((p) => p.user_id !== currentUserId)
-          const name = conv.conversation_type === 'group'
-            ? conv.name || 'Group'
-            : other?.user_name || conv.participant_names?.[0] || 'Chat'
+          const name = conversationPeerName(conv, currentUserId)
           const hasUnread = conv.unread_count > 0
           const isActive = conv.id === activeConversationId
           const preview = sanitizeMessagePreview(conv.last_message_preview || '')
