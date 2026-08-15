@@ -25,6 +25,7 @@ import { useVoiceInput, useVoiceConversation, speakText, speakDelta, nextSpokenS
 import { useHomeSummary } from '../hooks/useHomeSummary'
 import { useHomeActivity } from '../hooks/useHomeActivity'
 import { getAccessToken, handleUnauthorized } from '../utils/auth'
+import { conversationPeerName } from '../utils/conversationLabel'
 
 function getAuthToken() {
   return getAccessToken()
@@ -375,12 +376,21 @@ function ChatHomeInner() {
   // Speak tokens as they stream in (Grok TTS websocket). Fallback: full
   // message once persisted, same as Hina/Aya unary path.
   const spokenStreamRef = useRef('')
+  const lastLiveStreamRef = useRef('')
   useEffect(() => {
     if (!miniConvId || activeConversationId !== miniConvId) return
     if (!speakReplies && !callActive) return
     const live = streamingByConv?.[miniConvId] || ''
-    if (!live) return
-    const { sentences, spoken } = nextSpokenSentences(live, spokenStreamRef.current)
+    const prev = lastLiveStreamRef.current
+    const ended = !live && !!prev
+    const source = live || (ended ? prev : '')
+    if (!source) return
+    lastLiveStreamRef.current = live
+    const { sentences, spoken } = nextSpokenSentences(
+      source,
+      spokenStreamRef.current,
+      { flushRemainder: ended },
+    )
     if (!sentences.length) return
     spokenStreamRef.current = spoken
     for (const sentence of sentences) {
@@ -503,17 +513,7 @@ function ChatHomeInner() {
   // home layout below renders the inline strip instead.)
   if (activeConversationId && urlConversationId) {
     const activeConv = conversations.find(c => c.id === activeConversationId)
-    const activeName = (() => {
-      if (!activeConv) return 'Chat'
-      if (activeConv.conversation_type === 'group') return activeConv.name || 'Group'
-      // For direct messages, find the OTHER participant (not current user)
-      const other = activeConv.participants?.find(p => p.user_id !== user?.id && !p.has_left)
-      if (other?.user_name) return other.user_name
-      // Fallback: find any name in participant_names that isn't the current user
-      const currentName = user?.first_name || user?.username || ''
-      const otherName = activeConv.participant_names?.find(n => n && n !== currentName)
-      return otherName || activeConv.participant_names?.[0] || 'Chat'
-    })()
+    const activeName = conversationPeerName(activeConv, user?.id)
 
     return (
       <>

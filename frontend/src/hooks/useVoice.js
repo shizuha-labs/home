@@ -9,6 +9,9 @@ import { startStreamingStt } from '../utils/streamingStt'
  * caller speaks. Batch /voice/api/stt upload is gone. TTS still goes
  * through /voice/api/tts (Cortex/Grok first, Kokoro backup).
  *
+ * Live call speak uses the Grok TTS websocket (speakDelta). Unary
+ * /voice/api/tts is the fallback when the stream is down.
+ *
  * The service probe is cached per session; a 404/503 silently selects the
  * browser path, so shipping the frontend first is safe.
  */
@@ -180,6 +183,25 @@ speakText.stop = () => {
 let speakWs = null
 let speakReady = null
 let speakQueue = Promise.resolve()
+let streamingTtsAvailable = null // null = unprobed
+
+async function probeStreamingTts() {
+  if (streamingTtsAvailable !== null) return streamingTtsAvailable
+  try {
+    const res = await fetch('/voice/api/health', { method: 'GET' })
+    if (!res.ok) {
+      streamingTtsAvailable = false
+      return false
+    }
+    const body = await res.json()
+    // Older images have no streaming_tts field — treat missing as unavailable
+    // so we do not sit on a 4s WS handshake to a route that 403s.
+    streamingTtsAvailable = !!body?.streaming_tts?.available
+  } catch {
+    streamingTtsAvailable = false
+  }
+  return streamingTtsAvailable
+}
 
 function playAudioChunk(b64, mime = 'audio/mpeg') {
   const binary = atob(b64)
@@ -207,40 +229,44 @@ function stopSpeakStream() {
 export function startSpeakStream({ voice } = {}) {
   if (speakWs && speakWs.readyState === WebSocket.OPEN) return speakReady
   stopSpeakStream()
-  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const ws = new WebSocket(`${proto}//${window.location.host}/voice/api/tts/stream`)
-  speakWs = ws
-  speakReady = new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(false), 4000)
-    ws.onopen = () => {
-      ws.send(JSON.stringify({
-        type: 'start',
-        token: getAccessToken(),
-        voice: voice || 'ara',
-        language: 'en',
-      }))
-    }
-    ws.onmessage = (event) => {
-      let msg
-      try { msg = JSON.parse(event.data) } catch { return }
-      if (msg.type === 'ready') {
-        clearTimeout(timer)
-        resolve(true)
-      } else if (msg.type === 'audio.delta' && msg.delta) {
-        speakQueue = speakQueue.then(() => playAudioChunk(msg.delta, msg.mime || 'audio/mpeg'))
+  speakReady = (async () => {
+    const advertised = await probeStreamingTts()
+    if (!advertised) return false
+    return await new Promise((resolve) => {
+      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const ws = new WebSocket(`${proto}//${window.location.host}/voice/api/tts/stream`)
+      speakWs = ws
+      const timer = setTimeout(() => resolve(false), 1500)
+      ws.onopen = () => {
+        ws.send(JSON.stringify({
+          type: 'start',
+          token: getAccessToken(),
+          voice: voice || 'ara',
+          language: 'en',
+        }))
       }
-    }
-    ws.onerror = () => { clearTimeout(timer); resolve(false) }
-    ws.onclose = () => {
-      if (speakWs === ws) speakWs = null
-      clearTimeout(timer)
-      resolve(false)
-    }
-  })
+      ws.onmessage = (event) => {
+        let msg
+        try { msg = JSON.parse(event.data) } catch { return }
+        if (msg.type === 'ready') {
+          clearTimeout(timer)
+          resolve(true)
+        } else if (msg.type === 'audio.delta' && msg.delta) {
+          speakQueue = speakQueue.then(() => playAudioChunk(msg.delta, msg.mime || 'audio/mpeg'))
+        }
+      }
+      ws.onerror = () => { clearTimeout(timer); resolve(false) }
+      ws.onclose = () => {
+        if (speakWs === ws) speakWs = null
+        clearTimeout(timer)
+        resolve(false)
+      }
+    })
+  })()
   return speakReady
 }
 
-export async function speakDelta(text) {
+export async function speakDelta(text, { done = true } = {}) {
   const clean = String(text || '').replace(/\s+/g, ' ').trim()
   if (!clean) return
   const ready = await startSpeakStream()
@@ -249,7 +275,7 @@ export async function speakDelta(text) {
     return
   }
   speakWs.send(JSON.stringify({ type: 'text.delta', delta: clean + ' ' }))
-  speakWs.send(JSON.stringify({ type: 'text.done' }))
+  if (done) speakWs.send(JSON.stringify({ type: 'text.done' }))
 }
 
 export function finishSpeakStream() {
@@ -258,7 +284,7 @@ export function finishSpeakStream() {
   }
 }
 
-export function nextSpokenSentences(buffer, alreadySpoken) {
+export function nextSpokenSentences(buffer, alreadySpoken, { flushRemainder = false } = {}) {
   const out = []
   let rest = String(buffer || '')
   const spoken = alreadySpoken || ''
@@ -266,11 +292,22 @@ export function nextSpokenSentences(buffer, alreadySpoken) {
   const re = /[\s\S]*?[.!?…](?:["')\]]+)?(?=\s|$)/g
   let m
   let consumed = spoken
+  let used = 0
   while ((m = re.exec(rest)) !== null) {
     const sentence = m[0].trim()
-    if (sentence.length >= 8) {
+    // Talk-seat replies are often one short word ("pong."). Waiting for 8
+    // chars left those on the persist+unary path (~1.5s extra).
+    if (sentence.length >= 2) {
       out.push(sentence)
       consumed += m[0]
+      used = m.index + m[0].length
+    }
+  }
+  if (flushRemainder) {
+    const leftover = rest.slice(used).trim()
+    if (leftover) {
+      out.push(leftover)
+      consumed += rest.slice(used)
     }
   }
   return { sentences: out, spoken: consumed }
@@ -480,7 +517,7 @@ export function useVoiceConversation({ onUtterance } = {}) {
     speakingRef.current = true
     setCallState('speaking')
     if (!mutedRef.current && !streamingRef.current) listenOnceRef.current?.()
-    await speakText(text)
+    await speakDelta(text)
     speakingRef.current = false
     if (activeRef.current && !mutedRef.current) listenOnceRef.current?.()
   }, [])
@@ -494,6 +531,7 @@ export function useVoiceConversation({ onUtterance } = {}) {
     setMuted(false)
     setLastHeard('')
     setCallError(null)
+    void startSpeakStream()
     listenOnceRef.current?.()
   }, [])
 

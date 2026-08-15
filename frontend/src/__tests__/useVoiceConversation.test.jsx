@@ -83,6 +83,18 @@ describe('nextSpokenSentences', () => {
     const second = nextSpokenSentences('Hello there. More to come!', first.spoken)
     expect(second.sentences).toEqual(['More to come!'])
   })
+
+  it('flushes short talk-seat replies like pong.', () => {
+    const first = nextSpokenSentences('pong.', '')
+    expect(first.sentences).toEqual(['pong.'])
+  })
+
+  it('flushes leftover text when the stream completes without punctuation', () => {
+    const mid = nextSpokenSentences('almost there', '')
+    expect(mid.sentences).toEqual([])
+    const done = nextSpokenSentences('almost there', mid.spoken, { flushRemainder: true })
+    expect(done.sentences).toEqual(['almost there'])
+  })
 })
 
 describe('useVoiceConversation — streaming STT captions', () => {
