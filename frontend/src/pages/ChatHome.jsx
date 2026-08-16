@@ -22,7 +22,7 @@ import {
   RETIRED_HOME_AGENTS,
   writeHomeAgentPref,
 } from '../hooks/useHomeAgentPreference'
-import { useVoiceInput, useVoiceConversation, speakText, speakDelta, nextSpokenSentences, spokenCovers, stripSpeakableMarkup, isTalkAckText } from '../hooks/useVoice'
+import { useVoiceInput, useVoiceConversation, speakText, speakDelta, nextSpokenSentences, spokenCovers, stripSpeakableMarkup, isTalkAckText, isGhostTranscript } from '../hooks/useVoice'
 import { useHomeSummary } from '../hooks/useHomeSummary'
 import { useHomeActivity } from '../hooks/useHomeActivity'
 import { getAccessToken, handleUnauthorized } from '../utils/auth'
@@ -359,11 +359,15 @@ function ChatHomeInner() {
   }, [callState, lastHeard])
   const lastAgentReply = useMemo(() => {
     const list = Array.isArray(messages) ? messages : []
-    const last = [...list].reverse().find((m) => m.sender_id !== user?.id && !isTalkAckText(m.content))
+    const last = [...list].reverse().find((m) => (
+      m.sender_id !== user?.id && !isTalkAckText(m.content) && !isGhostTranscript(m.content)
+    ))
     return last?.content || ''
   }, [messages, user?.id])
   const displayMessages = useMemo(
-    () => (Array.isArray(messages) ? messages.filter((m) => !isTalkAckText(m?.content)) : messages),
+    () => (Array.isArray(messages)
+      ? messages.filter((m) => !isTalkAckText(m?.content) && !isGhostTranscript(m?.content))
+      : messages),
     [messages],
   )
   // Active = mid-call only. 'error' is a terminal surface with guidance/retry, not "on call".
@@ -727,7 +731,10 @@ function ChatHomeInner() {
 
       {/* Main — same visual language as Hero. Scrolls: the live theater below
           grows with the org's activity (HIVE-602). */}
-      <div className="flex-1 flex flex-col items-center justify-start relative overflow-y-auto bg-gradient-to-br from-brand-50 via-white to-purple-50 dark:from-gray-900 dark:via-gray-950 dark:to-purple-950">
+      <div
+        data-testid="home-main-scroll"
+        className="flex-1 flex flex-col items-center justify-start relative overflow-y-auto bg-gradient-to-br from-brand-50 via-white to-purple-50 dark:from-gray-900 dark:via-gray-950 dark:to-purple-950"
+      >
         {/* Background gradient lives ON the scroll container: as an absolute
             inset-0 child it only covered the first viewport, so scrolling
             revealed the bare page background (black in dark mode) below it
@@ -782,6 +789,7 @@ function ChatHomeInner() {
             <div className="rounded-2xl bg-white dark:bg-gray-900 shadow-xl shadow-brand-900/5 dark:shadow-black/20 ring-1 ring-gray-200 dark:ring-gray-700 overflow-hidden">
               <textarea
                 ref={textareaRef}
+                data-testid="home-compose"
                 value={inputValue}
                 onChange={(e) => {
                   setInputValue(e.target.value)
@@ -827,6 +835,8 @@ function ChatHomeInner() {
                 )}
                 {liveCallButton('home-live-button', selectedPicker?.displayName || effectiveHomeAgent || 'agent')}
                 <button
+                  type="button"
+                  data-testid="home-send-button"
                   onClick={handleSubmit}
                   disabled={!inputValue.trim() || isSending || !effectiveHomeAgent}
                   className="w-9 h-9 rounded-xl bg-brand-600 hover:bg-brand-700 text-white flex items-center justify-center disabled:opacity-25 disabled:cursor-not-allowed transition-colors shadow-sm"

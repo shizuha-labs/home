@@ -1,0 +1,179 @@
+/**
+ * Shared helpers for operator-path live QA against shizuha.com.
+ * Credentials are read from the environment or ~/.shizuha/operator-ui-creds
+ * (two lines: username, password). Never log the password.
+ */
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { expect } from '@playwright/test'
+
+export const KNOWN_THREAD = 'bb516974-4152-427a-a2ac-04535b5f393f'
+export const GHOST_RE = /^(Replied\.?|Keyterms?\s*:)/im
+
+export function loadOperatorCreds() {
+  const user = process.env.HRITIK_USER || process.env.E2E_USERNAME || process.env.AGENT_USERNAME
+  const pass = process.env.HRITIK_PASS || process.env.E2E_PASSWORD || process.env.AGENT_PASSWORD
+  if (user && pass) return { user, pass }
+  const credPath = process.env.SHIZUHA_OPERATOR_CREDS
+    || path.join(os.homedir(), '.shizuha', 'operator-ui-creds')
+  try {
+    const lines = fs.readFileSync(credPath, 'utf8').split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
+    if (lines[0] && lines[1]) return { user: lines[0], pass: lines[1] }
+  } catch {
+    /* missing file is a skip, not a leak */
+  }
+  return { user: '', pass: '' }
+}
+
+export async function loginHome(page) {
+  const { user, pass } = loadOperatorCreds()
+  await page.goto('/id/login?continue=/')
+  await page.waitForSelector('#username, input[type="password"]', { timeout: 20000 })
+  if (await page.locator('#username').count()) {
+    await page.fill('#username', user)
+    await page.fill('#password', pass)
+  } else {
+    const inputs = page.locator('form input')
+    const n = await inputs.count()
+    for (let i = 0; i < n; i += 1) {
+      const type = await inputs.nth(i).getAttribute('type')
+      if (type === 'password') await inputs.nth(i).fill(pass)
+      else if (type !== 'hidden' && type !== 'submit') await inputs.nth(i).fill(user)
+    }
+  }
+  const loginResponsePromise = page.waitForResponse(
+    (response) => response.url().includes('/id/api/auth/login/')
+      && response.request().method() === 'POST',
+    { timeout: 30000 },
+  )
+  await page.locator('button[type="submit"], input[type="submit"]').first().click()
+  const loginResponse = await loginResponsePromise
+  expect(loginResponse.ok(), 'operator form login').toBeTruthy()
+  await page.waitForURL((url) => !url.toString().includes('/id/login'), { timeout: 30000 })
+
+  const access = await bearerToken(page)
+  expect(access, 'access token after login').toBeTruthy()
+  const userResponse = await page.request.get('/id/api/auth/user/', {
+    headers: { Authorization: `Bearer ${access}` },
+  })
+  expect(userResponse.ok(), 'authenticated user lookup').toBeTruthy()
+  const me = await userResponse.json()
+  expect(me?.id, 'user id').toBeTruthy()
+
+  await page.goto('/')
+  await page.waitForLoadState('domcontentloaded')
+  await expect(page.locator('input[type="password"]')).toHaveCount(0)
+  await expect(page.getByTestId('home-live-button')).toBeVisible({ timeout: 20000 })
+  await expect(page.getByRole('heading', { name: /Shizuha/i }).first()).toBeVisible()
+  return { access, user: me }
+}
+
+export async function bearerToken(page) {
+  const cookies = await page.context().cookies()
+  const cookie = cookies.find((c) => c.name === 'shizuha-access-token')?.value
+  if (cookie) return cookie
+  return page.evaluate(() => window.localStorage.getItem('shizuha_access_token') || '')
+}
+
+export async function authHeaders(page) {
+  const access = await bearerToken(page)
+  return { Authorization: `Bearer ${access}` }
+}
+
+export async function shot(page, name) {
+  const dir = path.join(process.cwd(), 'test-results', 'live-operator')
+  fs.mkdirSync(dir, { recursive: true })
+  const file = path.join(dir, `${name}.png`)
+  await page.screenshot({ path: file, fullPage: true })
+  return file
+}
+
+export async function visibleTalkText(page) {
+  return page.evaluate(() => {
+    const nodes = [
+      ...document.querySelectorAll('[data-testid="mini-chat-scroll"]'),
+      ...document.querySelectorAll('[data-testid="connect-message-list"]'),
+      ...document.querySelectorAll('[data-testid="message-list"]'),
+    ]
+    return nodes.map((n) => n.innerText || '').join('\n')
+  })
+}
+
+export async function assertNoGhosts(page, where) {
+  const text = await visibleTalkText(page)
+  const lines = text.split('\n').map((s) => s.trim()).filter(Boolean)
+  const ghosts = lines.filter((line) => GHOST_RE.test(line) || /^keyterms?\s*:/i.test(line))
+  expect(ghosts, `${where}: no Replied. / Keyterms leftovers`).toEqual([])
+}
+
+export function homeCompose(page) {
+  return page.locator('[data-testid="home-compose"], textarea[placeholder^="Ask "]').first()
+}
+
+export function homeMainScroll(page) {
+  return page.locator('[data-testid="home-main-scroll"]').or(
+    page.locator('textarea[placeholder^="Ask "]').locator('xpath=ancestor::div[contains(@class,"overflow-y-auto")][1]'),
+  )
+}
+
+export async function hudState(page) {
+  const hud = page.getByTestId('live-voice-overlay')
+  if (!(await hud.count())) return { present: false, state: '', label: '' }
+  const attr = (await hud.getAttribute('data-call-state')) || ''
+  let label = ''
+  const labeled = page.getByTestId('live-voice-state')
+  if (await labeled.count()) {
+    label = ((await labeled.textContent()) || '').trim()
+  } else {
+    const txt = (await hud.innerText()) || ''
+    const match = txt.match(/\b(Muted|Connecting|Listening|Thinking|Speaking|Unavailable)\b/i)
+    label = match ? match[1] : ''
+  }
+  return {
+    present: true,
+    state: (attr || label || '').toLowerCase(),
+    label,
+  }
+}
+
+export async function assertSidebarHasNoGhosts(page) {
+  const previews = page.getByTestId('conversation-preview')
+  const n = await previews.count()
+  const ghosts = []
+  for (let i = 0; i < n; i += 1) {
+    const text = ((await previews.nth(i).innerText()) || '').trim()
+    if (/^(replied\.?|keyterms?\s*:)/i.test(text)) ghosts.push(text)
+  }
+  expect(ghosts, 'sidebar conversation previews must not show Replied. / Keyterms').toEqual([])
+}
+
+export async function waitHudLeavesSpeaking(page, timeoutMs = 20000) {
+  const started = Date.now()
+  let sawSpeaking = false
+  let leftSpeakingAt = 0
+  while (Date.now() - started < timeoutMs) {
+    const now = await hudState(page)
+    const speaking = now.state === 'speaking' || /^speaking/i.test(now.label)
+    if (speaking) sawSpeaking = true
+    else if (sawSpeaking && !leftSpeakingAt) leftSpeakingAt = Date.now()
+    else if (!speaking && leftSpeakingAt && Date.now() - leftSpeakingAt >= 400) {
+      return { sawSpeaking, stuck: false, ms: Date.now() - started, ...now }
+    }
+    await page.waitForTimeout(250)
+  }
+  const last = await hudState(page)
+  const stuck = last.state === 'speaking' || /^speaking/i.test(last.label)
+  expect(stuck, 'HUD must leave Speaking so TTS/listen can resume').toBeFalsy()
+  return { sawSpeaking, stuck, ms: Date.now() - started, ...last }
+}
+
+export async function sendHomeCompose(page, text) {
+  const box = homeCompose(page)
+  await expect(box).toBeVisible({ timeout: 15000 })
+  await box.click()
+  await box.fill(text)
+  const send = page.getByTestId('home-send-button')
+  if (await send.count()) await send.click()
+  else await page.keyboard.press('Enter')
+}

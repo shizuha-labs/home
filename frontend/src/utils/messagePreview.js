@@ -46,6 +46,10 @@ export function sanitizeMessagePreview(raw) {
     text = (sp > 80 ? cut.slice(0, sp) : cut).trim() + '…'
   }
 
+  if (/^(replied|done|sent|ok|noted|pong sent)[.!]?$/i.test(text) || /^keyterms?\s*:/i.test(text)) {
+    return { text: '', chip: null }
+  }
+
   return { text, chip }
 }
 

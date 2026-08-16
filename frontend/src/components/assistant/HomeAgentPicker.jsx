@@ -67,6 +67,7 @@ export default function HomeAgentPicker({
     <div ref={rootRef} className="relative mx-auto mb-4 w-full max-w-md">
       <button
         type="button"
+        data-testid="home-agent-picker"
         onClick={() => setOpen((v) => !v)}
         className="mx-auto flex items-center gap-2 rounded-full border border-gray-200/80 bg-white/80 px-3 py-1 text-xs font-medium text-gray-600 shadow-sm hover:border-brand-300 hover:text-brand-700 dark:border-gray-700 dark:bg-gray-900/70 dark:text-gray-300"
         title="Change who the home composer talks to"

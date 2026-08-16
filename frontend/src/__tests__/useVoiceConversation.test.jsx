@@ -424,6 +424,7 @@ describe('MiniShizuhaChat — voice failure surface', () => {
           { id: '1', sender_id: 1, content: "Yo, what's up?" },
           { id: '2', sender_id: 2, sender_name: 'Ena', content: "Hey. I'm here. What do you need?" },
           { id: '3', sender_id: 2, sender_name: 'Ena', content: 'Replied.' },
+          { id: '4', sender_id: 2, sender_name: 'Ena', content: 'Keyterms: Shizuha, Hritik, Hive' },
         ]}
         typingUsers={[]}
         currentUserId={1}
@@ -432,8 +433,10 @@ describe('MiniShizuhaChat — voice failure surface', () => {
         onClose={() => {}}
       />,
     )
+    expect(screen.getByText(/yo, what's up/i)).toBeInTheDocument()
     expect(screen.getByText(/hey\. i'm here/i)).toBeInTheDocument()
     expect(screen.queryByText(/^replied\.?$/i)).toBeNull()
+    expect(screen.queryByText(/keyterms?:/i)).toBeNull()
     expect(screen.getByTestId('mini-chat-scroll').className).toMatch(/overflow-y-auto/)
   })
 

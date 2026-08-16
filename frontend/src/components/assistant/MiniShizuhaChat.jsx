@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react'
 import LiveWaveformIcon from './LiveWaveformIcon'
-import { isTalkAckText } from '../../hooks/useVoice'
+import { isTalkAckText, isGhostTranscript } from '../../hooks/useVoice'
 
 /**
  * MiniShizuhaChat — HIVE home inline chat (operator 2026-07-11).
@@ -44,7 +44,7 @@ export default function MiniShizuhaChat({
   // Rolling window: drop talk-seat "Replied." leftovers, keep recent turns.
   const visible = useMemo(() => {
     const list = Array.isArray(messages) ? messages : []
-    return list.filter((m) => !isTalkAckText(m?.content)).slice(-20)
+    return list.filter((m) => !isTalkAckText(m?.content) && !isGhostTranscript(m?.content)).slice(-20)
   }, [messages])
 
   const shizuhaTyping = Array.isArray(typingUsers) && typingUsers.length > 0

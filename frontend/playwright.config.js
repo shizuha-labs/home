@@ -27,8 +27,10 @@ export default defineConfig({
 
   // Shared settings for all the projects below
   use: {
-    // Base URL - use shizuha-nginx for internal pod access
-    baseURL: process.env.BASE_URL || 'http://shizuha-nginx',
+    // Live operator QA talks to production. In-cluster specs still default
+    // to the in-cluster nginx name.
+    baseURL: process.env.BASE_URL
+      || (process.env.SHIZUHA_LIVE_E2E === '1' ? 'https://shizuha.com' : 'http://shizuha-nginx'),
 
     // Collect trace when retrying the failed test
     trace: 'on-first-retry',

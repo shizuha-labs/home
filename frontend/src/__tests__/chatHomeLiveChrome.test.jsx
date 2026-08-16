@@ -3,7 +3,7 @@
  * voice hook surface as the homepage compose strip.
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { createElement } from 'react'
+import { createElement, useState } from 'react'
 import { act, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
@@ -42,6 +42,7 @@ vi.mock('../hooks/useVoice', () => ({
   finishSpeakStream: vi.fn(),
   stripSpeakableMarkup: (s) => s,
   isTalkAckText: (text) => /^(replied|done|sent|ok|noted|pong sent)[.!]?$/i.test(String(text || '').trim()),
+  isGhostTranscript: (text) => /^keyterms?\s*:/i.test(String(text || '').trim()),
 }))
 
 vi.mock('../hooks/useHomeSummary', () => ({
@@ -127,14 +128,30 @@ vi.mock('@shizuha/ui', () => ({
 
 import ChatHome from '../pages/ChatHome'
 
+function ChatHomeRoutes() {
+  return (
+    <Routes>
+      <Route path="/" element={<ChatHome />} />
+      <Route path="/c/:conversationId" element={<ChatHome />} />
+    </Routes>
+  )
+}
+
 function renderAt(path) {
   return render(
     <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="/" element={<ChatHome />} />
-        <Route path="/c/:conversationId" element={<ChatHome />} />
-      </Routes>
+      <ChatHomeRoutes />
     </MemoryRouter>,
+  )
+}
+
+function PersistHarness() {
+  const [, setTick] = useState(0)
+  PersistHarness.tick = () => setTick((n) => n + 1)
+  return (
+    <MemoryRouter initialEntries={['/']}>
+      <ChatHomeRoutes />
+    </MemoryRouter>
   )
 }
 
@@ -144,6 +161,8 @@ describe('ChatHome Live chrome', () => {
     voice.callError = null
     voice.endSpeak.mockClear()
     voice.beginSpeak.mockClear()
+    voice.startCall.mockClear()
+    voice.endCall.mockClear()
     chat.messages = []
     chat.streamingByConv = {}
   })
@@ -177,40 +196,53 @@ describe('ChatHome Live chrome', () => {
     expect(screen.getByRole('button', { name: /Open full chat/i })).toBeInTheDocument()
   })
 
-  it('hides Replied. leftovers on the homepage strip and full thread', () => {
+  it('hides Replied. leftovers and Keyterms dumps on the homepage strip and full thread', () => {
     chat.messages = [
       { id: 'u1', sender_id: 1, content: "Yo, what's up?" },
       { id: 'a1', sender_id: 2, sender_name: 'Ena', content: "Hey. I'm here. What do you need?" },
       { id: 'a2', sender_id: 2, sender_name: 'Ena', content: 'Replied.' },
+      { id: 'a3', sender_id: 2, sender_name: 'Ena', content: 'Keyterms: Shizuha, Hritik, Hive, Cortex, Pulse' },
     ]
     voice.callState = 'listening'
     renderAt('/')
     act(() => {
       screen.getByTestId('home-live-button').click()
     })
-    expect(screen.getByText(/hey\. i'm here/i)).toBeInTheDocument()
-    expect(screen.queryByText(/^replied\.?$/i)).not.toBeInTheDocument()
+    const strip = screen.getByTestId('mini-chat-scroll')
+    expect(strip.textContent).toMatch(/yo, what's up/i)
+    expect(strip.textContent).toMatch(/hey\. i'm here/i)
+    expect(strip.textContent).not.toMatch(/replied/i)
+    expect(strip.textContent).not.toMatch(/keyterms/i)
 
     renderAt(`/c/${CONV}`)
+    expect(screen.getByTestId('message-list').textContent).toMatch(/yo, what's up/i)
     expect(screen.getByTestId('message-list').textContent).toMatch(/hey\. i'm here/i)
     expect(screen.getByTestId('message-list').textContent).not.toMatch(/replied/i)
+    expect(screen.getByTestId('message-list').textContent).not.toMatch(/keyterms/i)
   })
 
-  it('ends speak after a Replied. persist so Live does not freeze on Speaking', () => {
+  it('ends speak after a Replied. persist on the same mount so Live does not freeze on Speaking', () => {
+    // Production order: Start Live → agent sentence → leftover "Replied."
+    // persist on the SAME ChatHome instance (not a remount).
     chat.messages = [
       { id: 'a1', sender_id: 2, sender_name: 'Ena', content: "Hey. I'm here." },
     ]
-    voice.callState = 'speaking'
-    renderAt('/')
+    voice.callState = 'idle'
+    render(<PersistHarness />)
     act(() => {
       screen.getByTestId('home-live-button').click()
     })
+    expect(voice.startCall).toHaveBeenCalled()
+    expect(voice.endCall).not.toHaveBeenCalled()
+    voice.callState = 'speaking'
     voice.endSpeak.mockClear()
     chat.messages = [
       { id: 'a1', sender_id: 2, sender_name: 'Ena', content: "Hey. I'm here." },
       { id: 'a2', sender_id: 2, sender_name: 'Ena', content: 'Replied.' },
     ]
-    renderAt('/')
+    act(() => {
+      PersistHarness.tick()
+    })
     expect(voice.endSpeak).toHaveBeenCalled()
   })
 })

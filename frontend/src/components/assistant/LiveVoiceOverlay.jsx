@@ -42,6 +42,7 @@ export default function LiveVoiceOverlay({
       className="pointer-events-none fixed inset-x-0 top-[4.25rem] z-[55] flex justify-center px-3 sm:justify-end sm:px-5"
       data-testid="live-voice-overlay"
       data-mode="hud"
+      data-call-state={callState}
     >
       <div
         role="region"
@@ -65,7 +66,10 @@ export default function LiveVoiceOverlay({
               </span>
               Live
             </span>
-            <span className="truncate text-sm font-medium tracking-tight">
+            <span
+              data-testid="live-voice-state"
+              className="truncate text-sm font-medium tracking-tight"
+            >
               {muted ? 'Muted' : label}
             </span>
             <span className="hidden truncate text-xs text-white/55 sm:inline">{agentLabel}</span>
