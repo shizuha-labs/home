@@ -23,6 +23,41 @@ export function sttCommitHangoverMs(text) {
   return utteranceLooksIncomplete(text) ? STT_INCOMPLETE_HANGOVER_MS : STT_COMPLETE_HANGOVER_MS
 }
 
+/** Grok often resets the running transcript after a mid-thought pause.
+ * A new partial that does not extend the pending clause is still one turn. */
+export function stitchHeard(prev, next) {
+  const a = String(prev || '').replace(/\s+/g, ' ').trim()
+  const b = String(next || '').replace(/\s+/g, ' ').trim()
+  if (!a) return b
+  if (!b) return a
+  if (b === a) return b
+  if (b.startsWith(a)) return b
+  if (a.startsWith(b) && a.length > b.length) return a
+  if (a.toLowerCase().includes(b.toLowerCase())) return a
+  if (b.toLowerCase().includes(a.toLowerCase())) return b
+  const aWords = a.split(' ')
+  const bWords = b.split(' ')
+  for (let n = Math.min(aWords.length, bWords.length); n >= 2; n -= 1) {
+    if (aWords.slice(-n).join(' ').toLowerCase() === bWords.slice(0, n).join(' ').toLowerCase()) {
+      return [...aWords, ...bWords.slice(n)].join(' ')
+    }
+  }
+  const max = Math.min(a.length, b.length)
+  for (let n = max; n >= 8; n -= 1) {
+    if (a.slice(-n).toLowerCase() === b.slice(0, n).toLowerCase()) {
+      return `${a}${b.slice(n)}`.replace(/\s+/g, ' ').trim()
+    }
+  }
+  return `${a} ${b}`
+}
+
+export function isTranscriptExtension(prev, next) {
+  const a = String(prev || '').replace(/\s+/g, ' ').trim()
+  const b = String(next || '').replace(/\s+/g, ' ').trim()
+  if (!a || !b) return true
+  return b.startsWith(a) || a.startsWith(b)
+}
+
 const wsUrl = () => {
   const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   return `${scheme}//${window.location.host}/voice/api/stt/stream`
@@ -265,22 +300,26 @@ export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, 
           },
         }
         const text = String(event.text || '').trim()
-        if (text) {
-          lastPartial = text
-          onPartial?.(text, timedEvent)
-        }
-        if (event.speech_final && text) {
+        if (!text) return
+        const stitched = pendingFinal ? stitchHeard(pendingFinal.text, text) : text
+        lastPartial = stitched
+        onPartial?.(stitched, timedEvent)
+        if (event.speech_final) {
           // Do not tear the mic down on the first VAD silence. Grok's
           // speech_final can fire mid-clause; hangover + Smart Turn wait
           // for the rest of the sentence (industry endpointing).
-          armCommit(text, timedEvent)
-        } else if (text && pendingFinal) {
+          armCommit(stitched, timedEvent)
+        } else if (pendingFinal && !isTranscriptExtension(pendingFinal.text, text)) {
+          // New clause after a pause — keep one turn, refresh hangover.
+          armCommit(stitched, timedEvent)
+        } else if (pendingFinal) {
           clearCommit()
         }
         return
       }
       if (event.type === 'transcript.done') {
-        deliverFinal(event.text, event)
+        const text = stitchHeard(pendingFinal?.text || lastPartial, event.text)
+        deliverFinal(text, event)
         onDone?.(event)
         close()
         return

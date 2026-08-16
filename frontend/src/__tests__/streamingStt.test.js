@@ -3,6 +3,8 @@ import {
   startStreamingStt,
   utteranceLooksIncomplete,
   sttCommitHangoverMs,
+  stitchHeard,
+  isTranscriptExtension,
   STT_INCOMPLETE_HANGOVER_MS,
   STT_MUTE_COMMIT_MS,
 } from '../utils/streamingStt'
@@ -225,6 +227,36 @@ describe('startStreamingStt hangover', () => {
     expect(onFinal.mock.calls[0][0]).toMatch(/relevant/i)
   })
 
+  it('stitches a mid-thought when Grok resets the transcript after a pause', async () => {
+    const onFinal = vi.fn()
+    const onPartial = vi.fn()
+    const ws = await readyAndPartial(onFinal, onPartial)
+    ws.onmessage({
+      data: JSON.stringify({
+        type: 'transcript.partial',
+        text: 'I want you to check',
+        speech_final: true,
+        is_final: true,
+      }),
+    })
+    ws.onmessage({
+      data: JSON.stringify({
+        type: 'transcript.partial',
+        text: 'this five nine three six Pulse task',
+        speech_final: false,
+        is_final: false,
+      }),
+    })
+    expect(onPartial).toHaveBeenLastCalledWith(
+      expect.stringMatching(/I want you to check.*five nine three six/i),
+      expect.any(Object),
+    )
+    await vi.advanceTimersByTimeAsync(STT_INCOMPLETE_HANGOVER_MS + 200)
+    expect(onFinal).toHaveBeenCalledTimes(1)
+    expect(onFinal.mock.calls[0][0]).toMatch(/I want you to check/i)
+    expect(onFinal.mock.calls[0][0]).toMatch(/five nine three six/i)
+  })
+
   it('hintTurnComplete commits the last partial after a short mute delay', async () => {
     const onFinal = vi.fn()
     const controller = startStreamingStt({ token: 'token', onFinal })
@@ -244,5 +276,27 @@ describe('startStreamingStt hangover', () => {
     expect(onFinal).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(2)
     expect(onFinal).toHaveBeenCalledWith('check the s1 drive', expect.any(Object))
+  })
+})
+
+describe('stitchHeard', () => {
+  it('keeps a growing Grok transcript', () => {
+    expect(stitchHeard('I want you to check', 'I want you to check this task')).toBe(
+      'I want you to check this task',
+    )
+    expect(isTranscriptExtension('I want you to check', 'I want you to check this task')).toBe(true)
+  })
+
+  it('joins a reset mid-thought instead of dropping the first clause', () => {
+    expect(stitchHeard('I want you to check', 'this five nine three six Pulse task')).toBe(
+      'I want you to check this five nine three six Pulse task',
+    )
+    expect(isTranscriptExtension('I want you to check', 'this five nine three six Pulse task')).toBe(false)
+  })
+
+  it('does not duplicate an overlapping second clause', () => {
+    expect(
+      stitchHeard('I want you to check Whether you can', 'Whether you can SSH into s1'),
+    ).toBe('I want you to check Whether you can SSH into s1')
   })
 })

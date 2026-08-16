@@ -77,7 +77,7 @@ export default function LiveVoiceOverlay({
             </span>
             <span className="hidden truncate text-xs text-white/55 sm:inline">{agentLabel}</span>
           </div>
-          <p className="mt-0.5 truncate text-xs text-white/55">{caption}</p>
+          <p data-testid="live-hud-caption" className="mt-0.5 truncate text-xs text-white/55">{caption}</p>
           <p className="mt-0.5 flex items-center gap-1 text-[10px] uppercase tracking-[0.18em] text-white/35">
             <LiveWaveformIcon className="h-3 w-3" active={!muted && callState !== 'error'} />
             Live with {agentLabel}
