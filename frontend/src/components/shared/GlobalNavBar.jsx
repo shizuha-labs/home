@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { LayoutDashboard, Cpu, ListChecks, Shield, Search, Menu, X, LogOut } from 'lucide-react'
 import ThemeToggle from '../ThemeToggle'
+import HaneChip from './HaneChip'
 import { AppSwitcher } from '@shizuha/ui'
 import { useAuth } from '../../contexts/AuthContext'
 import { isHomeAppPath } from '../../utils/conversationRoute'
@@ -105,6 +106,7 @@ export default function GlobalNavBar() {
             </button>
 
             <ThemeToggle />
+            {isAuthenticated && <HaneChip />}
 
             {/* Desktop User Menu */}
             <div className="hidden md:flex items-center gap-2 ml-2">
