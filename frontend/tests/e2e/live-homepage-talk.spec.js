@@ -17,6 +17,9 @@
  * Credentials: HRITIK_USER/HRITIK_PASS, or ~/.shizuha/operator-ui-creds.
  * Never commit or print the password.
  */
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { test, expect } from '@playwright/test'
 import {
   KNOWN_THREAD,
@@ -33,6 +36,11 @@ import {
   homeMainScroll,
   visibleTalkText,
 } from './live-operator.js'
+
+const STATE = path.join(os.tmpdir(), `shizuha-live-qa-${process.pid}.json`)
+if (!fs.existsSync(STATE)) {
+  fs.writeFileSync(STATE, JSON.stringify({ cookies: [], origins: [] }))
+}
 
 const LIVE = process.env.SHIZUHA_LIVE_E2E === '1'
 const CREDS = loadOperatorCreds()
@@ -53,6 +61,23 @@ test.use({
 })
 
 test.describe.configure({ mode: 'serial' })
+
+test.beforeAll(async ({ browser }) => {
+  const context = await browser.newContext({
+    viewport: { width: 1440, height: 900 },
+    permissions: ['microphone'],
+  })
+  const page = await context.newPage()
+  await loginHome(page)
+  await context.storageState({ path: STATE })
+  await context.close()
+})
+
+test.afterAll(() => {
+  try { fs.unlinkSync(STATE) } catch { /* tmp */ }
+})
+
+test.use({ storageState: STATE })
 
 async function waitForNewAgentReply(page, probe, timeout = 60000) {
   const strip = page.getByTestId('mini-chat-scroll')
@@ -83,8 +108,9 @@ async function waitForNewAgentReply(page, probe, timeout = 60000) {
 
 test('operator homepage Live: typed turn, no ghosts, HUD unsticks, strip scrolls, SPA keeps HUD', async ({ page }) => {
   test.setTimeout(240000)
-  const session = await loginHome(page)
-  expect(String(session.user.username || '').toLowerCase()).toBeTruthy()
+  await page.goto('/')
+  await page.waitForLoadState('domcontentloaded')
+  await expect(page.getByTestId('home-live-button')).toBeVisible({ timeout: 20000 })
   await shot(page, '01-home-after-login')
 
   await test.step('dashboard is the logged-in ChatHome, not a remounted landing page', async () => {
@@ -236,7 +262,8 @@ test('operator homepage Live: typed turn, no ghosts, HUD unsticks, strip scrolls
 
 test('homepage Live Pulse question gets a real reply, not an ack leftover', async ({ page }) => {
   test.setTimeout(240000)
-  await loginHome(page)
+  await page.goto('/')
+  await expect(page.getByTestId('home-live-button')).toBeVisible({ timeout: 20000 })
   await page.getByTestId('home-live-button').click()
   await expect(page.getByTestId('live-voice-overlay')).toBeVisible({ timeout: 20000 })
   const pulseProbe = `live-qa ${Date.now()}: what Pulse tasks are on my queue? one short sentence`
@@ -256,7 +283,6 @@ test('homepage Live Pulse question gets a real reply, not an ack leftover', asyn
 
 test('known operator thread hides leftover Replied. / Keyterms and keeps Live chrome', async ({ page }) => {
   test.setTimeout(120000)
-  await loginHome(page)
   await page.goto(`/c/${KNOWN_THREAD}`)
   await page.waitForLoadState('domcontentloaded')
   await expect(page.getByTestId('thread-live-button')).toBeVisible({ timeout: 20000 })

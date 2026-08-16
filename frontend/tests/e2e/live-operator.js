@@ -29,28 +29,40 @@ export function loadOperatorCreds() {
 export async function loginHome(page) {
   const { user, pass } = loadOperatorCreds()
   await page.goto('/id/login?continue=/')
-  await page.waitForSelector('#username, input[type="password"]', { timeout: 20000 })
-  if (await page.locator('#username').count()) {
-    await page.fill('#username', user)
-    await page.fill('#password', pass)
+  await page.waitForLoadState('domcontentloaded')
+  if (!page.url().includes('/id/login')) {
+    await page.goto('/')
   } else {
-    const inputs = page.locator('form input')
-    const n = await inputs.count()
-    for (let i = 0; i < n; i += 1) {
-      const type = await inputs.nth(i).getAttribute('type')
-      if (type === 'password') await inputs.nth(i).fill(pass)
-      else if (type !== 'hidden' && type !== 'submit') await inputs.nth(i).fill(user)
+    await page.waitForSelector('#username, input[type="password"]', { timeout: 20000 })
+    let lastStatus = 0
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (await page.locator('#username').count()) {
+        await page.fill('#username', user)
+        await expect(page.locator('#username')).toHaveValue(user)
+        await page.fill('#password', pass)
+      } else {
+        const inputs = page.locator('form input')
+        const n = await inputs.count()
+        for (let i = 0; i < n; i += 1) {
+          const type = await inputs.nth(i).getAttribute('type')
+          if (type === 'password') await inputs.nth(i).fill(pass)
+          else if (type !== 'hidden' && type !== 'submit') await inputs.nth(i).fill(user)
+        }
+      }
+      const loginResponsePromise = page.waitForResponse(
+        (response) => response.url().includes('/id/api/auth/login/')
+          && response.request().method() === 'POST',
+        { timeout: 30000 },
+      )
+      await page.locator('button[type="submit"], input[type="submit"]').first().click()
+      const loginResponse = await loginResponsePromise
+      lastStatus = loginResponse.status()
+      if (loginResponse.ok()) break
+      if (attempt < 2) await page.waitForTimeout(1500 * (attempt + 1))
     }
+    expect(lastStatus, 'operator form login').toBeLessThan(400)
+    await page.waitForURL((url) => !url.toString().includes('/id/login'), { timeout: 30000 })
   }
-  const loginResponsePromise = page.waitForResponse(
-    (response) => response.url().includes('/id/api/auth/login/')
-      && response.request().method() === 'POST',
-    { timeout: 30000 },
-  )
-  await page.locator('button[type="submit"], input[type="submit"]').first().click()
-  const loginResponse = await loginResponsePromise
-  expect(loginResponse.ok(), 'operator form login').toBeTruthy()
-  await page.waitForURL((url) => !url.toString().includes('/id/login'), { timeout: 30000 })
 
   const access = await bearerToken(page)
   expect(access, 'access token after login').toBeTruthy()
