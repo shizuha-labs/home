@@ -31,6 +31,12 @@ describe('home agent preference', () => {
     expect(resolveHomeAgentUsername('yuna', { email: 'hothritik1@gmail.com' })).toBe('yuna')
   })
 
+  it('does not send a regular or QA user to the operator Ena seat', () => {
+    expect(resolveHomeAgentUsername('', { email: 'liveqa@shizuha.com' })).toBe('yuna')
+    expect(resolveHomeAgentUsername('', { email: 'someone@example.com' })).toBe('yuna')
+    expect(resolveHomeAgentUsername('hina', { email: 'liveqa@shizuha.com' })).toBe('yuna')
+  })
+
   it('round-trips localStorage', () => {
     writeHomeAgentPref('cora')
     expect(readHomeAgentPref()).toBe('cora')
@@ -51,6 +57,7 @@ describe('home agent preference', () => {
     ]
     expect(findAgentConversation(conversations, 'cora')?.id).toBe('b')
     expect(participantMatchesAgent(conversations[0].participants[0], 'Shizuha')).toBe(true)
+    expect(participantMatchesAgent({ user_name: 'Ena QA', email: 'enaqa@shizuha.com' }, 'enaqa')).toBe(true)
   })
 
   it('lists prior agent DMs for the picker', () => {

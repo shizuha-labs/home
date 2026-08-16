@@ -17,6 +17,8 @@ import {
   bearerToken,
   homeCompose,
   hudState,
+  liveAgentUsername,
+  selectHomeAgent,
   shot,
   waitHudLeavesSpeaking,
 } from './live-operator.js'
@@ -129,7 +131,10 @@ export async function waitUntilListening(page, timeout = 20000) {
 }
 
 export async function startSpokenLive(page) {
-  await page.getByTestId('home-live-button').click()
+  if (!page.url().includes('/c/')) {
+    await selectHomeAgent(page, liveAgentUsername())
+  }
+  await page.getByTestId('thread-live-button').click()
   const hud = page.getByTestId('live-voice-overlay')
   await expect(hud).toBeVisible({ timeout: 20000 })
   await page.evaluate(async () => {
@@ -167,8 +172,10 @@ export async function composeValue(page) {
 export async function miniChatTurns(page) {
   return page.evaluate(() => {
     const root = document.querySelector('[data-testid="mini-chat-scroll"]')
+      || document.querySelector('[data-testid="connect-message-list"]')
     if (!root) return []
-    return [...root.querySelectorAll(':scope > div')].map((row) => {
+    const nodes = root.querySelectorAll('.flex.justify-end, .flex.justify-start')
+    return [...nodes].map((row) => {
       const mine = /\bjustify-end\b/.test(row.className)
       const raw = (row.innerText || '').trim()
       const text = raw.replace(/^[A-Za-z][A-Za-z0-9 ._-]{0,24}:\s*/, '')
@@ -176,6 +183,8 @@ export async function miniChatTurns(page) {
     }).filter((row) => (
       row.text
       && !/Say something —|Loading conversation/i.test(row.text)
+      && !/^\d{1,2}:\d{2}\s*(AM|PM)$/i.test(row.text)
+      && !/^(EQ|YU|Ena QA)$/i.test(row.text)
     ))
   })
 }
@@ -198,7 +207,7 @@ export function parseTurns(text) {
       else if (body) agent.push(body)
       continue
     }
-    const ena = line.match(/^Ena:\s*(.*)$/i)
+    const ena = line.match(/^(?:Ena QA|Ena|Yuna):\s*(.*)$/i)
     if (ena) {
       if (ena[1]) agent.push(ena[1])
       continue
@@ -293,7 +302,8 @@ export async function waitForNewUserTurn(page, beforeTurns, pattern, timeout = 2
           last = later
         }
       }
-      return { turn: added[added.length - 1] || hit, turns: now, added }
+      const matched = [...added].reverse().find((row) => re.test(row.text)) || hit
+      return { turn: matched, turns: now, added }
     }
     await page.waitForTimeout(350)
   }

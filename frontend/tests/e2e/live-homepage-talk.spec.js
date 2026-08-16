@@ -14,8 +14,8 @@
  * Run against production before shipping home Live/voice:
  *   npm run test:e2e:live
  *
- * Credentials: HRITIK_USER/HRITIK_PASS, or ~/.shizuha/operator-ui-creds.
- * Never commit or print the password.
+ * Credentials: ~/.shizuha/live-qa-creds (liveqa → Yuna).
+ * Never the operator mailbox. Never commit or print the password.
  */
 import fs from 'node:fs'
 import os from 'node:os'
@@ -23,7 +23,7 @@ import path from 'node:path'
 import { test, expect } from '@playwright/test'
 import {
   KNOWN_THREAD,
-  loadOperatorCreds,
+  loadLiveCallerCreds,
   loginHome,
   authHeaders,
   shot,
@@ -43,10 +43,12 @@ if (!fs.existsSync(STATE)) {
 }
 
 const LIVE = process.env.SHIZUHA_LIVE_E2E === '1'
-const CREDS = loadOperatorCreds()
+const CREDS = loadLiveCallerCreds()
+const OPERATOR = process.env.SHIZUHA_LIVE_OPERATOR_E2E === '1'
 
-test.skip(!LIVE, 'set SHIZUHA_LIVE_E2E=1 to run operator live homepage talk QA')
-test.skip(!CREDS.user || !CREDS.pass, 'live homepage talk QA needs operator creds')
+test.skip(!LIVE, 'set SHIZUHA_LIVE_E2E=1 to run live homepage talk QA')
+test.skip(!CREDS.user || !CREDS.pass, 'live homepage talk QA needs ~/.shizuha/live-qa-creds')
+test.skip(/hritik/i.test(CREDS.user), 'live homepage talk QA must not use the operator mailbox')
 
 test.use({
   viewport: { width: 1440, height: 900 },
@@ -260,13 +262,13 @@ test('operator homepage Live: typed turn, no ghosts, HUD unsticks, strip scrolls
   if (await end.count()) await end.click().catch(() => {})
 })
 
-test('homepage Live Pulse question gets a real reply, not an ack leftover', async ({ page }) => {
+test('homepage Live asks the test agent a real question and gets a real reply', async ({ page }) => {
   test.setTimeout(240000)
   await page.goto('/')
   await expect(page.getByTestId('home-live-button')).toBeVisible({ timeout: 20000 })
   await page.getByTestId('home-live-button').click()
   await expect(page.getByTestId('live-voice-overlay')).toBeVisible({ timeout: 20000 })
-  const pulseProbe = `live-qa ${Date.now()}: what Pulse tasks are on my queue? one short sentence`
+  const pulseProbe = `live-qa ${Date.now()}: say your name in one short sentence`
   await sendHomeCompose(page, pulseProbe)
   await expect(page.getByTestId('mini-chat-scroll')).toContainText(pulseProbe, { timeout: 20000 })
   const found = await waitForNewAgentReply(page, pulseProbe, 120000)
@@ -283,6 +285,7 @@ test('homepage Live Pulse question gets a real reply, not an ack leftover', asyn
 })
 
 test('known operator thread hides leftover Replied. / Keyterms and keeps Live chrome', async ({ page }) => {
+  test.skip(!OPERATOR, 'operator-thread chrome is opt-in via SHIZUHA_LIVE_OPERATOR_E2E=1')
   test.setTimeout(120000)
   await page.goto(`/c/${KNOWN_THREAD}`)
   await page.waitForLoadState('domcontentloaded')

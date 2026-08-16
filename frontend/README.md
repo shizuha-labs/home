@@ -56,7 +56,7 @@ The bugs that shipped half-baked (leftover `Replied.`, Keyterms ghosts, HUD stuc
 npm run test:e2e:live
 ```
 
-That sets `SHIZUHA_LIVE_E2E=1` and `BASE_URL=https://shizuha.com`, then runs `tests/e2e/live-homepage-talk.spec.js`. Credentials come from `HRITIK_USER` / `HRITIK_PASS` or `~/.shizuha/operator-ui-creds` (two lines: username, password). Do not commit or print the password.
+That sets `SHIZUHA_LIVE_E2E=1` and `BASE_URL=https://shizuha.com`, then runs `tests/e2e/live-homepage-talk.spec.js`. Credentials come from `LIVE_QA_USER` / `LIVE_QA_PASS` or `~/.shizuha/live-qa-creds` (two lines: username, password) and talk to **Yuna**, not the operator Ena thread. Do not commit or print the password. Operator-path chrome is opt-in via `SHIZUHA_LIVE_OPERATOR_E2E=1`.
 
 The live suite logs in through `/id/login?continue=/`, starts Live, types a unique turn, waits for a **new** agent reply, and asserts the same surfaces the operator sees:
 

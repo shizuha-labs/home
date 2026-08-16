@@ -277,7 +277,7 @@ function ChatHomeInner() {
           if (!res.ok) return []
           const data = await res.json()
           return (data.results ?? data ?? []).map((u) => ({
-            userId: u.id || u.user_id,
+            userId: u.user_id || u.id,
             username: u.username,
             displayName: u.first_name || u.display_name || u.username,
             email: u.email,

@@ -36,24 +36,34 @@ export function suggestedHomeAgentUsername(user) {
   return ''
 }
 
+/** Non-CEO Live must not land on the operator's Ena thread. */
+export const DEFAULT_HOME_AGENT = 'yuna'
+
 /** Prefer stored pick, but never land Live on a retired/stopped seat. */
 export function resolveHomeAgentUsername(preferred, user) {
   const raw = String(preferred || '').trim().toLowerCase()
   if (raw && !RETIRED_HOME_AGENTS.has(raw)) return raw
-  return suggestedHomeAgentUsername(user) || 'ena'
+  return suggestedHomeAgentUsername(user) || DEFAULT_HOME_AGENT
 }
 
 export function participantMatchesAgent(participant, username) {
   if (!participant || !username) return false
   const want = String(username).toLowerCase()
+  const compact = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9@.]/g, '')
+  const wantCompact = compact(want)
   const names = [
     participant.user_name,
     participant.username,
     participant.name,
     participant.email,
+    participant.display_name,
   ]
-  return names.some((n) => String(n || '').toLowerCase() === want
-    || String(n || '').toLowerCase().split('@')[0] === want)
+  return names.some((n) => {
+    const s = String(n || '').toLowerCase()
+    return s === want
+      || s.split('@')[0] === want
+      || compact(s) === wantCompact
+  })
 }
 
 export function findAgentConversation(conversations, username) {
