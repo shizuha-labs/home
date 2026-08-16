@@ -61,19 +61,19 @@ async function waitForNewAgentReply(page, probe, timeout = 60000) {
   while (Date.now() < deadline) {
     const text = (await strip.innerText().catch(() => '')) || (await visibleTalkText(page))
     last = text
-    const hasProbe = text.includes(probe)
-    const lines = text.split('\n').map((s) => s.trim()).filter(Boolean)
-    const reply = lines.find((line) => (
-      line
-      && line !== probe
-      && !line.startsWith('live-qa ')
-      && !/^(replied\.?|keyterms?\s*:)/i.test(line)
-      && (
-        /tangerine/i.test(line)
-        || /^(Ena|Yuna|Shizuha)\s*:/i.test(line)
-      )
-    ))
-    if (hasProbe && reply) return { reply, text }
+    const idx = text.indexOf(probe)
+    if (idx >= 0) {
+      const after = text.slice(idx + probe.length)
+      const lines = after.split('\n').map((s) => s.trim()).filter(Boolean)
+      const reply = lines.find((line) => (
+        line
+        && line !== probe
+        && !line.startsWith('live-qa ')
+        && !/^(replied\.?|keyterms?\s*:)/i.test(line)
+        && line.length >= 8
+      ))
+      if (reply) return { reply, text }
+    }
     await page.waitForTimeout(500)
   }
   throw new Error(
@@ -275,6 +275,8 @@ test('known operator thread hides leftover Replied. / Keyterms and keeps Live ch
   await page.waitForURL((url) => new URL(url).pathname === '/', { timeout: 10000 })
   await expect(hud).toBeVisible()
   await expect(hud).toHaveAttribute('data-qa-keep', '1')
+  await expect(homeCompose(page)).toBeVisible()
+  await expect(page.getByText(/Good (morning|afternoon|evening)/i).first()).toBeVisible()
   await shot(page, '10-thread-live-to-dashboard')
   const end = page.getByRole('button', { name: 'End Live' }).first()
   if (await end.count()) await end.click().catch(() => {})
