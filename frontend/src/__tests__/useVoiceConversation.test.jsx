@@ -570,6 +570,8 @@ describe('MiniShizuhaChat — voice failure surface', () => {
           callState="listening"
           muted={false}
           lastHeard="hello"
+          speakEnabled
+          onToggleSpeak={() => {}}
           onToggleMute={() => {}}
           onEnd={() => {}}
           ttsSpeed={1.2}
@@ -581,7 +583,9 @@ describe('MiniShizuhaChat — voice failure surface', () => {
     expect(hud).toBeInTheDocument()
     expect(hud).toHaveAttribute('data-mode', 'hud')
     expect(hud).toHaveClass('pointer-events-none')
+    expect(hud.className).toMatch(/top-\[7\.5rem\]/)
     expect(hud.className).not.toMatch(/\binset-0\b/)
+    expect(screen.getByTestId('hud-speak-button')).toHaveAttribute('title', 'Voice replies on')
     expect(screen.getByRole('region', { name: /live voice/i })).toHaveClass('bg-gray-950')
     expect(screen.getByRole('region', { name: /live voice/i })).toBeInTheDocument()
     expect(screen.queryByRole('dialog')).toBeNull()

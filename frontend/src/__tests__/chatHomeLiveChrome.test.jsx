@@ -270,6 +270,19 @@ describe('ChatHome Live chrome', () => {
     expect(screen.getByTestId('thread-speak-button')).toHaveAttribute('title', 'Voice replies off')
   })
 
+  it('cuts in-flight TTS from the HUD Voice replies button', () => {
+    localStorage.setItem('shizuha_speak_replies', '1')
+    voice.callState = 'speaking'
+    renderAt(`/c/${CONV}`)
+    act(() => {
+      screen.getByTestId('hud-speak-button').click()
+    })
+    expect(speakText.stop).toHaveBeenCalled()
+    expect(voice.cancelSpeak).toHaveBeenCalled()
+    expect(screen.getByTestId('hud-speak-button')).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByTestId('hud-speak-button')).toHaveAttribute('title', 'Voice replies off')
+  })
+
   it('cuts in-flight TTS from the mini-chat Voice replies button', () => {
     localStorage.setItem('shizuha_speak_replies', '1')
     localStorage.setItem('shizuha_home_agent', 'ena')

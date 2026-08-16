@@ -971,6 +971,8 @@ function ChatHomeInner() {
           lastHeard={lastHeard}
           lastReply={lastAgentReply}
           error={callError?.message || sendError || null}
+          speakEnabled={speakReplies}
+          onToggleSpeak={toggleSpeakReplies}
           onToggleMute={toggleMute}
           onEnd={endCall}
           onRetry={callError?.canRetry ? retryCall : undefined}
