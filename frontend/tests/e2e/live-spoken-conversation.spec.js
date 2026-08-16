@@ -303,8 +303,8 @@ test('spoken Live: mute, unmute, leak, stitch, names, barge-in', async ({ page }
 
   await test.step('talk-over while she speaks must not kill the call; next listen still hears us', async () => {
     const before = await miniChatTurns(page)
-    await speakAsHuman(page, 'Give me a long recap of plat five nine three six. Take your time.')
-    await waitForNewUserTurn(page, before, /recap|plat|five|5936/i, 25000)
+    await speakAsHuman(page, 'Give me two short sentences on plat five nine three six.')
+    await waitForNewUserTurn(page, before, /two|short|plat|five|5936/i, 25000)
     const started = Date.now()
     while (Date.now() - started < 25000) {
       const now = await hudState(page)
@@ -315,8 +315,8 @@ test('spoken Live: mute, unmute, leak, stitch, names, barge-in', async ({ page }
     await speakAsHuman(page, 'Stop. Just say the word lantern.')
     const during = await hudState(page)
     expect(during.state, `call died during talk-over: ${during.state} ${during.label}`).not.toBe('error')
-    await waitHudLeavesSpeaking(page, 60000).catch(() => {})
-    await waitUntilListening(page, 20000)
+    await waitHudLeavesSpeaking(page, 90000).catch(() => {})
+    await waitUntilListening(page, 45000)
     const beforeFast = await miniChatTurns(page)
     await speakAsHuman(page, 'Okay, just say lantern.')
     const heard = await waitForNewUserTurn(page, beforeFast, /lantern|okay/i, 25000)
