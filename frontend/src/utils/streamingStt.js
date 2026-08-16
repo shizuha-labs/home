@@ -1,3 +1,22 @@
+/** After a complete-looking speech_final, wait this long for more words. */
+export const STT_COMPLETE_HANGOVER_MS = 600
+/** After a hanging clause ("I want you to check"), wait longer. */
+export const STT_INCOMPLETE_HANGOVER_MS = 1500
+
+const INCOMPLETE_TAIL = /\b(a|an|and|at|but|check|for|if|in|of|on|or|so|the|to|with|my|your|this|that|these|those|first|second|third|want|see|look|tell|give|pull|open|about)$/i
+
+/** True when the transcript is a mid-thought, not a finished command. */
+export function utteranceLooksIncomplete(text) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim()
+  if (!t) return true
+  if (/[.?!…]$/.test(t)) return false
+  return INCOMPLETE_TAIL.test(t)
+}
+
+export function sttCommitHangoverMs(text) {
+  return utteranceLooksIncomplete(text) ? STT_INCOMPLETE_HANGOVER_MS : STT_COMPLETE_HANGOVER_MS
+}
+
 const wsUrl = () => {
   const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   return `${scheme}//${window.location.host}/voice/api/stt/stream`
@@ -34,11 +53,19 @@ export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, 
   let firstAudioAt = 0
   let firstPartialMs = null
   let lastLoudAt = 0
+  let commitTimer = null
+  let pendingFinal = null
 
   const emitIdle = () => {
     if (idleDelivered) return
     idleDelivered = true
     onState?.('idle')
+  }
+
+  const clearCommit = () => {
+    if (commitTimer != null) window.clearTimeout(commitTimer)
+    commitTimer = null
+    pendingFinal = null
   }
 
   const stopResources = () => {
@@ -57,6 +84,7 @@ export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, 
   const close = () => {
     cancelled = true
     captureEnded = true
+    clearCommit()
     if (closeTimer) window.clearTimeout(closeTimer)
     closeTimer = null
     stopResources()
@@ -94,11 +122,35 @@ export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, 
     const clean = String(text || '').trim()
     if (!clean || finalDelivered) return
     finalDelivered = true
+    clearCommit()
     onFinal?.(clean, event)
+  }
+
+  const commitPending = () => {
+    const pending = pendingFinal
+    commitTimer = null
+    pendingFinal = null
+    if (!pending || finalDelivered) return
+    finishCapture(true)
+    deliverFinal(pending.text, pending.event)
+  }
+
+  const armCommit = (text, event) => {
+    if (finalDelivered || cancelled) return
+    if (commitTimer != null) window.clearTimeout(commitTimer)
+    pendingFinal = { text, event }
+    commitTimer = window.setTimeout(commitPending, sttCommitHangoverMs(text))
   }
 
   const controller = {
     stop: () => {
+      if (pendingFinal) {
+        const pending = pendingFinal
+        clearCommit()
+        finishCapture(true)
+        deliverFinal(pending.text, pending.event)
+        return
+      }
       if (!ready) {
         cancelled = true
         close()
@@ -187,9 +239,13 @@ export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, 
         }
         const text = String(event.text || '').trim()
         if (text) onPartial?.(text, timedEvent)
-        if (event.speech_final) {
-          finishCapture(true)
-          deliverFinal(text, timedEvent)
+        if (event.speech_final && text) {
+          // Do not tear the mic down on the first VAD silence. Grok's
+          // speech_final can fire mid-clause; hangover + Smart Turn wait
+          // for the rest of the sentence (industry endpointing).
+          armCommit(text, timedEvent)
+        } else if (text && pendingFinal) {
+          clearCommit()
         }
         return
       }

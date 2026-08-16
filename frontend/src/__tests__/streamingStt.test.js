@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { startStreamingStt } from '../utils/streamingStt'
+import {
+  startStreamingStt,
+  utteranceLooksIncomplete,
+  sttCommitHangoverMs,
+  STT_INCOMPLETE_HANGOVER_MS,
+} from '../utils/streamingStt'
 
 const deferred = () => {
   let resolve
@@ -103,5 +108,115 @@ describe('startStreamingStt startup cancellation', () => {
     expect(track.stop).toHaveBeenCalled()
     expect(sockets[0].close).toHaveBeenCalled()
     expect(context.createMediaStreamSource.mock.results[0].value.connect).not.toHaveBeenCalled()
+  })
+})
+
+describe('utterance endpointing', () => {
+  it('treats hanging clauses as incomplete and finished sentences as done', () => {
+    expect(utteranceLooksIncomplete('I want you to check')).toBe(true)
+    expect(utteranceLooksIncomplete('check the second task if it is relevant.')).toBe(false)
+    expect(utteranceLooksIncomplete("What's up")).toBe(false)
+    expect(sttCommitHangoverMs('I want you to check')).toBe(STT_INCOMPLETE_HANGOVER_MS)
+  })
+})
+
+describe('startStreamingStt hangover', () => {
+  let sockets
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    sockets = []
+    class FakeWebSocket {
+      static OPEN = 1
+      static CONNECTING = 0
+      constructor() {
+        this.readyState = FakeWebSocket.OPEN
+        this.close = vi.fn()
+        this.send = vi.fn()
+        sockets.push(this)
+      }
+    }
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const context = {
+      sampleRate: 16000,
+      resume: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+      createMediaStreamSource: vi.fn(() => ({ connect: vi.fn(), disconnect: vi.fn() })),
+      createScriptProcessor: vi.fn(() => ({ connect: vi.fn(), disconnect: vi.fn(), onaudioprocess: null })),
+      createGain: vi.fn(() => ({ connect: vi.fn(), disconnect: vi.fn(), gain: { value: 1 } })),
+      destination: {},
+    }
+    vi.stubGlobal('AudioContext', class { constructor() { return context } })
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] }) },
+    })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
+
+  const readyAndPartial = async (onFinal, onPartial) => {
+    startStreamingStt({ token: 'token', onFinal, onPartial })
+    for (let i = 0; i < 8; i += 1) await Promise.resolve()
+    const ws = sockets[0]
+    expect(ws).toBeTruthy()
+    ws.onmessage({ data: JSON.stringify({ type: 'transcript.created' }) })
+    return ws
+  }
+
+  it('does not send a mid-clause speech_final until the hangover elapses', async () => {
+    const onFinal = vi.fn()
+    const ws = await readyAndPartial(onFinal)
+    ws.onmessage({
+      data: JSON.stringify({
+        type: 'transcript.partial',
+        text: 'I want you to check',
+        speech_final: true,
+        is_final: true,
+      }),
+    })
+    expect(onFinal).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(400)
+    expect(onFinal).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(STT_INCOMPLETE_HANGOVER_MS)
+    expect(onFinal).toHaveBeenCalledWith('I want you to check', expect.any(Object))
+  })
+
+  it('cancels the premature commit when the speaker continues', async () => {
+    const onFinal = vi.fn()
+    const onPartial = vi.fn()
+    const ws = await readyAndPartial(onFinal, onPartial)
+    ws.onmessage({
+      data: JSON.stringify({
+        type: 'transcript.partial',
+        text: 'I want you to check',
+        speech_final: true,
+        is_final: true,
+      }),
+    })
+    ws.onmessage({
+      data: JSON.stringify({
+        type: 'transcript.partial',
+        text: 'I want you to check the second task if it is relevant',
+        speech_final: false,
+        is_final: false,
+      }),
+    })
+    await vi.advanceTimersByTimeAsync(STT_INCOMPLETE_HANGOVER_MS + 200)
+    expect(onFinal).not.toHaveBeenCalled()
+    ws.onmessage({
+      data: JSON.stringify({
+        type: 'transcript.partial',
+        text: 'I want you to check the second task if it is relevant.',
+        speech_final: true,
+        is_final: true,
+      }),
+    })
+    await vi.advanceTimersByTimeAsync(700)
+    expect(onFinal).toHaveBeenCalledTimes(1)
+    expect(onFinal.mock.calls[0][0]).toMatch(/relevant/i)
   })
 })
