@@ -22,7 +22,8 @@ import {
   RETIRED_HOME_AGENTS,
   writeHomeAgentPref,
 } from '../hooks/useHomeAgentPreference'
-import { useVoiceInput, useVoiceConversation, speakText, speakDelta, nextSpokenSentences, spokenCovers, stripSpeakableMarkup, isTalkAckText, isGhostTranscript } from '../hooks/useVoice'
+import { useVoiceInput, useVoiceConversation, speakText, speakDelta, nextSpokenSentences, spokenCovers, stripSpeakableMarkup, isTalkAckText, isGhostTranscript, readTtsSpeed, cycleTtsSpeed } from '../hooks/useVoice'
+import TtsSpeedButton from '../components/assistant/TtsSpeedButton'
 import { useHomeSummary } from '../hooks/useHomeSummary'
 import { useHomeActivity } from '../hooks/useHomeActivity'
 import { getAccessToken, handleUnauthorized } from '../utils/auth'
@@ -117,6 +118,8 @@ function ChatHomeInner() {
   const [homeAgent, setHomeAgent] = useState(() => readHomeAgentPref())
   const [sendError, setSendError] = useState('')
   const [speakReplies, setSpeakReplies] = useState(() => localStorage.getItem('shizuha_speak_replies') === '1')
+  const [ttsSpeed, setTtsSpeed] = useState(() => readTtsSpeed())
+  const cycleTalkSpeed = useCallback(() => setTtsSpeed(cycleTtsSpeed()), [])
   const lastSpokenIdRef = useRef(null)
   const [showApps, setShowApps] = useState(false)
   const [showNewChat, setShowNewChat] = useState(false)
@@ -674,6 +677,7 @@ function ChatHomeInner() {
                   </svg>
                 </button>
               )}
+              <TtsSpeedButton speed={ttsSpeed} onCycle={cycleTalkSpeed} compact />
               <button
                 type="button"
                 data-testid="thread-speak-button"
@@ -833,6 +837,7 @@ function ChatHomeInner() {
                     </svg>
                   </button>
                 )}
+                <TtsSpeedButton speed={ttsSpeed} onCycle={cycleTalkSpeed} compact />
                 {liveCallButton('home-live-button', selectedPicker?.displayName || effectiveHomeAgent || 'agent')}
                 <button
                   type="button"
@@ -866,6 +871,8 @@ function ChatHomeInner() {
                 onClose={closeMiniChat}
                 speakEnabled={speakReplies}
                 onToggleSpeak={toggleSpeakReplies}
+                ttsSpeed={ttsSpeed}
+                onCycleSpeed={cycleTalkSpeed}
                 callState={callState}
                 callError={callError}
                 onToggleCall={toggleCall}
@@ -958,6 +965,8 @@ function ChatHomeInner() {
           onToggleMute={toggleMute}
           onEnd={endCall}
           onRetry={callError?.canRetry ? retryCall : undefined}
+          ttsSpeed={ttsSpeed}
+          onCycleSpeed={cycleTalkSpeed}
         />
       )}
 

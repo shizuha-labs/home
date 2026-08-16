@@ -1,4 +1,5 @@
 import LiveWaveformIcon from './LiveWaveformIcon'
+import TtsSpeedButton from './TtsSpeedButton'
 
 /**
  * Compact live-voice HUD. Talk, type, and keep dashboard + chat visible
@@ -15,6 +16,8 @@ export default function LiveVoiceOverlay({
   onToggleMute,
   onEnd,
   onRetry,
+  ttsSpeed,
+  onCycleSpeed,
 }) {
   const label =
     callState === 'connecting' ? 'Connecting'
@@ -82,6 +85,9 @@ export default function LiveVoiceOverlay({
         </div>
 
         <div className="flex shrink-0 items-center gap-1.5">
+          {typeof onCycleSpeed === 'function' && (
+            <TtsSpeedButton speed={ttsSpeed} onCycle={onCycleSpeed} />
+          )}
           <button
             type="button"
             onClick={onToggleMute}

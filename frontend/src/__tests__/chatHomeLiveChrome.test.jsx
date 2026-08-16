@@ -43,6 +43,9 @@ vi.mock('../hooks/useVoice', () => ({
   stripSpeakableMarkup: (s) => s,
   isTalkAckText: (text) => /^(replied|done|sent|ok|noted|pong sent)[.!]?$/i.test(String(text || '').trim()),
   isGhostTranscript: (text) => /^keyterms?\s*:/i.test(String(text || '').trim()),
+  readTtsSpeed: () => 1.2,
+  cycleTtsSpeed: () => 1.4,
+  formatTtsSpeed: (n) => `${n}×`,
 }))
 
 vi.mock('../hooks/useHomeSummary', () => ({
@@ -172,6 +175,7 @@ describe('ChatHome Live chrome', () => {
     expect(screen.getByTestId('thread-live-button')).toBeInTheDocument()
     expect(screen.getByTestId('thread-speak-button')).toBeInTheDocument()
     expect(screen.getByTestId('thread-mic-button')).toBeInTheDocument()
+    expect(screen.getByTestId('tts-speed-button')).toBeInTheDocument()
     expect(screen.getByTestId('message-list')).toBeInTheDocument()
     expect(screen.queryByTestId('live-voice-overlay')).not.toBeInTheDocument()
   })

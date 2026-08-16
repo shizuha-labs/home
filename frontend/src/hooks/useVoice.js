@@ -143,12 +143,13 @@ export async function speakText(text) {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${getAccessToken()}`,
         },
-        body: JSON.stringify({ text: clean }),
+        body: JSON.stringify({ text: clean, speed: readTtsSpeed() }),
       })
       if (res.ok) {
         const blob = await res.blob()
         const url = URL.createObjectURL(blob)
         const audio = new Audio(url)
+        audio.playbackRate = readTtsSpeed()
         currentAudio = audio
         await new Promise((resolve) => {
           audio.onended = () => { URL.revokeObjectURL(url); if (currentAudio === audio) currentAudio = null; resolve() }
@@ -175,8 +176,52 @@ speakText.stop = () => {
     try { currentAudio.pause() } catch { /* noop */ }
     currentAudio = null
   }
+  stopGaplessPlayback()
   if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel()
   stopSpeakStream()
+}
+
+// ── Talk speed (Grok TTS 0.7–1.5). Default 1.2 so Live does not linger. ──
+export const TTS_SPEED_KEY = 'shizuha_tts_speed'
+export const TTS_SPEED_PRESETS = [1, 1.2, 1.4]
+
+export function clampTtsSpeed(value) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return 1.2
+  return Math.min(1.5, Math.max(0.7, Math.round(n * 10) / 10))
+}
+
+export function readTtsSpeed() {
+  try {
+    return clampTtsSpeed(localStorage.getItem(TTS_SPEED_KEY) ?? 1.2)
+  } catch {
+    return 1.2
+  }
+}
+
+export function nextTtsSpeed(current = readTtsSpeed()) {
+  const cur = clampTtsSpeed(current)
+  const i = TTS_SPEED_PRESETS.findIndex((p) => p > cur + 0.01)
+  return i === -1 ? TTS_SPEED_PRESETS[0] : TTS_SPEED_PRESETS[i]
+}
+
+export function writeTtsSpeed(value) {
+  const next = clampTtsSpeed(value)
+  try { localStorage.setItem(TTS_SPEED_KEY, String(next)) } catch { /* private */ }
+  if (speakWs && speakWs.readyState === WebSocket.OPEN) {
+    stopSpeakStream()
+    startSpeakStream()
+  }
+  return next
+}
+
+export function cycleTtsSpeed() {
+  return writeTtsSpeed(nextTtsSpeed())
+}
+
+export function formatTtsSpeed(value = readTtsSpeed()) {
+  const n = clampTtsSpeed(value)
+  return `${n % 1 === 0 ? n.toFixed(0) : n.toFixed(1)}×`
 }
 
 // ── Streaming TTS (Grok WS via /voice/api/tts/stream, Kokoro backup) ────────
@@ -184,6 +229,10 @@ let speakWs = null
 let speakReady = null
 let speakQueue = Promise.resolve()
 let streamingTtsAvailable = null // null = unprobed
+let speakProvider = 'grok'
+let gaplessCtx = null
+let gaplessHead = 0
+const gaplessSources = []
 
 async function probeStreamingTts() {
   if (streamingTtsAvailable !== null) return streamingTtsAvailable
@@ -203,19 +252,64 @@ async function probeStreamingTts() {
   return streamingTtsAvailable
 }
 
-function playAudioChunk(b64, mime = 'audio/mpeg') {
-  const binary = atob(b64)
-  const bytes = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+function stopGaplessPlayback() {
+  for (const src of gaplessSources) {
+    try { src.stop() } catch { /* already stopped */ }
+  }
+  gaplessSources.length = 0
+  gaplessHead = 0
+}
+
+function playHtmlAudioChunk(bytes, mime, rate) {
   const blob = new Blob([bytes], { type: mime })
   const url = URL.createObjectURL(blob)
   const audio = new Audio(url)
+  audio.playbackRate = rate
   currentAudio = audio
   return new Promise((resolve) => {
     audio.onended = () => { URL.revokeObjectURL(url); if (currentAudio === audio) currentAudio = null; resolve() }
     audio.onerror = () => { URL.revokeObjectURL(url); if (currentAudio === audio) currentAudio = null; resolve() }
     audio.play().catch(() => resolve())
   })
+}
+
+function playAudioChunk(b64, mime = 'audio/mpeg') {
+  const binary = atob(b64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
+  // Grok already synthesized at the requested speed. Kokoro/HTML fallback
+  // needs a client playbackRate so Fast still shortens talk time.
+  const rate = speakProvider === 'grok' ? 1 : readTtsSpeed()
+  const Ctx = typeof AudioContext !== 'undefined'
+    ? AudioContext
+    : (typeof window !== 'undefined' ? window.webkitAudioContext : null)
+  if (!Ctx) return playHtmlAudioChunk(bytes, mime, rate)
+  try {
+    if (!gaplessCtx) gaplessCtx = new Ctx()
+    if (gaplessCtx.state === 'suspended') void gaplessCtx.resume()
+    const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+    return gaplessCtx.decodeAudioData(copy).then((buf) => {
+      const src = gaplessCtx.createBufferSource()
+      src.buffer = buf
+      src.playbackRate.value = rate
+      src.connect(gaplessCtx.destination)
+      const now = gaplessCtx.currentTime
+      if (gaplessHead < now + 0.02) gaplessHead = now + 0.02
+      src.start(gaplessHead)
+      const dur = buf.duration / (rate || 1)
+      gaplessHead += dur
+      gaplessSources.push(src)
+      return new Promise((resolve) => {
+        src.onended = () => {
+          const i = gaplessSources.indexOf(src)
+          if (i >= 0) gaplessSources.splice(i, 1)
+          resolve()
+        }
+      })
+    }).catch(() => playHtmlAudioChunk(bytes, mime, rate))
+  } catch {
+    return playHtmlAudioChunk(bytes, mime, rate)
+  }
 }
 
 function stopSpeakStream() {
@@ -243,16 +337,21 @@ export function startSpeakStream({ voice } = {}) {
           token: getAccessToken(),
           voice: voice || 'ara',
           language: 'en',
+          speed: readTtsSpeed(),
         }))
       }
       ws.onmessage = (event) => {
         let msg
         try { msg = JSON.parse(event.data) } catch { return }
         if (msg.type === 'ready') {
+          speakProvider = msg.provider || 'grok'
           clearTimeout(timer)
           resolve(true)
         } else if (msg.type === 'audio.delta' && msg.delta) {
-          speakQueue = speakQueue.then(() => playAudioChunk(msg.delta, msg.mime || 'audio/mpeg'))
+          // Schedule immediately. Waiting for the previous <audio> to end
+          // before starting the next chunk is what sounded like packet loss.
+          const played = playAudioChunk(msg.delta, msg.mime || 'audio/mpeg')
+          speakQueue = speakQueue.then(() => played)
         }
       }
       ws.onerror = () => { clearTimeout(timer); resolve(false) }

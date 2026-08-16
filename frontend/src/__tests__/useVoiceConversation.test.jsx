@@ -17,6 +17,9 @@ import {
   spokenCovers,
   isTalkAckText,
   isGhostTranscript,
+  clampTtsSpeed,
+  nextTtsSpeed,
+  formatTtsSpeed,
   isEchoUtterance,
   useVoiceConversation,
   VOICE_STREAM_BASE_BACKOFF_MS,
@@ -122,6 +125,18 @@ describe('nextSpokenSentences', () => {
     expect(mid.sentences).toEqual([])
     const done = nextSpokenSentences('almost there', mid.spoken, { flushRemainder: true })
     expect(done.sentences).toEqual(['almost there'])
+  })
+})
+
+describe('TTS talk speed', () => {
+  it('clamps to the Grok 0.7–1.5 range and cycles 1 / 1.2 / 1.4', () => {
+    expect(clampTtsSpeed(0.1)).toBe(0.7)
+    expect(clampTtsSpeed(9)).toBe(1.5)
+    expect(clampTtsSpeed('nope')).toBe(1.2)
+    expect(nextTtsSpeed(1)).toBe(1.2)
+    expect(nextTtsSpeed(1.2)).toBe(1.4)
+    expect(nextTtsSpeed(1.4)).toBe(1)
+    expect(formatTtsSpeed(1.2)).toBe('1.2×')
   })
 })
 
@@ -508,6 +523,8 @@ describe('MiniShizuhaChat — voice failure surface', () => {
           lastHeard="hello"
           onToggleMute={() => {}}
           onEnd={() => {}}
+          ttsSpeed={1.2}
+          onCycleSpeed={() => {}}
         />
       </div>,
     )
@@ -523,6 +540,7 @@ describe('MiniShizuhaChat — voice failure surface', () => {
     expect(screen.getByLabelText('End Live')).toBeInTheDocument()
     expect(screen.getByText(/Live with Hina/i)).toBeInTheDocument()
     expect(screen.getByText('hello')).toBeInTheDocument()
+    expect(screen.getByTestId('tts-speed-button')).toHaveTextContent('1.2×')
     screen.getByRole('button', { name: 'Dashboard' }).click()
     expect(onDash).toHaveBeenCalledOnce()
     const compose = screen.getByLabelText('Message Ena')

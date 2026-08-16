@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import LiveWaveformIcon from './LiveWaveformIcon'
 import { isTalkAckText, isGhostTranscript } from '../../hooks/useVoice'
+import TtsSpeedButton from './TtsSpeedButton'
 
 /**
  * MiniShizuhaChat — HIVE home inline chat (operator 2026-07-11).
@@ -29,6 +30,8 @@ export default function MiniShizuhaChat({
   onToggleCall,
   onRetryCall,
   onDismissCallError,
+  ttsSpeed,
+  onCycleSpeed,
 }) {
   const scrollRef = useRef(null)
   // 'error' is a terminal guidance surface, not an active call (CON-296).
@@ -108,6 +111,9 @@ export default function MiniShizuhaChat({
             >
               <LiveWaveformIcon className="h-3.5 w-3.5" active={callActive} />
             </button>
+          )}
+          {typeof onCycleSpeed === 'function' && (
+            <TtsSpeedButton speed={ttsSpeed} onCycle={onCycleSpeed} compact />
           )}
           {typeof onToggleSpeak === 'function' && (
             <button
