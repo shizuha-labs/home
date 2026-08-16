@@ -385,25 +385,45 @@ export async function speakLikeHuman(page, input) {
   const script = toScript(input)
   if (!script.length) return
   const token = await bearerToken(page)
-  await page.evaluate(async ({ phrases, token: bearer }) => {
+  const parts = []
+  for (const part of script) {
+    let lastErr = 'user TTS failed'
+    let body = null
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const res = await page.request.post('/voice/api/tts', {
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          data: { text: part.say, speed: part.speed || 0.95 },
+        })
+        if (res.ok()) {
+          body = Buffer.from(await res.body())
+          lastErr = ''
+          break
+        }
+        lastErr = `user TTS failed ${res.status()}`
+      } catch (err) {
+        lastErr = String(err?.message || err)
+      }
+      await page.waitForTimeout(700 * (attempt + 1))
+    }
+    if (!body) throw new Error(lastErr)
+    parts.push({ b64: body.toString('base64'), gap: part.gapAfterMs || 0 })
+  }
+  await page.evaluate(async ({ phrases }) => {
     const speak = window.__shizuhaSpeak
     if (!speak) throw new Error('spoken mic hook missing')
     await speak.resume()
     const decoded = []
     for (const part of phrases) {
-      const res = await fetch('/voice/api/tts', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${bearer}`,
-        },
-        body: JSON.stringify({ text: part.say, speed: part.speed || 0.95 }),
-      })
-      if (!res.ok) throw new Error(`user TTS failed ${res.status}`)
-      const raw = await res.arrayBuffer()
+      const binary = atob(part.b64)
+      const bytes = new Uint8Array(binary.length)
+      for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
       decoded.push({
-        buf: await speak.ctx.decodeAudioData(raw.slice(0)),
-        gap: part.gapAfterMs || 0,
+        buf: await speak.ctx.decodeAudioData(bytes.buffer.slice(0)),
+        gap: part.gap || 0,
       })
     }
     const rate = decoded[0].buf.sampleRate
@@ -419,7 +439,7 @@ export async function speakLikeHuman(page, input) {
       offset += part.buf.length + gaps[i]
     })
     await speak.playDecoded(mixed)
-  }, { phrases: script, token })
+  }, { phrases: parts })
 }
 
 export async function speakAsHuman(page, text, { pauseMsAfter = 350 } = {}) {
