@@ -301,6 +301,28 @@ export function normalizeUtterance(text) {
   return String(text || '').replace(/\s+/g, ' ').trim().toLowerCase()
 }
 
+/** message_user leftover when auto-reply already delivered the real sentence. */
+export function isTalkAckText(text) {
+  return /^(replied|done|sent|ok|noted|pong sent)[.!]?$/i.test(String(text || '').replace(/\s+/g, ' ').trim())
+}
+
+/** xAI keyterm boost dumps, not something the caller said. */
+export function isGhostTranscript(text) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim()
+  if (!t) return true
+  return /^keyterms?\s*:/i.test(t)
+}
+
+/** TTS leaking back into STT (Hive/Pulse/etc. after we just spoke). */
+export function isEchoUtterance(heard, lastSpoken, now, spokenAt, windowMs = 4000) {
+  const a = normalizeUtterance(heard)
+  const b = normalizeUtterance(lastSpoken)
+  if (!a || !b) return false
+  if (now - spokenAt > windowMs) return false
+  if (a === b || b.includes(a) || (a.length >= 8 && a.includes(b))) return true
+  return /^(shizuha|hritik|hive|cortex|pulse)[.!?]?$/.test(a)
+}
+
 export function isDuplicateUtterance(next, prev, now, prevAt, windowMs = 2500) {
   const a = normalizeUtterance(next)
   const b = normalizeUtterance(prev)
@@ -415,6 +437,7 @@ export function useVoiceConversation({ onUtterance } = {}) {
   const retryTimerRef = useRef(null)
   const silenceTimerRef = useRef(null)
   const lastUtteranceRef = useRef({ text: '', at: 0 })
+  const lastSpokenRef = useRef({ text: '', at: 0 })
 
   const clearTimers = useCallback(() => {
     if (retryTimerRef.current != null) {
@@ -492,6 +515,14 @@ export function useVoiceConversation({ onUtterance } = {}) {
           if (!activeRef.current || mutedRef.current || !text.trim()) return
           const heard = text.trim()
           const now = Date.now()
+          if (isGhostTranscript(heard) || isTalkAckText(heard)) {
+            utteranceDelivered = true
+            return
+          }
+          if (isEchoUtterance(heard, lastSpokenRef.current.text, now, lastSpokenRef.current.at)) {
+            utteranceDelivered = true
+            return
+          }
           if (isDuplicateUtterance(heard, lastUtteranceRef.current.text, now, lastUtteranceRef.current.at)) {
             utteranceDelivered = true
             return
@@ -556,16 +587,23 @@ export function useVoiceConversation({ onUtterance } = {}) {
     if (!streamingRef.current) listenOnceRef.current?.()
   }, [])
 
-  const notifyReply = useCallback(async (text) => {
-    if (!activeRef.current || !text) return
+  const beginSpeak = useCallback((text) => {
+    if (!activeRef.current) return
     speakingRef.current = true
     setCallState('speaking')
     teardownCapture()
+    const clean = String(text || '').trim()
+    if (clean) lastSpokenRef.current = { text: clean, at: Date.now() }
+  }, [teardownCapture])
+
+  const notifyReply = useCallback(async (text) => {
+    if (!activeRef.current || !text) return
+    beginSpeak(text)
     await speakDelta(text)
     await waitSpeakIdle()
     speakingRef.current = false
     resumeListen()
-  }, [teardownCapture, resumeListen])
+  }, [beginSpeak, resumeListen])
 
   const startCall = useCallback(() => {
     if (activeRef.current) return
@@ -574,6 +612,7 @@ export function useVoiceConversation({ onUtterance } = {}) {
     speakingRef.current = false
     streamAttemptsRef.current = 0
     lastUtteranceRef.current = { text: '', at: 0 }
+    lastSpokenRef.current = { text: '', at: 0 }
     setMuted(false)
     setLastHeard('')
     setCallError(null)
@@ -590,6 +629,7 @@ export function useVoiceConversation({ onUtterance } = {}) {
     speakText.stop()
     streamAttemptsRef.current = 0
     lastUtteranceRef.current = { text: '', at: 0 }
+    lastSpokenRef.current = { text: '', at: 0 }
     setMuted(false)
     setLastHeard('')
     setCallError(null)
@@ -642,6 +682,7 @@ export function useVoiceConversation({ onUtterance } = {}) {
     retryCall,
     toggleMute,
     notifyReply,
+    beginSpeak,
     resumeListen,
     isCallActive: () => activeRef.current,
   }

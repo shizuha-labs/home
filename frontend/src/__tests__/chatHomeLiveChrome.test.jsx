@@ -18,6 +18,7 @@ const voice = {
   retryCall: vi.fn(),
   toggleMute: vi.fn(),
   notifyReply: vi.fn(),
+  beginSpeak: vi.fn(),
   resumeListen: vi.fn(),
   isCallActive: () => voice.callState !== 'idle' && voice.callState !== 'error',
 }

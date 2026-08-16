@@ -22,7 +22,7 @@ import {
   RETIRED_HOME_AGENTS,
   writeHomeAgentPref,
 } from '../hooks/useHomeAgentPreference'
-import { useVoiceInput, useVoiceConversation, speakText, speakDelta, nextSpokenSentences, spokenCovers, waitSpeakIdle, finishSpeakStream, stripSpeakableMarkup } from '../hooks/useVoice'
+import { useVoiceInput, useVoiceConversation, speakText, speakDelta, nextSpokenSentences, spokenCovers, waitSpeakIdle, finishSpeakStream, stripSpeakableMarkup, isTalkAckText } from '../hooks/useVoice'
 import { useHomeSummary } from '../hooks/useHomeSummary'
 import { useHomeActivity } from '../hooks/useHomeActivity'
 import { getAccessToken, handleUnauthorized } from '../utils/auth'
@@ -347,7 +347,7 @@ function ChatHomeInner() {
   // speak the reply → listen again. onUtterance fires when the caller finishes
   // an utterance; we send it to Shizuha and the reply is spoken by the effect
   // below once it streams in.
-  const { callState, callError, muted, lastHeard, startCall, endCall, retryCall, toggleMute, notifyReply, resumeListen, isCallActive } = useVoiceConversation({
+  const { callState, callError, muted, lastHeard, startCall, endCall, retryCall, toggleMute, notifyReply, beginSpeak, resumeListen, isCallActive } = useVoiceConversation({
     onUtterance: (text) => {
       if (activeConversationId) sendMessage(text)
       else sendToShizuha(text)
@@ -434,10 +434,11 @@ function ChatHomeInner() {
     )
     if (!sentences.length) return
     spokenStreamRef.current = spoken
+    beginSpeak(sentences.join(' '))
     for (const sentence of sentences) {
       void speakDelta(sentence, { done: false })
     }
-  }, [streamingByConv, speakReplies, callActive, voiceConvId, activeConversationId])
+  }, [beginSpeak, streamingByConv, speakReplies, callActive, voiceConvId, activeConversationId])
 
   // Persist is the end of the turn. Speak only leftover text. Re-listen once.
   useEffect(() => {
@@ -448,6 +449,11 @@ function ChatHomeInner() {
     const key = last.id || last.client_message_id
     if (!key || lastSpokenIdRef.current === key) return
     lastSpokenIdRef.current = key
+    if (isTalkAckText(last.content)) {
+      lastLiveStreamRef.current = ''
+      if (callActive) void waitSpeakIdle().then(() => resumeListen())
+      return
+    }
     const leftover = spokenCovers(last.content, spokenStreamRef.current)
       ? ''
       : stripSpeakableMarkup(last.content || '')

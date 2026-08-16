@@ -15,6 +15,9 @@ import {
   nextSpokenSentences,
   stripSpeakableMarkup,
   spokenCovers,
+  isTalkAckText,
+  isGhostTranscript,
+  isEchoUtterance,
   useVoiceConversation,
   VOICE_STREAM_BASE_BACKOFF_MS,
   VOICE_STREAM_MAX_RETRIES,
@@ -122,7 +125,36 @@ describe('nextSpokenSentences', () => {
   })
 })
 
+describe('talk-seat transcript hygiene', () => {
+  it('drops Replied. acks and Keyterms dumps', () => {
+    expect(isTalkAckText('Replied.')).toBe(true)
+    expect(isTalkAckText('Hey. I am here.')).toBe(false)
+    expect(isGhostTranscript('Keyterms: Shizuha, Hritik, Hive, Cortex, Pulse')).toBe(true)
+    expect(isGhostTranscript("Hey, what's up?")).toBe(false)
+  })
+
+  it('treats isolated Hive after TTS as echo', () => {
+    const spokenAt = 1_000
+    expect(isEchoUtterance('Hive.', 'Here. What\'s up?', 1_500, spokenAt)).toBe(true)
+    expect(isEchoUtterance('What tasks are pending on me?', 'Here. What\'s up?', 1_500, spokenAt)).toBe(false)
+    expect(isEchoUtterance('Hive.', 'Here. What\'s up?', 10_000, spokenAt)).toBe(false)
+  })
+})
+
 describe('useVoiceConversation — utterance dedupe', () => {
+  it('does not inject Keyterms dumps or Hive echo as utterances', () => {
+    const onUtterance = vi.fn()
+    const { result } = renderHook(() => useVoiceConversation({ onUtterance }))
+    act(() => {
+      result.current.startCall()
+    })
+    const opts = startStreamingStt.mock.calls.at(-1)[0]
+    act(() => {
+      opts.onFinal?.('Keyterms: Shizuha, Hritik, Hive, Cortex, Pulse')
+    })
+    expect(onUtterance).not.toHaveBeenCalled()
+  })
+
   it('does not re-send the same final transcript within the window', () => {
     const onUtterance = vi.fn()
     const { result } = renderHook(() => useVoiceConversation({ onUtterance }))
