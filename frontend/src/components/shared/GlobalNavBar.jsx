@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { useLocation } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { LayoutDashboard, Cpu, ListChecks, Shield, Search, Menu, X, LogOut } from 'lucide-react'
 import ThemeToggle from '../ThemeToggle'
 import { AppSwitcher } from '@shizuha/ui'
 import { useAuth } from '../../contexts/AuthContext'
+import { isHomeAppPath } from '../../utils/conversationRoute'
 
 const NAV_ITEMS = [
   { label: 'Dashboard', href: '/', icon: LayoutDashboard, surface: 'home' },
@@ -19,6 +20,7 @@ export default function GlobalNavBar() {
   const [isSearchOpen, setIsSearchOpen] = useState(false)
   const { isAuthenticated, user } = useAuth()
   const location = useLocation()
+  const navigate = useNavigate()
 
   const currentSurface = NAV_ITEMS.find(
     item => location.pathname === item.href || location.pathname.startsWith((item.match || item.href) + '/') || location.pathname === item.match
@@ -35,35 +37,57 @@ export default function GlobalNavBar() {
           {/* Logo + Nav Items */}
           <div className="flex items-center gap-1">
             <div className="mr-2">
-              <AppSwitcher currentAppId={currentSurface} variant="compact" enableShortcuts popoverPosition="left" />
+              <AppSwitcher
+                currentAppId={currentSurface}
+                variant="compact"
+                enableShortcuts
+                popoverPosition="left"
+                onNavigate={(app) => {
+                  if (app?.id === 'home' || isHomeAppPath(app?.path || '')) {
+                    navigate('/')
+                    return true
+                  }
+                  return false
+                }}
+              />
             </div>
-            <a href="/" className="flex items-center gap-2 mr-4">
+            <Link to="/" className="flex items-center gap-2 mr-4">
               <div className="w-7 h-7 rounded-lg bg-brand-600 flex items-center justify-center">
                 <span className="text-white font-bold text-xs">S</span>
               </div>
               <span className="text-sm font-semibold text-gray-900 dark:text-white hidden sm:block">
                 Shizuha
               </span>
-            </a>
+            </Link>
 
             {/* Desktop Nav Items */}
             <div className="hidden md:flex items-center gap-0.5">
               {NAV_ITEMS.map(item => {
                 const isActive = item.surface === currentSurface
-                return (
-                  <a
-                    key={item.surface}
-                    href={item.href}
-                    className={`
+                const className = `
                       flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-150
                       ${isActive
                         ? 'bg-brand-50 text-brand-700 dark:bg-brand-950 dark:text-brand-300'
                         : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-white dark:hover:bg-gray-800'
                       }
-                    `}
-                  >
+                    `
+                const inner = (
+                  <>
                     <item.icon className="h-4 w-4" />
                     <span>{item.label}</span>
+                  </>
+                )
+                // Stay inside the home SPA for `/` and `/c/:id` so Live does not remount.
+                if (item.href === '/') {
+                  return (
+                    <Link key={item.surface} to="/" className={className}>
+                      {inner}
+                    </Link>
+                  )
+                }
+                return (
+                  <a key={item.surface} href={item.href} className={className}>
+                    {inner}
                   </a>
                 )
               })}
@@ -140,21 +164,39 @@ export default function GlobalNavBar() {
           <div className="px-4 py-3 space-y-1">
             {NAV_ITEMS.map(item => {
               const isActive = item.surface === currentSurface
-              return (
-                <a
-                  key={item.surface}
-                  href={item.href}
-                  className={`
+              const className = `
                     flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors
                     ${isActive
                       ? 'bg-brand-50 text-brand-700 dark:bg-brand-950 dark:text-brand-300'
                       : 'text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
                     }
-                  `}
-                  onClick={() => setIsMobileMenuOpen(false)}
-                >
+                  `
+              const inner = (
+                <>
                   <item.icon className="h-5 w-5" />
                   <span>{item.label}</span>
+                </>
+              )
+              if (item.href === '/') {
+                return (
+                  <Link
+                    key={item.surface}
+                    to="/"
+                    className={className}
+                    onClick={() => setIsMobileMenuOpen(false)}
+                  >
+                    {inner}
+                  </Link>
+                )
+              }
+              return (
+                <a
+                  key={item.surface}
+                  href={item.href}
+                  className={className}
+                  onClick={() => setIsMobileMenuOpen(false)}
+                >
+                  {inner}
                 </a>
               )
             })}

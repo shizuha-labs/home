@@ -61,4 +61,23 @@ describe('live call route mount', () => {
     expect(screen.getByTestId('chat-home')).toHaveTextContent('1')
     expect(mounts.n).toBe(1)
   })
+
+  it('keeps ChatHome mounted when returning from a thread to dashboard', () => {
+    function GoHome() {
+      const navigate = useNavigate()
+      return createElement('button', { type: 'button', onClick: () => navigate('/') }, 'go home')
+    }
+    render(
+      <MemoryRouter initialEntries={['/c/bb516974-4152-427a-a2ac-04535b5f393f']}>
+        <GoHome />
+        <App />
+      </MemoryRouter>,
+    )
+    expect(screen.getByTestId('chat-home')).toHaveTextContent('1')
+    act(() => {
+      screen.getByRole('button', { name: 'go home' }).click()
+    })
+    expect(screen.getByTestId('chat-home')).toHaveTextContent('1')
+    expect(mounts.n).toBe(1)
+  })
 })
