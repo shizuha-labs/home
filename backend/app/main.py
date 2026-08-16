@@ -39,9 +39,19 @@ from .clients import (
 )
 from .audit_leads import AuditLeadRequest, AuditLeadResponse, persist_audit_lead
 from .config import settings
+from .live_trace import (
+    RateLimited,
+    check_rate,
+    fetch_connect_messages,
+    merge_timeline,
+    persist_events,
+    read_events,
+    sanitize_event,
+)
 from .redis_client import block_read, block_read_multi, read_recent, read_recent_multi
 from .schema import (
     ActivityRecentResponse, HomeActivityEventV1, HomeSummaryV1, HomeActivityV1,
+    LiveTraceIngestResponse, LiveTraceIngestV1, LiveTraceTimelineV1,
     SUMMARY_VERSION, Widget,
 )
 
@@ -81,6 +91,53 @@ def _clear_audit_lead_rate_limits_for_tests() -> None:
 @app.get("/api/home/health")
 async def health():
     return {"status": "ok", "version": SUMMARY_VERSION}
+
+
+@app.post("/api/home/live-trace", response_model=LiveTraceIngestResponse)
+async def ingest_live_trace(
+    payload: LiveTraceIngestV1,
+    caller: Caller = Depends(verify_caller),
+) -> LiveTraceIngestResponse:
+    try:
+        check_rate(caller.user_id)
+    except RateLimited:
+        raise HTTPException(status_code=429, detail="Too many live-trace events")
+    accepted = []
+    dropped = 0
+    for raw in (payload.events or [])[:40]:
+        event = sanitize_event(raw, caller.user_id)
+        if event:
+            accepted.append(event)
+        else:
+            dropped += 1
+    stored = await persist_events(caller.user_id, accepted)
+    return LiveTraceIngestResponse(accepted=stored, dropped=dropped + (len(accepted) - stored))
+
+
+@app.get("/api/home/live-trace", response_model=LiveTraceTimelineV1)
+async def get_live_trace(
+    caller: Caller = Depends(verify_caller),
+    conversation_id: Optional[str] = Query(default=None),
+    call_id: Optional[str] = Query(default=None),
+    include_messages: bool = Query(default=True),
+    limit: int = Query(default=200, ge=1, le=400),
+) -> LiveTraceTimelineV1:
+    events = await read_events(
+        caller.user_id,
+        conversation_id=conversation_id or "",
+        call_id=call_id or "",
+        limit=limit,
+    )
+    messages = []
+    if include_messages and conversation_id:
+        messages = await fetch_connect_messages(caller.bearer, conversation_id, limit=min(limit, 80))
+    return LiveTraceTimelineV1(
+        generated_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        user_id=caller.user_id,
+        conversation_id=conversation_id,
+        call_id=call_id,
+        events=merge_timeline(events, messages),
+    )
 
 
 @app.post("/api/research/audit-leads", response_model=AuditLeadResponse, status_code=201)

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getAccessToken } from '../utils/auth'
+import { beginLiveCall, emitLiveTrace, endLiveCall, voiceCorrelation } from '../utils/liveTrace'
 import { startStreamingStt } from '../utils/streamingStt'
 
 /**
@@ -230,8 +231,10 @@ export async function speakText(text) {
 }
 
 speakText.stop = () => {
+  const remaining = remainingSpeakMs()
   speakEpoch += 1
   muteSpeakOutput()
+  emitLiveTrace('tts.stop', { remaining_ms: remaining, epoch: speakEpoch })
   if (currentAudio) {
     try { currentAudio.pause() } catch { /* noop */ }
     try { currentAudio.volume = 0 } catch { /* noop */ }
@@ -291,6 +294,8 @@ export function formatTtsSpeed(value = readTtsSpeed()) {
 let speakWs = null
 let speakReady = null
 let speakQueue = Promise.resolve()
+let ttsDeltaCount = 0
+let ttsDeltaChars = 0
 let streamingTtsAvailable = null // null = unprobed
 let speakProvider = 'grok'
 let gaplessCtx = null
@@ -448,6 +453,11 @@ export function playAudioChunk(b64, mime = 'audio/mpeg', sampleRate = PCM_SAMPLE
 }
 
 function stopSpeakStream() {
+  if (ttsDeltaCount) {
+    emitLiveTrace('tts.audio.stop', { deltas: ttsDeltaCount, b64_chars: ttsDeltaChars })
+  }
+  ttsDeltaCount = 0
+  ttsDeltaChars = 0
   if (speakWs) {
     try { speakWs.close() } catch { /* noop */ }
     speakWs = null
@@ -467,12 +477,14 @@ export function startSpeakStream({ voice } = {}) {
       speakWs = ws
       const timer = setTimeout(() => resolve(false), 1500)
       ws.onopen = () => {
+        emitLiveTrace('tts.stream.open', { voice: voice || 'ara', speed: readTtsSpeed() })
         ws.send(JSON.stringify({
           type: 'start',
           token: getAccessToken(),
           voice: voice || 'ara',
           language: 'en',
           speed: readTtsSpeed(),
+          ...voiceCorrelation(),
         }))
       }
       ws.onmessage = (event) => {
@@ -480,10 +492,14 @@ export function startSpeakStream({ voice } = {}) {
         try { msg = JSON.parse(event.data) } catch { return }
         if (msg.type === 'ready') {
           speakProvider = msg.provider || 'grok'
+          emitLiveTrace('tts.stream.ready', { provider: speakProvider })
           clearTimeout(timer)
           resolve(true)
         } else if (msg.type === 'audio.delta' && msg.delta) {
           if (speakWs !== ws || speakMuted) return
+          ttsDeltaCount += 1
+          ttsDeltaChars += String(msg.delta).length
+          if (ttsDeltaCount === 1) emitLiveTrace('tts.audio.start', { mime: msg.mime || '', provider: speakProvider })
           // PCM chunks are raw samples — schedule on one playhead. Independent
           // MP3 decode of each delta is what sounded like a cut syllable.
           const played = playAudioChunk(
@@ -748,6 +764,7 @@ export function useVoiceConversation({ onUtterance } = {}) {
     teardownCapture()
     speakText.stop()
     streamAttemptsRef.current = 0
+    emitLiveTrace('call.error', { kind, message, can_retry: canRetry ? 1 : 0 })
     setCallError({ kind, message, canRetry: !!canRetry })
     setCallState('error')
   }, [clearTimers, teardownCapture])
@@ -779,6 +796,7 @@ export function useVoiceConversation({ onUtterance } = {}) {
     try {
       const controller = startStreamingStt({
         token: getAccessToken(),
+        ...voiceCorrelation(),
         onState: (state) => {
           if (!activeRef.current) return
           // Promote connecting → listening once the stream is live. Ignore
@@ -816,6 +834,7 @@ export function useVoiceConversation({ onUtterance } = {}) {
           lastUtteranceRef.current = { text: heard, at: now }
           utteranceDelivered = true
           streamAttemptsRef.current = 0
+          emitLiveTrace('stt.final', { text: heard })
           setLastHeard(heard)
           if (speakingRef.current) {
             speakingRef.current = false
@@ -882,6 +901,7 @@ export function useVoiceConversation({ onUtterance } = {}) {
     if (!activeRef.current) return
     speakingRef.current = true
     setCallState('speaking')
+    emitLiveTrace('tts.speak.begin', { text })
     teardownCapture()
     const clean = String(text || '').trim()
     if (clean) lastSpokenRef.current = { text: clean, at: Date.now() }
@@ -903,6 +923,7 @@ export function useVoiceConversation({ onUtterance } = {}) {
   // Voice replies off / barge-in: cut audio now. Do not wait for leftover
   // TTS the way endSpeak does — that is how she kept talking after Off.
   const cancelSpeak = useCallback(() => {
+    emitLiveTrace('tts.cancel', { remaining_ms: remainingSpeakMs() })
     speakText.stop()
     speakingRef.current = false
     if (!activeRef.current) return
@@ -925,6 +946,8 @@ export function useVoiceConversation({ onUtterance } = {}) {
     streamAttemptsRef.current = 0
     lastUtteranceRef.current = { text: '', at: 0 }
     lastSpokenRef.current = { text: '', at: 0 }
+    beginLiveCall()
+    emitLiveTrace('call.start', {})
     setMuted(false)
     setLastHeard('')
     setCallError(null)
@@ -942,6 +965,7 @@ export function useVoiceConversation({ onUtterance } = {}) {
     streamAttemptsRef.current = 0
     lastUtteranceRef.current = { text: '', at: 0 }
     lastSpokenRef.current = { text: '', at: 0 }
+    endLiveCall()
     setMuted(false)
     setLastHeard('')
     setCallError(null)
@@ -953,6 +977,7 @@ export function useVoiceConversation({ onUtterance } = {}) {
     const next = !mutedRef.current
     mutedRef.current = next
     setMuted(next)
+    emitLiveTrace(next ? 'mic.mute' : 'mic.unmute', {})
     if (next) {
       // Mute only stops sending new voice. Do not cancel the STT session —
       // that dropped the hangover and the words the caller just said.

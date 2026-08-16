@@ -77,7 +77,7 @@ const toPcm16 = (samples) => {
  * Permission/context startup continues in the background, checking cancellation
  * after every await before it can create or connect the next resource.
  */
-export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, onError }) {
+export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, onError, call_id, trace_id, conversation_id, session_id } = {}) {
   let stream = null
   let context = null
   let source = null
@@ -268,6 +268,10 @@ export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, 
         token,
         sample_rate: context?.sampleRate || 16000,
         language: navigator.language || 'en',
+        call_id,
+        trace_id,
+        conversation_id,
+        session_id,
       }))
     }
     socket.onmessage = ({ data }) => {

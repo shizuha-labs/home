@@ -27,6 +27,7 @@ import TtsSpeedButton from '../components/assistant/TtsSpeedButton'
 import { useHomeSummary } from '../hooks/useHomeSummary'
 import { useHomeActivity } from '../hooks/useHomeActivity'
 import { getAccessToken, handleUnauthorized } from '../utils/auth'
+import { emitLiveTrace, setLiveTraceContext } from '../utils/liveTrace'
 import { conversationPeerName } from '../utils/conversationLabel'
 import { conversationIdFromPath, isHomeAppPath, nextThreadAfterRouteChange } from '../utils/conversationRoute'
 
@@ -291,6 +292,7 @@ function ChatHomeInner() {
 
   const sendToShizuha = useCallback(async (message) => {
     if (!message.trim() || isSending) return
+    emitLiveTrace('chat.send', { via: 'compose', text: message, agent: resolveHomeAgentUsername(homeAgent, user) })
     const targetUsername = resolveHomeAgentUsername(homeAgent, user)
     if (!targetUsername) {
       setSendError('Choose an agent above, then ask.')
@@ -352,6 +354,7 @@ function ChatHomeInner() {
   // below once it streams in.
   const { callState, callError, muted, lastHeard, startCall, endCall, retryCall, toggleMute, notifyReply, beginSpeak, endSpeak, cancelSpeak, isCallActive } = useVoiceConversation({
     onUtterance: (text) => {
+      emitLiveTrace('chat.send', { via: 'utterance', text, conversation_id: activeConversationId || miniConvId || '' })
       if (activeConversationId) sendMessage(text)
       else sendToShizuha(text)
     },
@@ -376,6 +379,15 @@ function ChatHomeInner() {
   // Active = mid-call only. 'error' is a terminal surface with guidance/retry, not "on call".
   const callActive = callState !== 'idle' && callState !== 'error'
   const callFailed = callState === 'error'
+
+  useEffect(() => {
+    setLiveTraceContext({
+      conversationId: miniConvId || activeConversationId || urlConversationId || '',
+      userId: user?.id || '',
+      agent: effectiveHomeAgent || '',
+      route: pathname,
+    })
+  }, [activeConversationId, effectiveHomeAgent, miniConvId, pathname, urlConversationId, user?.id])
 
   const goHome = useCallback(() => {
     if (activeConversationId && callState !== 'idle') {
@@ -447,6 +459,11 @@ function ChatHomeInner() {
     )
     if (!sentences.length) return
     spokenStreamRef.current = spoken
+    emitLiveTrace('chat.stream', {
+      ended: ended ? 1 : 0,
+      sentences: sentences.length,
+      text: sentences.join(' '),
+    })
     beginSpeak(sentences.join(' '))
     for (const sentence of sentences) {
       void speakDelta(sentence, { done: false })
@@ -479,6 +496,7 @@ function ChatHomeInner() {
       if (callActive) void endSpeak()
       return
     }
+    emitLiveTrace('chat.persist', { leftover: leftover.slice(0, 160), speak: speakReplies ? 1 : 0 })
     if (callActive) notifyReply(leftover)
     else speakText(leftover)
   }, [messages, speakReplies, callActive, notifyReply, endSpeak, voiceConvId, activeConversationId, user?.id])
@@ -487,11 +505,15 @@ function ChatHomeInner() {
     const next = !speakReplies
     setSpeakReplies(next)
     try { localStorage.setItem('shizuha_speak_replies', next ? '1' : '0') } catch { /* private */ }
+    emitLiveTrace(next ? 'speak.on' : 'speak.off', {
+      during_call: callActive ? 1 : 0,
+      call_state: callState,
+    })
     if (!next) {
       speakText.stop()
       if (callActive) cancelSpeak()
     }
-  }, [speakReplies, callActive, cancelSpeak])
+  }, [speakReplies, callActive, callState, cancelSpeak])
 
   // Voice input: hold-to-talk / tap-to-toggle mic. Transcript lands in the
   // input box so the user can review before sending (or auto-send on final).

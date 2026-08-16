@@ -1,5 +1,6 @@
 import LiveWaveformIcon from './LiveWaveformIcon'
 import TtsSpeedButton from './TtsSpeedButton'
+import { getLiveTraceContext } from '../../utils/liveTrace'
 
 /**
  * Compact live-voice HUD. Talk, type, and keep dashboard + chat visible
@@ -135,6 +136,21 @@ export default function LiveVoiceOverlay({
               Retry
             </button>
           ) : null}
+          <button
+            type="button"
+            onClick={() => {
+              const ctx = getLiveTraceContext()
+              const qs = new URLSearchParams()
+              if (ctx.callId) qs.set('call', ctx.callId)
+              if (ctx.conversationId) qs.set('conversation', ctx.conversationId)
+              window.open(`/live-trace${qs.toString() ? `?${qs}` : ''}`, '_blank', 'noopener')
+            }}
+            className="flex h-10 items-center justify-center rounded-full bg-white/10 px-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/70 hover:bg-white/20"
+            aria-label="Open live trace"
+            title="Open live trace"
+          >
+            Trace
+          </button>
           <button
             type="button"
             onClick={onEnd}
