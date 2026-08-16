@@ -54,6 +54,8 @@ jobs:
           FTAG="home-frontend-${SHORT}"
           REG="registry.registry.svc.cluster.local:5000"
           echo "Multi-arch build shizuha-home-frontend:${FTAG} (amd64 + arm64)"
+          PREV_FRONTEND_IMAGE="$(kubectl -n shizuha get deploy shizuha-home-frontend -o jsonpath='{.spec.template.spec.containers[0].image}')"
+          echo "Carry forward hashed assets from ${PREV_FRONTEND_IMAGE}"
 
           render_build_job() {  # $1=arch $2=attempt $3=cache-enabled
             local ARCH="$1"
@@ -122,6 +124,7 @@ jobs:
                       - --registry-mirror=mirror-dockerhub.registry.svc.cluster.local:5000
                       - --build-arg=NPM_CONFIG_REGISTRY=http://npm-cache.registry.svc.cluster.local:4873/
                       - --build-arg=FRONTEND_PATH=shizuha-home
+                      - --build-arg=PREV_FRONTEND_IMAGE=${PREV_FRONTEND_IMAGE}
                       - --cache=${CACHE_ENABLED}
                       - --cache-repo=${REG}/kaniko-cache/home-deploy-frontend-${ARCH}
                       - --cache-copy-layers=${CACHE_ENABLED}
