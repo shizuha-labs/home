@@ -230,19 +230,26 @@ test('operator homepage Live: typed turn, no ghosts, HUD unsticks, strip scrolls
     await shot(page, '07-dashboard-hud-still-up')
   })
 
-  await test.step('Pulse question gets a real reply, not an ack leftover', async () => {
-    const pulseProbe = `live-qa ${Date.now()}: what Pulse tasks are on my queue? one short sentence`
-    await sendHomeCompose(page, pulseProbe)
-    await expect(page.getByTestId('mini-chat-scroll')).toContainText(pulseProbe, { timeout: 20000 })
-    const found = await waitForNewAgentReply(page, pulseProbe, 90000)
-    expect(found.reply).not.toMatch(/^(replied|done|sent|ok|noted)[.!]?$/i)
-    expect(found.reply).not.toMatch(/^keyterms?\s*:/i)
-    expect(found.reply.length).toBeGreaterThan(12)
-    await assertNoGhosts(page, 'after Pulse question')
-    await waitHudLeavesSpeaking(page, 20000)
-    await shot(page, '08-pulse-reply')
-  })
+  const end = page.getByRole('button', { name: 'End Live' }).first()
+  if (await end.count()) await end.click().catch(() => {})
+})
 
+test('homepage Live Pulse question gets a real reply, not an ack leftover', async ({ page }) => {
+  test.setTimeout(240000)
+  await loginHome(page)
+  await page.getByTestId('home-live-button').click()
+  await expect(page.getByTestId('live-voice-overlay')).toBeVisible({ timeout: 20000 })
+  const pulseProbe = `live-qa ${Date.now()}: what Pulse tasks are on my queue? one short sentence`
+  await sendHomeCompose(page, pulseProbe)
+  await expect(page.getByTestId('mini-chat-scroll')).toContainText(pulseProbe, { timeout: 20000 })
+  const found = await waitForNewAgentReply(page, pulseProbe, 120000)
+  expect(found.text).toContain(pulseProbe)
+  expect(found.reply).not.toMatch(/^(replied|done|sent|ok|noted)[.!]?$/i)
+  expect(found.reply).not.toMatch(/^keyterms?\s*:/i)
+  expect(found.reply.length).toBeGreaterThan(12)
+  await assertNoGhosts(page, 'after Pulse question')
+  await waitHudLeavesSpeaking(page, 20000)
+  await shot(page, '08-pulse-reply')
   const end = page.getByRole('button', { name: 'End Live' }).first()
   if (await end.count()) await end.click().catch(() => {})
 })
