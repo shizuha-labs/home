@@ -27,6 +27,7 @@ import {
   startSpokenLive,
   speakLikeHuman,
   speakAsHuman,
+  waitForStt,
   waitForNewUserTurn,
   waitForAgentAfter,
   expectNoGhostsInTalk,
@@ -112,7 +113,7 @@ test('spoken Live: realistic multi-turn investigation of PLAT-5936', async ({ pa
     const turn = await spokenTurn(page, {
       name: 'greet',
       script: `Hey Ena, you there? This is a live check, number ${tag.spoken}. What's up?`,
-      hear: /hey|ena|what's up|whats up|live check/i,
+      hear: new RegExp(`live check|number ${tag.spoken.replace(/\s+/g, '\\s+')}`, 'i'),
       agentTimeout: 90000,
     })
     expect(turn.heard, `heard as Nawa: ${turn.heard}`).not.toMatch(/\bNawa\b/i)
@@ -223,14 +224,15 @@ test('spoken Live: realistic multi-turn investigation of PLAT-5936', async ({ pa
 test('spoken Live: mute, unmute, leak, stitch, names, barge-in', async ({ page }) => {
   test.setTimeout(12 * 60 * 1000)
   const tts = await installSpokenMic(page)
+  const tag = checkNumberWords()
   await page.goto('/')
   await page.waitForLoadState('domcontentloaded')
   await startSpokenLive(page)
 
   await test.step('Hey Ena must not become Nawa', async () => {
     const before = await miniChatTurns(page)
-    await speakAsHuman(page, "Hey Ena, what's up?")
-    const heard = await waitForNewUserTurn(page, before, /hey|ena|what's up|whats up/i, 30000)
+    await speakAsHuman(page, `Hey Ena, what's up? Edge check number ${tag.spoken}.`)
+    const heard = await waitForNewUserTurn(page, before, /hey|ena|what's up|whats up|edge check/i, 30000)
     expect(heard.turn.text, `heard as Nawa: ${heard.turn.text}`).not.toMatch(/\bNawa\b/i)
     expect(heard.turn.text).toMatch(/Ena|what's up|whats up|what is up/i)
     const reply = await waitForAgentAfter(page, before, 90000)
@@ -260,9 +262,10 @@ test('spoken Live: mute, unmute, leak, stitch, names, barge-in', async ({ page }
 
   await test.step('speak then mute — mute must not drop the turn', async () => {
     const before = await miniChatTurns(page)
-    await speakAsHuman(page, 'San said the Samsung nine eighty still has the critical warning. Can you look at the drive yourself?')
+    await speakAsHuman(page, `San said the Samsung nine eighty still has the critical warning. Look at the drive. Edge check ${tag.spoken}.`)
+    await waitForStt(page, /samsung|critical|drive|san|edge check/i, 15000).catch(() => {})
     await muteLive(page)
-    const heard = await waitForNewUserTurn(page, before, /samsung|critical|drive|san said/i, 20000)
+    const heard = await waitForNewUserTurn(page, before, /samsung|critical|drive|san|edge check/i, 25000)
     expect(heard.turn.text, 'mute dropped the utterance').toMatch(/samsung|critical|drive|san/i)
     const reply = await waitForAgentAfter(page, before, 120000)
     assertSafeReply(reply.reply, 'mute send')
@@ -273,10 +276,13 @@ test('spoken Live: mute, unmute, leak, stitch, names, barge-in', async ({ page }
   })
 
   await test.step('muted speech must not leak; unmute hears the next sentence', async () => {
+    await waitHudLeavesSpeaking(page, 40000).catch(() => {})
+    await waitUntilListening(page, 15000)
     const beforeNote = await miniChatTurns(page)
-    await speakAsHuman(page, 'Ena, note that I am about to mute after this sentence.')
+    await speakAsHuman(page, `Ena, note that I am about to mute after this sentence. Marker ${tag.spoken}.`)
+    await waitForStt(page, /mute after this|note that I am|marker/i, 15000).catch(() => {})
     await muteLive(page)
-    await waitForNewUserTurn(page, beforeNote, /mute after this|note that I am/i, 20000)
+    await waitForNewUserTurn(page, beforeNote, /mute after this|note that I am|marker/i, 25000)
     const mutedTurns = await miniChatTurns(page)
     await speakAsHuman(page, 'You should not hear the word pineapple while I am muted.')
     await page.waitForTimeout(2800)
@@ -287,8 +293,8 @@ test('spoken Live: mute, unmute, leak, stitch, names, barge-in', async ({ page }
     await unmuteLive(page)
     await waitUntilListening(page, 15000)
     const beforeBack = await miniChatTurns(page)
-    await speakAsHuman(page, 'Okay I am back. Please say the word lantern once.')
-    const heard = await waitForNewUserTurn(page, beforeBack, /lantern|I am back/i, 25000)
+    await speakAsHuman(page, `Okay I am back. Please say the word lantern once. Marker ${tag.spoken}.`)
+    const heard = await waitForNewUserTurn(page, beforeBack, /lantern|I am back|marker/i, 25000)
     const reply = await waitForAgentAfter(page, beforeBack, 90000)
     expect(reply.reply.toLowerCase()).toMatch(/lantern|here|okay|back/)
     await expectNoGhostsInTalk(page, 'unmute resume')

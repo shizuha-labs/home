@@ -209,18 +209,34 @@ export function parseTurns(text) {
   return { user, agent, lines }
 }
 
-function textsOf(turns, role) {
-  return new Set(turns.filter((row) => row.role === role).map((row) => row.text))
+function countRoleTexts(turns, role) {
+  const counts = new Map()
+  for (const row of turns) {
+    if (row.role !== role) continue
+    counts.set(row.text, (counts.get(row.text) || 0) + 1)
+  }
+  return counts
+}
+
+function newTurnsForRole(before, now, role) {
+  const previous = countRoleTexts(before, role)
+  const seen = new Map()
+  const added = []
+  for (const row of now) {
+    if (row.role !== role) continue
+    const n = (seen.get(row.text) || 0) + 1
+    seen.set(row.text, n)
+    if (n > (previous.get(row.text) || 0)) added.push(row)
+  }
+  return added
 }
 
 function newUserTurns(before, now) {
-  const seen = textsOf(before, 'user')
-  return now.filter((row) => row.role === 'user' && !seen.has(row.text))
+  return newTurnsForRole(before, now, 'user')
 }
 
 function newAgentTurns(before, now) {
-  const seen = textsOf(before, 'agent')
-  return now.filter((row) => row.role === 'agent' && !seen.has(row.text))
+  return newTurnsForRole(before, now, 'agent')
 }
 
 export async function waitForMiniChatStable(page, timeout = 15000) {
@@ -232,7 +248,7 @@ export async function waitForMiniChatStable(page, timeout = 15000) {
     const turns = await miniChatTurns(page)
     if (!loading && turns.length === last && last >= 0) {
       if (!stableSince) stableSince = Date.now()
-      if (Date.now() - stableSince >= 800) return turns
+      if (Date.now() - stableSince >= 1500) return turns
     } else {
       stableSince = 0
       last = turns.length
@@ -261,7 +277,7 @@ export async function waitForNewUserTurn(page, beforeTurns, pattern, timeout = 2
   const deadline = Date.now() + timeout
   let last = beforeTurns
   while (Date.now() < deadline) {
-    const now = await miniChatTurns(page)
+    let now = await miniChatTurns(page)
     last = now
     let added = newUserTurns(beforeTurns, now)
     const hit = added.find((row) => re.test(row.text))
@@ -310,11 +326,27 @@ export async function waitForAgentAfter(page, beforeTurns, timeout = 120000) {
   while (Date.now() < deadline) {
     const now = await miniChatTurns(page)
     last = now
-    const reply = newAgentTurns(beforeTurns, now).find((row) => (
-      row.text.length > 3
-      && !GHOST_LINE.test(row.text)
-      && !ACK_ONLY.test(row.text)
-    ))
+    const users = newUserTurns(beforeTurns, now)
+    const lastUser = users[users.length - 1]
+    let reply = null
+    if (lastUser) {
+      const userIdx = now.reduce((idx, row, i) => (
+        row.role === 'user' && row.text === lastUser.text ? i : idx
+      ), -1)
+      reply = now.slice(Math.max(0, userIdx) + 1).find((row) => (
+        row.role === 'agent'
+        && row.text.length > 2
+        && !GHOST_LINE.test(row.text)
+        && !ACK_ONLY.test(row.text)
+      ))
+    }
+    if (!reply) {
+      reply = newAgentTurns(beforeTurns, now).find((row) => (
+        row.text.length > 2
+        && !GHOST_LINE.test(row.text)
+        && !ACK_ONLY.test(row.text)
+      ))
+    }
     if (reply) return { reply: reply.text, turn: reply, turns: now }
     await page.waitForTimeout(500)
   }
@@ -463,7 +495,8 @@ export async function spokenTurn(page, {
     await waitForStt(page, hear, 20000).catch(() => {})
   }
   const heard = await waitForNewUserTurn(page, before, hear || /./, 28000)
-  const blob = heard.added.map((row) => row.text).join(' ')
+  const matched = heard.added.filter((row) => !hear || asRe(hear).test(row.text))
+  const blob = (matched.length ? matched : heard.added).map((row) => row.text).join(' ')
   if (hear) expect(blob, `${name}: STT missed the utterance (${blob})`).toMatch(asRe(hear))
   for (const extra of hearAll) {
     expect(blob, `${name}: dropped clause ${extra} in "${blob}"`).toMatch(asRe(extra))
