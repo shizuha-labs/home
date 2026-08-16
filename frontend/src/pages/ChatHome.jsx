@@ -127,7 +127,7 @@ function ChatHomeInner() {
   const [showCommandPalette, setShowCommandPalette] = useState(false)
   const [pendingRequestCount, setPendingRequestCount] = useState(0)
   const textareaRef = useRef(null)
-  const { summary } = useHomeSummary()
+  const { summary, widget: summaryWidget, refresh: refreshSummary } = useHomeSummary()
   const orgs = Array.isArray(summary?.orgs) ? summary.orgs : null
   // Org-progress panel: per-org selection (defaults to the first org) + range.
   const [progressOrgId, setProgressOrgId] = useState(null)
@@ -967,7 +967,7 @@ function ChatHomeInner() {
               independently from the HIVE-375 aggregation API. Chat stays the heart
               above; this is the "everything at a glance" surface below it. */}
           <div className="mt-8">
-            <CommandCenterDashboard onPeekOrg={peekOrg} />
+            <CommandCenterDashboard summary={summary} widget={summaryWidget} refresh={refreshSummary} onPeekOrg={peekOrg} />
           </div>
         </div>
       </div>
