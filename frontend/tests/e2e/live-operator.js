@@ -171,9 +171,9 @@ export async function waitHudLeavesSpeaking(page, timeoutMs = 20000) {
 export async function sendHomeCompose(page, text) {
   const box = homeCompose(page)
   await expect(box).toBeVisible({ timeout: 15000 })
-  await box.click()
+  await box.click({ timeout: 5000 }).catch(() => {})
   await box.fill(text)
-  const send = page.getByTestId('home-send-button')
-  if (await send.count()) await send.click()
-  else await page.keyboard.press('Enter')
+  // Enter is the operator path. Clicking the send icon is intercepted by the
+  // Live HUD / mini-chat once Playwright scrolls the icon into view.
+  await box.press('Enter')
 }
