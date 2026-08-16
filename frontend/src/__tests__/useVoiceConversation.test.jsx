@@ -23,6 +23,7 @@ import {
   isEchoUtterance,
   normalizeHeardName,
   useVoiceConversation,
+  speakText,
   VOICE_STREAM_BASE_BACKOFF_MS,
   VOICE_STREAM_MAX_RETRIES,
 } from '../hooks/useVoice'
@@ -202,6 +203,27 @@ describe('useVoiceConversation — utterance dedupe', () => {
     expect(result.current.callState).not.toBe('speaking')
     expect(['listening', 'connecting']).toContain(result.current.callState)
     expect(startStreamingStt.mock.calls.length).toBeGreaterThan(1)
+  })
+
+  it('cancelSpeak cuts TTS immediately and leaves Speaking without waiting', () => {
+    const stop = vi.spyOn(speakText, 'stop')
+    const { result } = renderHook(() => useVoiceConversation())
+    act(() => {
+      result.current.startCall()
+    })
+    act(() => {
+      result.current.beginSpeak('A long reply that should be cut off.')
+    })
+    expect(result.current.callState).toBe('speaking')
+    const callsBefore = startStreamingStt.mock.calls.length
+    act(() => {
+      result.current.cancelSpeak()
+    })
+    expect(stop).toHaveBeenCalled()
+    expect(result.current.callState).not.toBe('speaking')
+    expect(['listening', 'connecting']).toContain(result.current.callState)
+    expect(startStreamingStt.mock.calls.length).toBeGreaterThan(callsBefore)
+    stop.mockRestore()
   })
 
   it('mute only silences the mic and still delivers the in-flight utterance', () => {

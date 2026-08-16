@@ -117,9 +117,13 @@ export default function MiniShizuhaChat({
           )}
           {typeof onToggleSpeak === 'function' && (
             <button
+              type="button"
+              data-testid="mini-speak-button"
               onClick={onToggleSpeak}
               title={speakEnabled ? 'Voice replies on' : 'Voice replies off'}
-              className={`rounded-lg p-1.5 transition-colors ${speakEnabled
+              aria-pressed={speakEnabled}
+              aria-label={speakEnabled ? 'Voice replies on' : 'Voice replies off'}
+              className={`rounded-lg p-1.5 transition-colors ${speakEnabled}
                 ? 'text-brand-600 bg-brand-50 dark:text-brand-400 dark:bg-brand-950/40'
                 : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}
             >

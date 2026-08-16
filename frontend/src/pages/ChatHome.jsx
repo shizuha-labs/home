@@ -350,7 +350,7 @@ function ChatHomeInner() {
   // speak the reply → listen again. onUtterance fires when the caller finishes
   // an utterance; we send it to Shizuha and the reply is spoken by the effect
   // below once it streams in.
-  const { callState, callError, muted, lastHeard, startCall, endCall, retryCall, toggleMute, notifyReply, beginSpeak, endSpeak, isCallActive } = useVoiceConversation({
+  const { callState, callError, muted, lastHeard, startCall, endCall, retryCall, toggleMute, notifyReply, beginSpeak, endSpeak, cancelSpeak, isCallActive } = useVoiceConversation({
     onUtterance: (text) => {
       if (activeConversationId) sendMessage(text)
       else sendToShizuha(text)
@@ -408,6 +408,8 @@ function ChatHomeInner() {
       else endCall()
       return
     }
+    // A Live call is a voice call — hear her unless the caller turns speaker off.
+    if (!speakReplies) setSpeakReplies(true)
     startCall()
     // Homepage Live needs a thread immediately so Open full / sidebar stay
     // in-app. Waiting for the first utterance left no expand target.
@@ -419,7 +421,7 @@ function ChatHomeInner() {
         if (dest !== activeConversationId) setActiveConversation(dest)
       }
     }
-  }, [activeConversationId, callError, callState, conversations, effectiveHomeAgent, endCall, isCallActive, retryCall, selectedPicker, setActiveConversation, startCall, urlConversationId])
+  }, [activeConversationId, callError, callState, conversations, effectiveHomeAgent, endCall, isCallActive, retryCall, selectedPicker, setActiveConversation, speakReplies, startCall, urlConversationId])
 
   // Speak tokens as they stream in (Grok TTS websocket). Fallback: full
   // message once persisted. Persist must NOT reset the spoken prefix or the
@@ -430,7 +432,7 @@ function ChatHomeInner() {
   const voiceConvId = miniConvId || ((callActive || speakReplies) ? activeConversationId : null)
   useEffect(() => {
     if (!voiceConvId || activeConversationId !== voiceConvId) return
-    if (!speakReplies && !callActive) return
+    if (!speakReplies) return
     const live = streamingByConv?.[voiceConvId] || ''
     const prev = lastLiveStreamRef.current
     if (live && !prev) spokenStreamRef.current = ''
@@ -473,18 +475,23 @@ function ChatHomeInner() {
       if (callActive) void endSpeak()
       return
     }
+    if (!speakReplies) {
+      if (callActive) void endSpeak()
+      return
+    }
     if (callActive) notifyReply(leftover)
-    else if (speakReplies) speakText(leftover)
+    else speakText(leftover)
   }, [messages, speakReplies, callActive, notifyReply, endSpeak, voiceConvId, activeConversationId, user?.id])
 
   const toggleSpeakReplies = useCallback(() => {
-    setSpeakReplies((v) => {
-      const next = !v
-      localStorage.setItem('shizuha_speak_replies', next ? '1' : '0')
-      if (!next) speakText.stop?.()
-      return next
-    })
-  }, [])
+    const next = !speakReplies
+    setSpeakReplies(next)
+    try { localStorage.setItem('shizuha_speak_replies', next ? '1' : '0') } catch { /* private */ }
+    if (!next) {
+      speakText.stop()
+      if (callActive) cancelSpeak()
+    }
+  }, [speakReplies, callActive, cancelSpeak])
 
   // Voice input: hold-to-talk / tap-to-toggle mic. Transcript lands in the
   // input box so the user can review before sending (or auto-send on final).
@@ -683,6 +690,8 @@ function ChatHomeInner() {
                 data-testid="thread-speak-button"
                 onClick={toggleSpeakReplies}
                 title={speakReplies ? 'Voice replies on' : 'Voice replies off'}
+                aria-pressed={speakReplies}
+                aria-label={speakReplies ? 'Voice replies on' : 'Voice replies off'}
                 className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors shadow-sm ${
                   speakReplies
                     ? 'bg-brand-50 text-brand-600 dark:bg-brand-950/40 dark:text-brand-400'

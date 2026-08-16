@@ -20,6 +20,7 @@ const voice = {
   notifyReply: vi.fn(),
   beginSpeak: vi.fn(),
   endSpeak: vi.fn(),
+  cancelSpeak: vi.fn(),
   resumeListen: vi.fn(),
   isCallActive: () => voice.callState !== 'idle' && voice.callState !== 'error',
 }
@@ -130,6 +131,7 @@ vi.mock('@shizuha/ui', () => ({
 }))
 
 import ChatHome from '../pages/ChatHome'
+import { speakText } from '../hooks/useVoice'
 
 function ChatHomeRoutes() {
   return (
@@ -163,11 +165,14 @@ describe('ChatHome Live chrome', () => {
     voice.callState = 'idle'
     voice.callError = null
     voice.endSpeak.mockClear()
+    voice.cancelSpeak.mockClear()
     voice.beginSpeak.mockClear()
     voice.startCall.mockClear()
     voice.endCall.mockClear()
+    speakText.stop.mockClear()
     chat.messages = []
     chat.streamingByConv = {}
+    localStorage.clear()
   })
 
   it('shows Live + speak + mic on the expanded thread', () => {
@@ -193,6 +198,7 @@ describe('ChatHome Live chrome', () => {
   })
 
   it('attaches the home-agent thread as mini-chat when Live starts on /', () => {
+    localStorage.setItem('shizuha_home_agent', 'ena')
     renderAt('/')
     act(() => {
       screen.getByTestId('home-live-button').click()
@@ -248,5 +254,33 @@ describe('ChatHome Live chrome', () => {
       PersistHarness.tick()
     })
     expect(voice.endSpeak).toHaveBeenCalled()
+  })
+
+  it('cuts in-flight TTS when Voice replies is turned off mid-speak', () => {
+    localStorage.setItem('shizuha_speak_replies', '1')
+    voice.callState = 'speaking'
+    renderAt(`/c/${CONV}`)
+    act(() => {
+      screen.getByTestId('thread-speak-button').click()
+    })
+    expect(speakText.stop).toHaveBeenCalled()
+    expect(voice.cancelSpeak).toHaveBeenCalled()
+    expect(voice.endSpeak).not.toHaveBeenCalled()
+    expect(screen.getByTestId('thread-speak-button')).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByTestId('thread-speak-button')).toHaveAttribute('title', 'Voice replies off')
+  })
+
+  it('cuts in-flight TTS from the mini-chat Voice replies button', () => {
+    localStorage.setItem('shizuha_speak_replies', '1')
+    localStorage.setItem('shizuha_home_agent', 'ena')
+    voice.callState = 'speaking'
+    renderAt('/')
+    act(() => {
+      screen.getByTestId('mini-speak-button').click()
+    })
+    expect(speakText.stop).toHaveBeenCalled()
+    expect(voice.cancelSpeak).toHaveBeenCalled()
+    expect(screen.getByTestId('mini-speak-button')).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByTestId('mini-speak-button')).toHaveAttribute('title', 'Voice replies off')
   })
 })
