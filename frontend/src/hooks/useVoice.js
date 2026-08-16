@@ -234,6 +234,8 @@ let speakProvider = 'grok'
 let gaplessCtx = null
 let gaplessHead = 0
 const gaplessSources = []
+let pcmRemainder = new Uint8Array(0)
+const PCM_SAMPLE_RATE = 24000
 
 async function probeStreamingTts() {
   if (streamingTtsAvailable !== null) return streamingTtsAvailable
@@ -259,6 +261,60 @@ function stopGaplessPlayback() {
   }
   gaplessSources.length = 0
   gaplessHead = 0
+  pcmRemainder = new Uint8Array(0)
+}
+
+function isPcmMime(mime) {
+  const t = String(mime || '').toLowerCase()
+  return t.includes('pcm') || t.includes('l16') || t.includes('raw')
+}
+
+function ensureGaplessCtx() {
+  const Ctx = typeof AudioContext !== 'undefined'
+    ? AudioContext
+    : (typeof window !== 'undefined' ? window.webkitAudioContext : null)
+  if (!Ctx) return null
+  if (!gaplessCtx) gaplessCtx = new Ctx()
+  if (gaplessCtx.state === 'suspended') void gaplessCtx.resume()
+  return gaplessCtx
+}
+
+function scheduleAudioBuffer(buf, rate) {
+  const ctx = gaplessCtx
+  if (!ctx) return Promise.resolve()
+  const src = ctx.createBufferSource()
+  src.buffer = buf
+  src.playbackRate.value = rate
+  src.connect(ctx.destination)
+  const now = ctx.currentTime
+  if (gaplessHead < now + 0.005) gaplessHead = now + 0.005
+  src.start(gaplessHead)
+  const dur = buf.duration / (rate || 1)
+  gaplessHead += dur
+  gaplessSources.push(src)
+  return new Promise((resolve) => {
+    src.onended = () => {
+      const i = gaplessSources.indexOf(src)
+      if (i >= 0) gaplessSources.splice(i, 1)
+      resolve()
+    }
+  })
+}
+
+function playPcmChunk(bytes, sampleRate = PCM_SAMPLE_RATE, rate = 1) {
+  const ctx = ensureGaplessCtx()
+  if (!ctx) return playHtmlAudioChunk(bytes, 'audio/wav', rate)
+  const merged = new Uint8Array(pcmRemainder.length + bytes.length)
+  merged.set(pcmRemainder, 0)
+  merged.set(bytes, pcmRemainder.length)
+  const even = merged.byteLength - (merged.byteLength % 2)
+  pcmRemainder = even < merged.byteLength ? merged.slice(even) : new Uint8Array(0)
+  if (even < 2) return Promise.resolve()
+  const samples = new Int16Array(merged.buffer, merged.byteOffset, even / 2)
+  const buf = ctx.createBuffer(1, samples.length, sampleRate)
+  const channel = buf.getChannelData(0)
+  for (let i = 0; i < samples.length; i += 1) channel[i] = samples[i] / 32768
+  return scheduleAudioBuffer(buf, rate)
 }
 
 function playHtmlAudioChunk(bytes, mime, rate) {
@@ -274,40 +330,20 @@ function playHtmlAudioChunk(bytes, mime, rate) {
   })
 }
 
-function playAudioChunk(b64, mime = 'audio/mpeg') {
+function playAudioChunk(b64, mime = 'audio/mpeg', sampleRate = PCM_SAMPLE_RATE) {
   const binary = atob(b64)
   const bytes = new Uint8Array(binary.length)
   for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
   // Grok already synthesized at the requested speed. Kokoro/HTML fallback
   // needs a client playbackRate so Fast still shortens talk time.
   const rate = speakProvider === 'grok' ? 1 : readTtsSpeed()
-  const Ctx = typeof AudioContext !== 'undefined'
-    ? AudioContext
-    : (typeof window !== 'undefined' ? window.webkitAudioContext : null)
-  if (!Ctx) return playHtmlAudioChunk(bytes, mime, rate)
+  if (isPcmMime(mime)) return playPcmChunk(bytes, sampleRate || PCM_SAMPLE_RATE, rate)
+  const ctx = ensureGaplessCtx()
+  if (!ctx) return playHtmlAudioChunk(bytes, mime, rate)
   try {
-    if (!gaplessCtx) gaplessCtx = new Ctx()
-    if (gaplessCtx.state === 'suspended') void gaplessCtx.resume()
     const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
-    return gaplessCtx.decodeAudioData(copy).then((buf) => {
-      const src = gaplessCtx.createBufferSource()
-      src.buffer = buf
-      src.playbackRate.value = rate
-      src.connect(gaplessCtx.destination)
-      const now = gaplessCtx.currentTime
-      if (gaplessHead < now + 0.02) gaplessHead = now + 0.02
-      src.start(gaplessHead)
-      const dur = buf.duration / (rate || 1)
-      gaplessHead += dur
-      gaplessSources.push(src)
-      return new Promise((resolve) => {
-        src.onended = () => {
-          const i = gaplessSources.indexOf(src)
-          if (i >= 0) gaplessSources.splice(i, 1)
-          resolve()
-        }
-      })
-    }).catch(() => playHtmlAudioChunk(bytes, mime, rate))
+    return ctx.decodeAudioData(copy).then((buf) => scheduleAudioBuffer(buf, rate))
+      .catch(() => playHtmlAudioChunk(bytes, mime, rate))
   } catch {
     return playHtmlAudioChunk(bytes, mime, rate)
   }
@@ -349,10 +385,17 @@ export function startSpeakStream({ voice } = {}) {
           clearTimeout(timer)
           resolve(true)
         } else if (msg.type === 'audio.delta' && msg.delta) {
-          // Schedule immediately. Waiting for the previous <audio> to end
-          // before starting the next chunk is what sounded like packet loss.
-          const played = playAudioChunk(msg.delta, msg.mime || 'audio/mpeg')
+          // PCM chunks are raw samples — schedule on one playhead. Independent
+          // MP3 decode of each delta is what sounded like a cut syllable.
+          const played = playAudioChunk(
+            msg.delta,
+            msg.mime || (speakProvider === 'grok' ? 'audio/pcm' : 'audio/mpeg'),
+            msg.sample_rate || PCM_SAMPLE_RATE,
+          )
           speakQueue = speakQueue.then(() => played)
+        } else if (msg.type === 'audio.clear') {
+          stopGaplessPlayback()
+          speakQueue = Promise.resolve()
         }
       }
       ws.onerror = () => { clearTimeout(timer); resolve(false) }
@@ -620,25 +663,25 @@ export function useVoiceConversation({ onUtterance } = {}) {
       const controller = startStreamingStt({
         token: getAccessToken(),
         onState: (state) => {
-          if (!activeRef.current || mutedRef.current) return
+          if (!activeRef.current) return
           // Promote connecting → listening once the stream is live. Ignore
           // 'idle'/'transcribing' here — conversation owns those transitions.
           if (state === 'listening') {
             // A live listen means the stream path worked; reset the failure budget.
             streamAttemptsRef.current = 0
             if (!speakingRef.current) setCallState('listening')
-          } else if (state === 'connecting' && !speakingRef.current) {
+          } else if (state === 'connecting' && !speakingRef.current && !mutedRef.current) {
             setCallState('connecting')
           }
         },
         onPartial: (text) => {
-          if (!activeRef.current || mutedRef.current) return
+          if (!activeRef.current) return
           const heard = normalizeHeardName(String(text || '').trim())
           if (heard && !isGhostTranscript(heard) && !isTalkAckText(heard)) setLastHeard(heard)
         },
         onFinal: (text) => {
           streamingRef.current = null
-          if (!activeRef.current || mutedRef.current || !text.trim()) return
+          if (!activeRef.current || !text.trim()) return
           const heard = normalizeHeardName(text.trim())
           const now = Date.now()
           if (isGhostTranscript(heard) || isTalkAckText(heard)) {
@@ -668,11 +711,11 @@ export function useVoiceConversation({ onUtterance } = {}) {
           // Successful stream close with no utterance (silence) — re-arm listen
           // once. This is the conversation loop, not a failure path, so it does
           // not consume the stream-retry budget.
-          if (activeRef.current && !utteranceDelivered) {
+          if (activeRef.current && !utteranceDelivered && !mutedRef.current) {
             if (silenceTimerRef.current != null) window.clearTimeout(silenceTimerRef.current)
             silenceTimerRef.current = window.setTimeout(() => {
               silenceTimerRef.current = null
-              if (activeRef.current) listenOnceRef.current?.()
+              if (activeRef.current && !mutedRef.current) listenOnceRef.current?.()
             }, 250)
           }
         },
@@ -784,11 +827,16 @@ export function useVoiceConversation({ onUtterance } = {}) {
     mutedRef.current = next
     setMuted(next)
     if (next) {
-      teardownCapture()
-    } else {
+      // Mute only stops sending new voice. Do not cancel the STT session —
+      // that dropped the hangover and the words the caller just said.
+      streamingRef.current?.setMicEnabled?.(false)
+      streamingRef.current?.hintTurnComplete?.()
+    } else if (streamingRef.current) {
+      streamingRef.current.setMicEnabled?.(true)
+    } else if (!speakingRef.current) {
       listenOnceRef.current?.()
     }
-  }, [teardownCapture])
+  }, [])
 
   /** Manual retry after a terminal stream_unavailable error (or user re-tap). */
   const retryCall = useCallback(() => {

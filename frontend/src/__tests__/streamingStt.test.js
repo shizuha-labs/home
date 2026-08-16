@@ -4,6 +4,7 @@ import {
   utteranceLooksIncomplete,
   sttCommitHangoverMs,
   STT_INCOMPLETE_HANGOVER_MS,
+  STT_MUTE_COMMIT_MS,
 } from '../utils/streamingStt'
 
 const deferred = () => {
@@ -150,7 +151,10 @@ describe('startStreamingStt hangover', () => {
     vi.stubGlobal('AudioContext', class { constructor() { return context } })
     Object.defineProperty(navigator, 'mediaDevices', {
       configurable: true,
-      value: { getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] }) },
+      value: { getUserMedia: vi.fn().mockResolvedValue({
+        getTracks: () => [{ stop: vi.fn(), enabled: true }],
+        getAudioTracks: () => [{ stop: vi.fn(), enabled: true }],
+      }) },
     })
   })
 
@@ -219,5 +223,26 @@ describe('startStreamingStt hangover', () => {
     await vi.advanceTimersByTimeAsync(STT_INCOMPLETE_HANGOVER_MS + 200)
     expect(onFinal).toHaveBeenCalledTimes(1)
     expect(onFinal.mock.calls[0][0]).toMatch(/relevant/i)
+  })
+
+  it('hintTurnComplete commits the last partial after a short mute delay', async () => {
+    const onFinal = vi.fn()
+    const controller = startStreamingStt({ token: 'token', onFinal })
+    for (let i = 0; i < 8; i += 1) await Promise.resolve()
+    const ws = sockets[0]
+    ws.onmessage({ data: JSON.stringify({ type: 'transcript.created' }) })
+    ws.onmessage({
+      data: JSON.stringify({
+        type: 'transcript.partial',
+        text: 'check the s1 drive',
+        speech_final: false,
+      }),
+    })
+    controller.hintTurnComplete()
+    expect(onFinal).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(STT_MUTE_COMMIT_MS - 1)
+    expect(onFinal).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(2)
+    expect(onFinal).toHaveBeenCalledWith('check the s1 drive', expect.any(Object))
   })
 })

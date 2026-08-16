@@ -2,6 +2,8 @@
 export const STT_COMPLETE_HANGOVER_MS = 2200
 /** Human-like pause after a mid-thought, digit string, or period-only clause. */
 export const STT_INCOMPLETE_HANGOVER_MS = 4000
+/** After mute, commit soon — mute is “I’m done talking”, not “throw this away”. */
+export const STT_MUTE_COMMIT_MS = 400
 
 const INCOMPLETE_TAIL = /\b(a|an|and|at|but|check|for|if|in|of|on|or|so|the|to|with|my|your|this|that|these|those|first|second|third|want|see|look|tell|give|pull|open|about|task|personally|perhaps|maybe|just|please|then|also)$/i
 
@@ -59,6 +61,8 @@ export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, 
   let lastLoudAt = 0
   let commitTimer = null
   let pendingFinal = null
+  let lastPartial = ''
+  let micEnabled = true
 
   const emitIdle = () => {
     if (idleDelivered) return
@@ -139,14 +143,29 @@ export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, 
     deliverFinal(pending.text, pending.event)
   }
 
-  const armCommit = (text, event) => {
+  const armCommit = (text, event, delayMs = sttCommitHangoverMs(text)) => {
     if (finalDelivered || cancelled) return
     if (commitTimer != null) window.clearTimeout(commitTimer)
     pendingFinal = { text, event }
-    commitTimer = window.setTimeout(commitPending, sttCommitHangoverMs(text))
+    commitTimer = window.setTimeout(commitPending, delayMs)
+  }
+
+  const setMicEnabled = (on) => {
+    micEnabled = !!on
+    const tracks = stream?.getAudioTracks?.() || stream?.getTracks?.() || []
+    tracks.forEach((track) => { track.enabled = micEnabled })
+  }
+
+  const hintTurnComplete = () => {
+    if (finalDelivered || cancelled) return
+    const text = (pendingFinal?.text || lastPartial || '').trim()
+    if (!text) return
+    armCommit(text, pendingFinal?.event || { type: 'transcript.partial', text, speech_final: true }, STT_MUTE_COMMIT_MS)
   }
 
   const controller = {
+    setMicEnabled,
+    hintTurnComplete,
     stop: () => {
       if (pendingFinal) {
         const pending = pendingFinal
@@ -196,6 +215,10 @@ export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, 
     processor.onaudioprocess = (event) => {
       if (!ready || captureEnded || socket?.readyState !== WebSocket.OPEN) return
       const samples = event.inputBuffer.getChannelData(0)
+      if (!micEnabled) {
+        socket.send(new Int16Array(samples.length).buffer)
+        return
+      }
       const now = performance.now()
       if (!firstAudioAt) firstAudioAt = now
       let sum = 0
@@ -242,7 +265,10 @@ export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, 
           },
         }
         const text = String(event.text || '').trim()
-        if (text) onPartial?.(text, timedEvent)
+        if (text) {
+          lastPartial = text
+          onPartial?.(text, timedEvent)
+        }
         if (event.speech_final && text) {
           // Do not tear the mic down on the first VAD silence. Grok's
           // speech_final can fire mid-clause; hangover + Smart Turn wait

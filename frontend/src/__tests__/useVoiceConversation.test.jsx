@@ -39,7 +39,7 @@ vi.mock('../utils/streamingStt', () => ({
 }))
 
 function makeController() {
-  return { stop: vi.fn(), cancel: vi.fn() }
+  return { stop: vi.fn(), cancel: vi.fn(), setMicEnabled: vi.fn(), hintTurnComplete: vi.fn() }
 }
 
 /** Fire onError from the most recent startStreamingStt call. */
@@ -202,6 +202,30 @@ describe('useVoiceConversation — utterance dedupe', () => {
     expect(result.current.callState).not.toBe('speaking')
     expect(['listening', 'connecting']).toContain(result.current.callState)
     expect(startStreamingStt.mock.calls.length).toBeGreaterThan(1)
+  })
+
+  it('mute only silences the mic and still delivers the in-flight utterance', () => {
+    const onUtterance = vi.fn()
+    const { result } = renderHook(() => useVoiceConversation({ onUtterance }))
+    act(() => {
+      result.current.startCall()
+    })
+    const first = startStreamingStt.mock.results[0]?.value
+    const opts = startStreamingStt.mock.calls.at(-1)[0]
+    act(() => {
+      opts.onPartial?.('check the s1 drive')
+    })
+    act(() => {
+      result.current.toggleMute()
+    })
+    expect(first.cancel).not.toHaveBeenCalled()
+    expect(first.setMicEnabled).toHaveBeenCalledWith(false)
+    expect(first.hintTurnComplete).toHaveBeenCalled()
+    act(() => {
+      opts.onFinal?.('check the s1 drive')
+    })
+    expect(onUtterance).toHaveBeenCalledWith('check the s1 drive')
+    expect(result.current.muted).toBe(true)
   })
 
   it('cancels the mic when a reply starts speaking', async () => {
