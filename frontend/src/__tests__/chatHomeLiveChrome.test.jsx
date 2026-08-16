@@ -4,7 +4,7 @@
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { createElement } from 'react'
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
 const CONV = 'bb516974-4152-427a-a2ac-04535b5f393f'
@@ -84,7 +84,7 @@ vi.mock('@shizuha/chat', () => {
         id: CONV,
         participants: [
           { user_id: 1, username: 'hritik', first_name: 'Hritik' },
-          { user_id: 2, username: 'ena', first_name: 'Ena' },
+          { user_id: 2, username: 'ena', first_name: 'Ena', email: 'ena@shizuha.com' },
         ],
       }],
       activeConversationId: CONV,
@@ -151,5 +151,13 @@ describe('ChatHome Live chrome', () => {
   it('shows the homepage Live control on the dashboard', () => {
     renderAt('/')
     expect(screen.getByTestId('home-live-button')).toBeInTheDocument()
+  })
+
+  it('attaches the home-agent thread as mini-chat when Live starts on /', () => {
+    renderAt('/')
+    act(() => {
+      screen.getByTestId('home-live-button').click()
+    })
+    expect(screen.getByRole('button', { name: /Open full chat/i })).toBeInTheDocument()
   })
 })

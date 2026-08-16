@@ -398,7 +398,17 @@ function ChatHomeInner() {
       return
     }
     startCall()
-  }, [isCallActive, startCall, endCall, retryCall, callState, callError])
+    // Homepage Live needs a thread immediately so Open full / sidebar stay
+    // in-app. Waiting for the first utterance left no expand target.
+    if (!urlConversationId) {
+      const dest = selectedPicker?.conversationId
+        || findAgentConversation(conversations, effectiveHomeAgent)?.id
+      if (dest) {
+        setMiniConvId(dest)
+        if (dest !== activeConversationId) setActiveConversation(dest)
+      }
+    }
+  }, [activeConversationId, callError, callState, conversations, effectiveHomeAgent, endCall, isCallActive, retryCall, selectedPicker, setActiveConversation, startCall, urlConversationId])
 
   // Speak tokens as they stream in (Grok TTS websocket). Fallback: full
   // message once persisted. Persist must NOT reset the spoken prefix or the
