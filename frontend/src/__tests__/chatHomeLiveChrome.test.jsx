@@ -41,6 +41,7 @@ vi.mock('../hooks/useVoice', () => ({
   waitSpeakIdle: async () => {},
   finishSpeakStream: vi.fn(),
   stripSpeakableMarkup: (s) => s,
+  isTalkAckText: (text) => /^(replied|done|sent|ok|noted|pong sent)[.!]?$/i.test(String(text || '').trim()),
 }))
 
 vi.mock('../hooks/useHomeSummary', () => ({
@@ -77,6 +78,11 @@ vi.mock('../components/assistant/HomeAgentPicker', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-picker' }, 'picker'),
 }))
 
+const chat = {
+  messages: [],
+  streamingByConv: {},
+}
+
 vi.mock('@shizuha/chat', () => {
   const React = require('react')
   return {
@@ -94,16 +100,20 @@ vi.mock('@shizuha/chat', () => {
       setActiveConversation: vi.fn(),
       createDirectConversation: vi.fn(),
       isConnected: true,
-      messages: [],
+      get messages() { return chat.messages },
       typingUsers: new Map(),
       onlineUsers: new Set(),
       hasMore: false,
       isLoadingMessages: false,
       loadMore: vi.fn(),
       sendMessage: vi.fn(),
-      streamingByConv: {},
+      get streamingByConv() { return chat.streamingByConv },
     }),
-    MessageList: () => React.createElement('div', { 'data-testid': 'message-list' }, 'messages'),
+    MessageList: ({ messages }) => React.createElement(
+      'div',
+      { 'data-testid': 'message-list' },
+      (messages || []).map((m) => m.content).join(' | '),
+    ),
     MessageInput: () => React.createElement('div', { 'data-testid': 'message-input' }, 'input'),
     Avatar: () => React.createElement('div', { 'data-testid': 'avatar' }),
     NewChatModal: () => null,
@@ -132,6 +142,10 @@ describe('ChatHome Live chrome', () => {
   beforeEach(() => {
     voice.callState = 'idle'
     voice.callError = null
+    voice.endSpeak.mockClear()
+    voice.beginSpeak.mockClear()
+    chat.messages = []
+    chat.streamingByConv = {}
   })
 
   it('shows Live + speak + mic on the expanded thread', () => {
@@ -161,5 +175,42 @@ describe('ChatHome Live chrome', () => {
       screen.getByTestId('home-live-button').click()
     })
     expect(screen.getByRole('button', { name: /Open full chat/i })).toBeInTheDocument()
+  })
+
+  it('hides Replied. leftovers on the homepage strip and full thread', () => {
+    chat.messages = [
+      { id: 'u1', sender_id: 1, content: "Yo, what's up?" },
+      { id: 'a1', sender_id: 2, sender_name: 'Ena', content: "Hey. I'm here. What do you need?" },
+      { id: 'a2', sender_id: 2, sender_name: 'Ena', content: 'Replied.' },
+    ]
+    voice.callState = 'listening'
+    renderAt('/')
+    act(() => {
+      screen.getByTestId('home-live-button').click()
+    })
+    expect(screen.getByText(/hey\. i'm here/i)).toBeInTheDocument()
+    expect(screen.queryByText(/^replied\.?$/i)).not.toBeInTheDocument()
+
+    renderAt(`/c/${CONV}`)
+    expect(screen.getByTestId('message-list').textContent).toMatch(/hey\. i'm here/i)
+    expect(screen.getByTestId('message-list').textContent).not.toMatch(/replied/i)
+  })
+
+  it('ends speak after a Replied. persist so Live does not freeze on Speaking', () => {
+    chat.messages = [
+      { id: 'a1', sender_id: 2, sender_name: 'Ena', content: "Hey. I'm here." },
+    ]
+    voice.callState = 'speaking'
+    renderAt('/')
+    act(() => {
+      screen.getByTestId('home-live-button').click()
+    })
+    voice.endSpeak.mockClear()
+    chat.messages = [
+      { id: 'a1', sender_id: 2, sender_name: 'Ena', content: "Hey. I'm here." },
+      { id: 'a2', sender_id: 2, sender_name: 'Ena', content: 'Replied.' },
+    ]
+    renderAt('/')
+    expect(voice.endSpeak).toHaveBeenCalled()
   })
 })

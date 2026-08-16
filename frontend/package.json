@@ -8,6 +8,9 @@
     "build": "vite build && node scripts/generate-route-html.mjs",
     "preview": "vite preview",
     "lint": "eslint src --report-unused-disable-directives --max-warnings 0",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "test:e2e:live": "SHIZUHA_LIVE_E2E=1 BASE_URL=https://shizuha.com playwright test tests/e2e/live-homepage-talk.spec.js --project=chromium",
     "prebuild": "node scripts/check-local-packages.mjs && node scripts/nginxResearchProxy.guardrail.test.mjs"
   },
   "dependencies": {
