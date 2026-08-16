@@ -262,8 +262,13 @@ test('known operator thread hides leftover Replied. / Keyterms and keeps Live ch
   await expect(page.getByTestId('thread-live-button')).toBeVisible({ timeout: 20000 })
   await expect(page.getByTestId('thread-speak-button')).toBeVisible()
   await expect(page.getByTestId('thread-mic-button')).toBeVisible()
+  await expect(page.locator('h3').filter({ hasText: /Ena/i }).first()).toBeVisible({ timeout: 20000 })
   const list = page.getByTestId('connect-message-list')
   await expect(list).toBeVisible({ timeout: 20000 })
+  await expect(list).not.toHaveText(/^\s*$/)
+  await expect.poll(async () => ((await list.innerText()) || '').trim().length, {
+    timeout: 20000,
+  }).toBeGreaterThan(20)
   await assertNoGhosts(page, `known thread ${KNOWN_THREAD}`)
   await assertSidebarHasNoGhosts(page)
   await shot(page, '09-known-thread')
