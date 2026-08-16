@@ -112,10 +112,11 @@ describe('startStreamingStt startup cancellation', () => {
 })
 
 describe('utterance endpointing', () => {
-  it('treats hanging clauses as incomplete and finished sentences as done', () => {
+  it('treats hanging clauses and digit strings as incomplete; only ?/! end a turn', () => {
     expect(utteranceLooksIncomplete('I want you to check')).toBe(true)
-    expect(utteranceLooksIncomplete('check the second task if it is relevant.')).toBe(false)
-    expect(utteranceLooksIncomplete("What's up")).toBe(false)
+    expect(utteranceLooksIncomplete('I want you to check this 5 9 3 6 task.')).toBe(true)
+    expect(utteranceLooksIncomplete('check the second task if it is relevant.')).toBe(true)
+    expect(utteranceLooksIncomplete("What's up?")).toBe(false)
     expect(sttCommitHangoverMs('I want you to check')).toBe(STT_INCOMPLETE_HANGOVER_MS)
   })
 })
@@ -215,7 +216,7 @@ describe('startStreamingStt hangover', () => {
         is_final: true,
       }),
     })
-    await vi.advanceTimersByTimeAsync(700)
+    await vi.advanceTimersByTimeAsync(STT_INCOMPLETE_HANGOVER_MS + 200)
     expect(onFinal).toHaveBeenCalledTimes(1)
     expect(onFinal.mock.calls[0][0]).toMatch(/relevant/i)
   })

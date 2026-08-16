@@ -1,16 +1,20 @@
-/** After a complete-looking speech_final, wait this long for more words. */
-export const STT_COMPLETE_HANGOVER_MS = 600
-/** After a hanging clause ("I want you to check"), wait longer. */
-export const STT_INCOMPLETE_HANGOVER_MS = 1500
+/** After a clearly finished question, wait this long for a late clause. */
+export const STT_COMPLETE_HANGOVER_MS = 2200
+/** Human-like pause after a mid-thought, digit string, or period-only clause. */
+export const STT_INCOMPLETE_HANGOVER_MS = 4000
 
-const INCOMPLETE_TAIL = /\b(a|an|and|at|but|check|for|if|in|of|on|or|so|the|to|with|my|your|this|that|these|those|first|second|third|want|see|look|tell|give|pull|open|about)$/i
+const INCOMPLETE_TAIL = /\b(a|an|and|at|but|check|for|if|in|of|on|or|so|the|to|with|my|your|this|that|these|those|first|second|third|want|see|look|tell|give|pull|open|about|task|personally|perhaps|maybe|just|please|then|also)$/i
 
-/** True when the transcript is a mid-thought, not a finished command. */
+/** True when the transcript is a mid-thought, not a finished command.
+ * Grok often appends a period on an unfinished clause, so `.` is not a stop. */
 export function utteranceLooksIncomplete(text) {
   const t = String(text || '').replace(/\s+/g, ' ').trim()
   if (!t) return true
-  if (/[.?!…]$/.test(t)) return false
-  return INCOMPLETE_TAIL.test(t)
+  const stripped = t.replace(/[.]+$/, '')
+  if (/\b\d(?:\s+\d)+\b/.test(stripped)) return true
+  if (/[?!…]$/.test(t) && stripped.split(/\s+/).length >= 2) return false
+  if (INCOMPLETE_TAIL.test(stripped)) return true
+  return true
 }
 
 export function sttCommitHangoverMs(text) {

@@ -21,6 +21,7 @@ import {
   nextTtsSpeed,
   formatTtsSpeed,
   isEchoUtterance,
+  normalizeHeardName,
   useVoiceConversation,
   VOICE_STREAM_BASE_BACKOFF_MS,
   VOICE_STREAM_MAX_RETRIES,
@@ -145,14 +146,16 @@ describe('talk-seat transcript hygiene', () => {
     expect(isTalkAckText('Replied.')).toBe(true)
     expect(isTalkAckText('Hey. I am here.')).toBe(false)
     expect(isGhostTranscript('Keyterms: Shizuha, Hritik, Hive, Cortex, Pulse')).toBe(true)
+    expect(isGhostTranscript('Hive.')).toBe(true)
     expect(isGhostTranscript("Hey, what's up?")).toBe(false)
+    expect(normalizeHeardName('Hey, Nawa, what\'s up?')).toBe('Hey, Ena, what\'s up?')
   })
 
   it('treats isolated Hive after TTS as echo', () => {
     const spokenAt = 1_000
     expect(isEchoUtterance('Hive.', 'Here. What\'s up?', 1_500, spokenAt)).toBe(true)
     expect(isEchoUtterance('What tasks are pending on me?', 'Here. What\'s up?', 1_500, spokenAt)).toBe(false)
-    expect(isEchoUtterance('Hive.', 'Here. What\'s up?', 10_000, spokenAt)).toBe(false)
+    expect(isEchoUtterance('Hive.', 'Here. What\'s up?', 10_000, spokenAt)).toBe(true)
   })
 })
 

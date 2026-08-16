@@ -179,6 +179,7 @@ speakText.stop = () => {
   stopGaplessPlayback()
   if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel()
   stopSpeakStream()
+  speakQueue = Promise.resolve()
 }
 
 // ── Talk speed (Grok TTS 0.7–1.5). Default 1.2 so Live does not linger. ──
@@ -392,20 +393,24 @@ export function finishSpeakStream() {
   }
 }
 
-export const SPEAK_IDLE_TIMEOUT_MS = 12_000
+export const SPEAK_IDLE_TIMEOUT_MS = 90_000
+
+export function remainingSpeakMs() {
+  if (gaplessCtx && typeof gaplessCtx.currentTime === 'number' && gaplessHead > gaplessCtx.currentTime) {
+    return Math.ceil((gaplessHead - gaplessCtx.currentTime) * 1000) + 200
+  }
+  return 0
+}
 
 export function waitSpeakIdle(timeoutMs = SPEAK_IDLE_TIMEOUT_MS) {
-  let timedOut = false
+  const deadline = Date.now() + timeoutMs
   return Promise.race([
-    speakQueue.then(() => undefined),
-    new Promise((resolve) => {
-      window.setTimeout(() => {
-        timedOut = true
-        resolve()
-      }, timeoutMs)
-    }),
-  ]).then(() => {
-    if (timedOut) speakText.stop?.()
+    speakQueue.catch(() => undefined),
+    new Promise((resolve) => { window.setTimeout(resolve, timeoutMs) }),
+  ]).then(async () => {
+    while (remainingSpeakMs() > 0 && Date.now() < deadline) {
+      await new Promise((resolve) => { window.setTimeout(resolve, 80) })
+    }
   })
 }
 
@@ -418,21 +423,30 @@ export function isTalkAckText(text) {
   return /^(replied|done|sent|ok|noted|pong sent)[.!]?$/i.test(String(text || '').replace(/\s+/g, ' ').trim())
 }
 
+const STT_KEYTERM_ONLY = /^(shizuha|hritik|hive|cortex|pulse|ena|yuna)[.!?]?$/i
+
 /** xAI keyterm boost dumps, not something the caller said. */
 export function isGhostTranscript(text) {
   const t = String(text || '').replace(/\s+/g, ' ').trim()
   if (!t) return true
-  return /^keyterms?\s*:/i.test(t)
+  if (/^keyterms?\s*:/i.test(t)) return true
+  return STT_KEYTERM_ONLY.test(t)
+}
+
+/** Common STT confusions for talk-seat names. */
+export function normalizeHeardName(text) {
+  return String(text || '').replace(/\bNawa\b/g, 'Ena').replace(/\bNawah\b/g, 'Ena')
 }
 
 /** TTS leaking back into STT (Hive/Pulse/etc. after we just spoke). */
-export function isEchoUtterance(heard, lastSpoken, now, spokenAt, windowMs = 4000) {
+export function isEchoUtterance(heard, lastSpoken, now, spokenAt, windowMs = 8000) {
   const a = normalizeUtterance(heard)
   const b = normalizeUtterance(lastSpoken)
   if (!a || !b) return false
+  if (STT_KEYTERM_ONLY.test(a)) return true
   if (now - spokenAt > windowMs) return false
   if (a === b || b.includes(a) || (a.length >= 8 && a.includes(b))) return true
-  return /^(shizuha|hritik|hive|cortex|pulse)[.!?]?$/.test(a)
+  return false
 }
 
 export function isDuplicateUtterance(next, prev, now, prevAt, windowMs = 2500) {
@@ -619,13 +633,13 @@ export function useVoiceConversation({ onUtterance } = {}) {
         },
         onPartial: (text) => {
           if (!activeRef.current || mutedRef.current) return
-          const heard = String(text || '').trim()
-          if (heard) setLastHeard(heard)
+          const heard = normalizeHeardName(String(text || '').trim())
+          if (heard && !isGhostTranscript(heard) && !isTalkAckText(heard)) setLastHeard(heard)
         },
         onFinal: (text) => {
           streamingRef.current = null
           if (!activeRef.current || mutedRef.current || !text.trim()) return
-          const heard = text.trim()
+          const heard = normalizeHeardName(text.trim())
           const now = Date.now()
           if (isGhostTranscript(heard) || isTalkAckText(heard)) {
             utteranceDelivered = true
@@ -666,6 +680,11 @@ export function useVoiceConversation({ onUtterance } = {}) {
           streamingRef.current = null
           // startStreamingStt already disposed WS/AudioContext/mic tracks.
           if (!activeRef.current) return
+          const message = String(error?.message || '')
+          if (/time.?limit|idle_timeout|session reached/i.test(message)) {
+            listenOnceRef.current?.()
+            return
+          }
           const kind = classifyVoiceError(error)
           if (kind === 'no_mic' || kind === 'permission_denied') {
             // Hard fail — never auto-retry mic/permission errors (CON-296 A).
