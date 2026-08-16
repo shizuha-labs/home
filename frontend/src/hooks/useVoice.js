@@ -266,8 +266,17 @@ export function startSpeakStream({ voice } = {}) {
   return speakReady
 }
 
+export function stripSpeakableMarkup(text) {
+  return String(text || '')
+    .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, ' ')
+    .replace(/<\/?tool_call\b[^>]*>/gi, ' ')
+    .replace(/<invoke\b[\s\S]*?<\/invoke>/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 export async function speakDelta(text, { done = true } = {}) {
-  const clean = String(text || '').replace(/\s+/g, ' ').trim()
+  const clean = stripSpeakableMarkup(text)
   if (!clean) return
   const ready = await startSpeakStream()
   if (!ready || !speakWs || speakWs.readyState !== WebSocket.OPEN) {

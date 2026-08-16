@@ -22,7 +22,7 @@ import {
   RETIRED_HOME_AGENTS,
   writeHomeAgentPref,
 } from '../hooks/useHomeAgentPreference'
-import { useVoiceInput, useVoiceConversation, speakText, speakDelta, nextSpokenSentences, spokenCovers, waitSpeakIdle } from '../hooks/useVoice'
+import { useVoiceInput, useVoiceConversation, speakText, speakDelta, nextSpokenSentences, spokenCovers, waitSpeakIdle, finishSpeakStream, stripSpeakableMarkup } from '../hooks/useVoice'
 import { useHomeSummary } from '../hooks/useHomeSummary'
 import { useHomeActivity } from '../hooks/useHomeActivity'
 import { getAccessToken, handleUnauthorized } from '../utils/auth'
@@ -411,7 +411,7 @@ function ChatHomeInner() {
     if (!sentences.length) return
     spokenStreamRef.current = spoken
     for (const sentence of sentences) {
-      void speakDelta(sentence)
+      void speakDelta(sentence, { done: false })
     }
   }, [streamingByConv, speakReplies, callActive, voiceConvId, activeConversationId])
 
@@ -426,8 +426,9 @@ function ChatHomeInner() {
     lastSpokenIdRef.current = key
     const leftover = spokenCovers(last.content, spokenStreamRef.current)
       ? ''
-      : String(last.content || '').trim()
+      : stripSpeakableMarkup(last.content || '')
     lastLiveStreamRef.current = ''
+    if (callActive) finishSpeakStream()
     if (!leftover) {
       if (callActive) void waitSpeakIdle().then(() => resumeListen())
       return

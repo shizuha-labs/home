@@ -13,6 +13,7 @@ import {
   classifyVoiceError,
   isDuplicateUtterance,
   nextSpokenSentences,
+  stripSpeakableMarkup,
   spokenCovers,
   useVoiceConversation,
   VOICE_STREAM_BASE_BACKOFF_MS,
@@ -105,6 +106,12 @@ describe('nextSpokenSentences', () => {
   it('flushes short talk-seat replies like pong.', () => {
     const first = nextSpokenSentences('pong.', '')
     expect(first.sentences).toEqual(['pong.'])
+  })
+
+  it('does not treat leaked tool_call storms as speakable', () => {
+    expect(stripSpeakableMarkup(
+      "I'll look up Hive. <tool_call>ToolSearch</tool_call> <tool_call>ToolSearch</tool_call>",
+    )).toBe("I'll look up Hive.")
   })
 
   it('flushes leftover text when the stream completes without punctuation', () => {
