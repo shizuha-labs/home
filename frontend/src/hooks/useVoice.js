@@ -293,8 +293,21 @@ export function finishSpeakStream() {
   }
 }
 
-export function waitSpeakIdle() {
-  return speakQueue.then(() => undefined)
+export const SPEAK_IDLE_TIMEOUT_MS = 12_000
+
+export function waitSpeakIdle(timeoutMs = SPEAK_IDLE_TIMEOUT_MS) {
+  let timedOut = false
+  return Promise.race([
+    speakQueue.then(() => undefined),
+    new Promise((resolve) => {
+      window.setTimeout(() => {
+        timedOut = true
+        resolve()
+      }, timeoutMs)
+    }),
+  ]).then(() => {
+    if (timedOut) speakText.stop?.()
+  })
 }
 
 export function normalizeUtterance(text) {
@@ -596,14 +609,25 @@ export function useVoiceConversation({ onUtterance } = {}) {
     if (clean) lastSpokenRef.current = { text: clean, at: Date.now() }
   }, [teardownCapture])
 
+  const endSpeak = useCallback(async () => {
+    finishSpeakStream()
+    await waitSpeakIdle()
+    speakingRef.current = false
+    if (!activeRef.current) return
+    if (mutedRef.current) {
+      setCallState('listening')
+      return
+    }
+    setCallState('listening')
+    resumeListen()
+  }, [resumeListen])
+
   const notifyReply = useCallback(async (text) => {
     if (!activeRef.current || !text) return
     beginSpeak(text)
     await speakDelta(text)
-    await waitSpeakIdle()
-    speakingRef.current = false
-    resumeListen()
-  }, [beginSpeak, resumeListen])
+    await endSpeak()
+  }, [beginSpeak, endSpeak])
 
   const startCall = useCallback(() => {
     if (activeRef.current) return
@@ -683,6 +707,7 @@ export function useVoiceConversation({ onUtterance } = {}) {
     toggleMute,
     notifyReply,
     beginSpeak,
+    endSpeak,
     resumeListen,
     isCallActive: () => activeRef.current,
   }

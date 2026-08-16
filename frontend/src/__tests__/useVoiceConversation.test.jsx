@@ -169,6 +169,23 @@ describe('useVoiceConversation — utterance dedupe', () => {
     expect(onUtterance).toHaveBeenCalledTimes(1)
   })
 
+  it('clears Speaking and re-opens the mic after endSpeak', async () => {
+    const { result } = renderHook(() => useVoiceConversation())
+    act(() => {
+      result.current.startCall()
+    })
+    act(() => {
+      result.current.beginSpeak('Hey. I am here.')
+    })
+    expect(result.current.callState).toBe('speaking')
+    await act(async () => {
+      await result.current.endSpeak()
+    })
+    expect(result.current.callState).not.toBe('speaking')
+    expect(['listening', 'connecting']).toContain(result.current.callState)
+    expect(startStreamingStt.mock.calls.length).toBeGreaterThan(1)
+  })
+
   it('cancels the mic when a reply starts speaking', async () => {
     const { result } = renderHook(() => useVoiceConversation())
     act(() => {
@@ -400,6 +417,26 @@ describe('useVoiceConversation — CON-296 failure paths', () => {
 })
 
 describe('MiniShizuhaChat — voice failure surface', () => {
+  it('hides Replied leftovers and keeps the strip scrollable', () => {
+    render(
+      <MiniShizuhaChat
+        messages={[
+          { id: '1', sender_id: 1, content: "Yo, what's up?" },
+          { id: '2', sender_id: 2, sender_name: 'Ena', content: "Hey. I'm here. What do you need?" },
+          { id: '3', sender_id: 2, sender_name: 'Ena', content: 'Replied.' },
+        ]}
+        typingUsers={[]}
+        currentUserId={1}
+        isLoading={false}
+        onOpenFull={() => {}}
+        onClose={() => {}}
+      />,
+    )
+    expect(screen.getByText(/hey\. i'm here/i)).toBeInTheDocument()
+    expect(screen.queryByText(/^replied\.?$/i)).toBeNull()
+    expect(screen.getByTestId('mini-chat-scroll').className).toMatch(/overflow-y-auto/)
+  })
+
   it('renders actionable no-mic guidance with Dismiss (no Retry)', () => {
     const onDismiss = vi.fn()
     render(

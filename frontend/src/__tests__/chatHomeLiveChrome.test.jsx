@@ -19,6 +19,7 @@ const voice = {
   toggleMute: vi.fn(),
   notifyReply: vi.fn(),
   beginSpeak: vi.fn(),
+  endSpeak: vi.fn(),
   resumeListen: vi.fn(),
   isCallActive: () => voice.callState !== 'idle' && voice.callState !== 'error',
 }

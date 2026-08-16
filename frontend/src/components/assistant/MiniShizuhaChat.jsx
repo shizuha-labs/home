@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react'
 import LiveWaveformIcon from './LiveWaveformIcon'
+import { isTalkAckText } from '../../hooks/useVoice'
 
 /**
  * MiniShizuhaChat — HIVE home inline chat (operator 2026-07-11).
@@ -40,10 +41,10 @@ export default function MiniShizuhaChat({
           : callState === 'speaking' ? 'Speaking…'
             : ''
 
-  // Rolling window: latest 3 messages, newest at the bottom.
+  // Rolling window: drop talk-seat "Replied." leftovers, keep recent turns.
   const visible = useMemo(() => {
     const list = Array.isArray(messages) ? messages : []
-    return list.slice(-3)
+    return list.filter((m) => !isTalkAckText(m?.content)).slice(-20)
   }, [messages])
 
   const shizuhaTyping = Array.isArray(typingUsers) && typingUsers.length > 0
@@ -172,7 +173,11 @@ export default function MiniShizuhaChat({
           soft top fade sells the "rolling" read. */}
       <div className="relative">
         <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-5 bg-gradient-to-b from-white/85 to-transparent dark:from-gray-900/70" />
-        <div ref={scrollRef} className="max-h-40 space-y-1.5 overflow-y-auto px-4 pb-3 pt-1">
+        <div
+          ref={scrollRef}
+          data-testid="mini-chat-scroll"
+          className="max-h-64 min-h-0 space-y-1.5 overflow-y-auto overscroll-y-contain px-4 pb-3 pt-1"
+        >
           {isLoading && visible.length === 0 && (
             <p className="py-2 text-center text-xs text-gray-400">Loading conversation…</p>
           )}

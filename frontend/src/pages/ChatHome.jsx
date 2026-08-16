@@ -22,7 +22,7 @@ import {
   RETIRED_HOME_AGENTS,
   writeHomeAgentPref,
 } from '../hooks/useHomeAgentPreference'
-import { useVoiceInput, useVoiceConversation, speakText, speakDelta, nextSpokenSentences, spokenCovers, waitSpeakIdle, finishSpeakStream, stripSpeakableMarkup, isTalkAckText } from '../hooks/useVoice'
+import { useVoiceInput, useVoiceConversation, speakText, speakDelta, nextSpokenSentences, spokenCovers, stripSpeakableMarkup, isTalkAckText } from '../hooks/useVoice'
 import { useHomeSummary } from '../hooks/useHomeSummary'
 import { useHomeActivity } from '../hooks/useHomeActivity'
 import { getAccessToken, handleUnauthorized } from '../utils/auth'
@@ -347,7 +347,7 @@ function ChatHomeInner() {
   // speak the reply → listen again. onUtterance fires when the caller finishes
   // an utterance; we send it to Shizuha and the reply is spoken by the effect
   // below once it streams in.
-  const { callState, callError, muted, lastHeard, startCall, endCall, retryCall, toggleMute, notifyReply, beginSpeak, resumeListen, isCallActive } = useVoiceConversation({
+  const { callState, callError, muted, lastHeard, startCall, endCall, retryCall, toggleMute, notifyReply, beginSpeak, endSpeak, isCallActive } = useVoiceConversation({
     onUtterance: (text) => {
       if (activeConversationId) sendMessage(text)
       else sendToShizuha(text)
@@ -359,9 +359,13 @@ function ChatHomeInner() {
   }, [callState, lastHeard])
   const lastAgentReply = useMemo(() => {
     const list = Array.isArray(messages) ? messages : []
-    const last = [...list].reverse().find((m) => m.sender_id !== user?.id)
+    const last = [...list].reverse().find((m) => m.sender_id !== user?.id && !isTalkAckText(m.content))
     return last?.content || ''
   }, [messages, user?.id])
+  const displayMessages = useMemo(
+    () => (Array.isArray(messages) ? messages.filter((m) => !isTalkAckText(m?.content)) : messages),
+    [messages],
+  )
   // Active = mid-call only. 'error' is a terminal surface with guidance/retry, not "on call".
   const callActive = callState !== 'idle' && callState !== 'error'
   const callFailed = callState === 'error'
@@ -451,21 +455,20 @@ function ChatHomeInner() {
     lastSpokenIdRef.current = key
     if (isTalkAckText(last.content)) {
       lastLiveStreamRef.current = ''
-      if (callActive) void waitSpeakIdle().then(() => resumeListen())
+      if (callActive) void endSpeak()
       return
     }
     const leftover = spokenCovers(last.content, spokenStreamRef.current)
       ? ''
       : stripSpeakableMarkup(last.content || '')
     lastLiveStreamRef.current = ''
-    if (callActive) finishSpeakStream()
     if (!leftover) {
-      if (callActive) void waitSpeakIdle().then(() => resumeListen())
+      if (callActive) void endSpeak()
       return
     }
     if (callActive) notifyReply(leftover)
     else if (speakReplies) speakText(leftover)
-  }, [messages, speakReplies, callActive, notifyReply, resumeListen, voiceConvId, activeConversationId, user?.id])
+  }, [messages, speakReplies, callActive, notifyReply, endSpeak, voiceConvId, activeConversationId, user?.id])
 
   const toggleSpeakReplies = useCallback(() => {
     setSpeakReplies((v) => {
@@ -690,7 +693,7 @@ function ChatHomeInner() {
           <MessageList
             key={activeConversationId}
             conversationId={activeConversationId}
-            messages={messages}
+            messages={displayMessages}
             currentUserId={user?.id}
             typingUsers={activeConversationId ? typingUsers.get(activeConversationId) : undefined}
             hasMore={hasMore}
@@ -844,7 +847,7 @@ function ChatHomeInner() {
                 talk with Shizuha without leaving the home page. */}
             {miniConvId && activeConversationId === miniConvId && (
               <MiniShizuhaChat
-                messages={messages}
+                messages={displayMessages}
                 typingUsers={typingUsers}
                 currentUserId={user?.id}
                 isLoading={isLoadingMessages}
