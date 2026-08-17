@@ -463,7 +463,7 @@ function scheduleAudioBuffer(buf, rate, epoch = speakEpoch) {
   })
 }
 
-export function playPcmChunk(bytes, sampleRate = PCM_SAMPLE_RATE, rate = 1) {
+export function playPcmChunk(bytes, sampleRate = PCM_SAMPLE_RATE, rate = 1, { fade = true } = {}) {
   const epoch = speakEpoch
   if (speakMuted) return Promise.resolve()
   const ctx = ensureGaplessCtx()
@@ -482,8 +482,10 @@ export function playPcmChunk(bytes, sampleRate = PCM_SAMPLE_RATE, rate = 1) {
   const buf = ctx.createBuffer(1, samples.length, sampleRate)
   const channel = buf.getChannelData(0)
   for (let i = 0; i < samples.length; i += 1) channel[i] = samples[i] / 32768
-  if (fadeNextPcm) {
+  if (fade && fadeNextPcm) {
     fadeInChannel(channel, sampleRate)
+    fadeNextPcm = false
+  } else {
     fadeNextPcm = false
   }
   return scheduleAudioBuffer(buf, rate, epoch)

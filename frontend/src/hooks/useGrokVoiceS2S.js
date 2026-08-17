@@ -30,20 +30,21 @@ function toPcm16(samples) {
   return pcm.buffer
 }
 
-function playS2SPcm(bytes) {
+function playS2SPcm(bytes, onPlay) {
   // speakText.stop() latches speakMuted so leftover cascade TTS dies.
   // Cascade unmutes before its next play. S2S must do the same or her
   // audio is dropped after the first speech_started.
   unmuteSpeakOutput()
-  void playPcmChunk(bytes, 24000, 1)
+  onPlay?.()
+  void playPcmChunk(bytes, 24000, 1, { fade: false })
 }
 
-function playBase64Pcm(b64) {
+function playBase64Pcm(b64, onPlay) {
   if (!b64) return
   const binary = atob(b64)
   const bytes = new Uint8Array(binary.length)
   for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
-  playS2SPcm(bytes)
+  playS2SPcm(bytes, onPlay)
 }
 
 /**
@@ -77,6 +78,7 @@ export function useGrokVoiceS2S({
   const lastSpokenRef = useRef({ text: '', at: 0 })
   const heardAudioRef = useRef(false)
   const droppedReplyRef = useRef('')
+  const lastPlayAtRef = useRef(0)
   const fallbackTimerRef = useRef(null)
   const pingTimerRef = useRef(null)
   const releaseTimerRef = useRef(null)
@@ -162,6 +164,10 @@ export function useGrokVoiceS2S({
     releaseTimerRef.current = window.setTimeout(() => {
       releaseTimerRef.current = null
       if (!holdMicRef.current) return
+      if (remainingSpeakMs() > 80 || Date.now() - lastPlayAtRef.current < 400) {
+        holdMicForSpeak(lastSpokenRef.current.text)
+        return
+      }
       holdMicRef.current = false
       applyMicGate()
       if (activeRef.current && !mutedRef.current) setCallState('listening')
@@ -246,8 +252,9 @@ export function useGrokVoiceS2S({
       if (cancelled || !activeRef.current) return
       if (typeof event.data !== 'string') {
         heardAudioRef.current = true
-        if (speakEnabledRef.current) playS2SPcm(new Uint8Array(event.data))
-        else emitLiveTrace('s2s.audio_drop', { reason: 'speak_off', via: 'binary' })
+        if (speakEnabledRef.current) {
+          playS2SPcm(new Uint8Array(event.data), () => { lastPlayAtRef.current = Date.now() })
+        } else emitLiveTrace('s2s.audio_drop', { reason: 'speak_off', via: 'binary' })
         return
       }
       let msg
@@ -278,11 +285,30 @@ export function useGrokVoiceS2S({
         return
       }
       if (type === 'speech_started' || type === 'input_audio_buffer.speech_started') {
-        // Echo of her speaker is not barge-in. Mic is already held while she talks.
+        // Echo of her speaker is not barge-in. Ignore VAD for 800ms after
+        // her audio starts so the first/last syllable is not cut off.
         if (holdMicRef.current || mutedRef.current) return
+        if (Date.now() - lastPlayAtRef.current < 800) return
         interruptSpeakOutput()
         setCallState('listening')
         return
+      }
+      if (type === 'debug.user') {
+        emitLiveTrace('s2s.user', { text: msg.text || '', via: 'proxy' })
+        return
+      }
+      if (type === 'debug.assistant') {
+        const text = String(msg.stt || msg.text || '').trim()
+        if (text) {
+          setLastReply(text)
+          emitLiveTrace('s2s.assistant', { text, via: 'stt' })
+        }
+        return
+      }
+      if (type === 'error' || type.startsWith('response.')) {
+        if (type.startsWith('response.') && type !== 'response.output_audio.delta' && type !== 'response.audio.delta') {
+          emitLiveTrace('s2s.event', { type })
+        }
       }
       if (
         type === 'input_audio_transcription.delta'
@@ -359,6 +385,7 @@ export function useGrokVoiceS2S({
         return
       }
       if (type === 'response.output_audio.delta' || type === 'response.audio.delta') {
+        if (!heardAudioRef.current) emitLiveTrace('s2s.audio.start', {})
         heardAudioRef.current = true
         if (fallbackTimerRef.current != null) {
           window.clearTimeout(fallbackTimerRef.current)
@@ -371,7 +398,7 @@ export function useGrokVoiceS2S({
           return
         }
         if (isSpeakOutputMuted()) emitLiveTrace('s2s.audio_unmute', { reason: 'after_stop' })
-        playBase64Pcm(msg.delta || msg.audio)
+        playBase64Pcm(msg.delta || msg.audio, () => { lastPlayAtRef.current = Date.now() })
         return
       }
       if (type === 'response.done' || type === 'response.completed') {
