@@ -368,6 +368,7 @@ function ChatHomeInner() {
     onUtterance: (text) => {
       emitLiveTrace('chat.send', { via: 'utterance', text, conversation_id: activeConversationId || miniConvId || urlConversationId || '' })
       if (!sendOnOpenThread(text)) sendToShizuha(text)
+      setInputValue('')
     },
   })
   // Streaming STT types into the compose box as the caller speaks.

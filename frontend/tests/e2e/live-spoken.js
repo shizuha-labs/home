@@ -164,9 +164,14 @@ export async function hudCaption(page) {
 }
 
 export async function composeValue(page) {
-  const box = homeCompose(page)
-  if (!(await box.count())) return ''
-  return box.inputValue().catch(() => '')
+  const home = homeCompose(page)
+  if (await home.count()) {
+    const typed = await home.inputValue().catch(() => '')
+    if (typed) return typed
+  }
+  const thread = page.getByRole('textbox', { name: /Message/i }).first()
+  if (await thread.count()) return thread.inputValue().catch(() => '')
+  return ''
 }
 
 export async function miniChatTurns(page) {
