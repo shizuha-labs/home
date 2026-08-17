@@ -24,6 +24,7 @@ import {
   echoTokenOverlap,
   readyToFlushSpokenSentences,
   shouldSurfaceHeard,
+  isLiveFillerUtterance,
   normalizeHeardName,
   useVoiceConversation,
   speakText,
@@ -182,7 +183,7 @@ describe('talk-seat transcript hygiene', () => {
 
   it('does not surface mute fragments or question paraphrases as heard text', () => {
     expect(shouldSurfaceHeard("I'm", { muted: true }).ok).toBe(false)
-    expect(shouldSurfaceHeard("I'm", { muted: true }).reason).toBe('muted_fragment')
+    expect(['muted_fragment', 'filler']).toContain(shouldSurfaceHeard("I'm", { muted: true }).reason)
     expect(shouldSurfaceHeard('What can I do?', {
       lastSpoken: "Hey. I'm here. What do you need?",
       spokenAt: 1_000,
@@ -194,6 +195,24 @@ describe('talk-seat transcript hygiene', () => {
       now: 8_000,
     }).ok).toBe(true)
     expect(shouldSurfaceHeard('check the s1 drive', { muted: true }).ok).toBe(true)
+  })
+
+  it('drops Good / Good here as Live filler, not as a real turn', () => {
+    expect(isLiveFillerUtterance('Good.')).toBe(true)
+    expect(isLiveFillerUtterance('Good here')).toBe(true)
+    expect(isLiveFillerUtterance("I'm here")).toBe(true)
+    expect(isLiveFillerUtterance('the drive')).toBe(false)
+    expect(isLiveFillerUtterance('BKSG-48')).toBe(false)
+    expect(shouldSurfaceHeard('Good.', {
+      lastSpoken: 'Want to walk BKSG-48 or the drive?',
+      spokenAt: 1_000,
+      now: 50_000,
+    })).toMatchObject({ ok: false, reason: 'filler' })
+    expect(shouldSurfaceHeard('the drive', {
+      lastSpoken: 'Want to walk BKSG-48 or the drive?',
+      spokenAt: 1_000,
+      now: 50_000,
+    }).ok).toBe(true)
   })
 
   it('holds the first Live flush until a real phrase lands', () => {
@@ -294,6 +313,33 @@ describe('useVoiceConversation — utterance dedupe', () => {
     })
     expect(onUtterance).toHaveBeenCalledWith('check the s1 drive')
     expect(result.current.muted).toBe(true)
+  })
+
+  it('does not send Good. after a long reply even outside the echo window', async () => {
+    const onUtterance = vi.fn()
+    const { result } = renderHook(() => useVoiceConversation({ onUtterance }))
+    act(() => {
+      result.current.startCall()
+    })
+    act(() => {
+      result.current.beginSpeak('Want to walk BKSG-48 or the drive?')
+    })
+    await act(async () => {
+      await result.current.endSpeak()
+    })
+    const opts = startStreamingStt.mock.calls.at(-1)[0]
+    act(() => {
+      opts.onPartial?.('Good.')
+    })
+    expect(result.current.lastHeard).not.toMatch(/^good/i)
+    act(() => {
+      opts.onFinal?.('Good.')
+    })
+    expect(onUtterance).not.toHaveBeenCalled()
+    act(() => {
+      opts.onFinal?.('Good here')
+    })
+    expect(onUtterance).not.toHaveBeenCalled()
   })
 
   it('does not paint or send a paraphrased echo after she just spoke', async () => {

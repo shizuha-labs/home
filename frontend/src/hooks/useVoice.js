@@ -646,6 +646,23 @@ export function isTalkAckText(text) {
   return /^(replied|done|sent|ok|noted|pong sent)[.!]?$/i.test(String(text || '').replace(/\s+/g, ' ').trim())
 }
 
+/** STT-only fillers. Not isTalkAckText — that hides rows in the thread. */
+const LIVE_FILLER = new Set([
+  'good', 'okay', 'ok', 'k', 'yeah', 'yup', 'yep', 'nah', 'here',
+  'alright', 'cool', 'sure', 'thanks', 'thank', 'fine', 'huh', 'uh',
+  'um', 'hmm', 'mm', 'mhm', 'oh', 'ah', 'right', 'nice', 'great',
+  'gotcha', 'copy', 'roger', 'i', 'im', "i'm",
+])
+
+export function isLiveFillerUtterance(text) {
+  const words = normalizeUtterance(text)
+    .replace(/[.!?,;:'"]/g, '')
+    .split(/\s+/)
+    .filter(Boolean)
+  if (!words.length) return true
+  return words.every((w) => LIVE_FILLER.has(w))
+}
+
 const STT_KEYTERM_ONLY = /^(shizuha|hritik|hive|cortex|pulse|ena|yuna)[.!?]?$/i
 
 /** xAI keyterm boost dumps, not something the caller said. */
@@ -707,6 +724,7 @@ export function shouldSurfaceHeard(heard, {
   const text = normalizeHeardName(String(heard || '').trim())
   if (!text) return { ok: false, reason: 'empty', text: '' }
   if (isGhostTranscript(text) || isTalkAckText(text)) return { ok: false, reason: 'ghost', text }
+  if (isLiveFillerUtterance(text)) return { ok: false, reason: 'filler', text }
   if (muted && !shouldCommitOnMute(text)) return { ok: false, reason: 'muted_fragment', text }
   if (isEchoUtterance(text, lastSpoken, now, spokenAt)) return { ok: false, reason: 'echo', text }
   return { ok: true, reason: '', text }
@@ -904,7 +922,9 @@ export function useVoiceConversation({ onUtterance } = {}) {
             spokenAt: lastSpokenRef.current.at,
           })
           if (!surface.ok) {
-            if (surface.reason === 'echo' || surface.reason === 'muted_fragment') setLastHeard('')
+            if (surface.reason === 'echo' || surface.reason === 'muted_fragment' || surface.reason === 'filler') {
+              setLastHeard('')
+            }
             return
           }
           setLastHeard(surface.text)
@@ -922,7 +942,8 @@ export function useVoiceConversation({ onUtterance } = {}) {
           if (!surface.ok) {
             if (surface.reason === 'muted_fragment') emitLiveTrace('stt.muted_drop', { text: surface.text })
             if (surface.reason === 'echo') emitLiveTrace('stt.echo_drop', { text: surface.text })
-            if (surface.reason === 'echo' || surface.reason === 'muted_fragment' || surface.reason === 'ghost') {
+            if (surface.reason === 'filler') emitLiveTrace('stt.filler_drop', { text: surface.text })
+            if (surface.reason === 'echo' || surface.reason === 'muted_fragment' || surface.reason === 'ghost' || surface.reason === 'filler') {
               setLastHeard('')
             }
             utteranceDelivered = true
@@ -1019,6 +1040,9 @@ export function useVoiceConversation({ onUtterance } = {}) {
     finishSpeakStream()
     await waitSpeakIdle()
     speakingRef.current = false
+    if (lastSpokenRef.current.text) {
+      lastSpokenRef.current = { ...lastSpokenRef.current, at: Date.now() }
+    }
     if (!activeRef.current) return
     if (mutedRef.current) {
       setCallState('listening')
