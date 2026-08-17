@@ -424,7 +424,7 @@ function scheduleAudioBuffer(buf, rate, epoch = speakEpoch) {
   })
 }
 
-function playPcmChunk(bytes, sampleRate = PCM_SAMPLE_RATE, rate = 1) {
+export function playPcmChunk(bytes, sampleRate = PCM_SAMPLE_RATE, rate = 1) {
   const epoch = speakEpoch
   if (speakMuted) return Promise.resolve()
   const ctx = ensureGaplessCtx()

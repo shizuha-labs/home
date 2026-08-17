@@ -23,6 +23,8 @@ import {
   writeHomeAgentPref,
 } from '../hooks/useHomeAgentPreference'
 import { useVoiceInput, useVoiceConversation, speakText, speakDelta, nextSpokenSentences, readyToFlushSpokenSentences, spokenCovers, stripSpeakableMarkup, isTalkAckText, isGhostTranscript, readTtsSpeed, cycleTtsSpeed } from '../hooks/useVoice'
+import { useGrokVoiceS2S } from '../hooks/useGrokVoiceS2S'
+import { isGrokVoiceOmniModel, liveVoiceAgent } from '../utils/grokVoice'
 import TtsSpeedButton from '../components/assistant/TtsSpeedButton'
 import { useHomeSummary } from '../hooks/useHomeSummary'
 import { useHomeActivity } from '../hooks/useHomeActivity'
@@ -224,6 +226,11 @@ function ChatHomeInner() {
   const selectedPicker = pickerOptions.find(
     (row) => String(row.username).toLowerCase() === String(effectiveHomeAgent).toLowerCase(),
   )
+  const liveConversation = conversations.find((c) => (
+    c.id === (miniConvId || activeConversationId || urlConversationId)
+  )) || null
+  const liveAgent = liveVoiceAgent(allAgents, liveConversation, user?.id, effectiveHomeAgent)
+  const s2sEnabled = isGrokVoiceOmniModel(liveAgent?.model)
 
   const chooseHomeAgent = useCallback((row) => {
     const username = writeHomeAgentPref(row?.username)
@@ -360,17 +367,27 @@ function ChatHomeInner() {
     navigate(`/c/${id}`)
   }, [miniConvId, navigate])
 
-  // Hands-free voice call (operator 2026-07-11): listen → transcribe → send →
-  // speak the reply → listen again. onUtterance fires when the caller finishes
-  // an utterance; we send it to Shizuha and the reply is spoken by the effect
-  // below once it streams in.
-  const { callState, callError, muted, lastHeard, startCall, endCall, retryCall, toggleMute, notifyReply, beginSpeak, endSpeak, cancelSpeak, isCallActive } = useVoiceConversation({
+  // Hands-free voice call. Grok Voice seats (Hina) use native speech-to-speech.
+  // Everyone else stays on STT → Connect → TTS.
+  const cascadeVoice = useVoiceConversation({
     onUtterance: (text) => {
       emitLiveTrace('chat.send', { via: 'utterance', text, conversation_id: activeConversationId || miniConvId || urlConversationId || '' })
       if (!sendOnOpenThread(text)) sendToShizuha(text)
       setInputValue('')
     },
   })
+  const s2sVoice = useGrokVoiceS2S({
+    conversationId: miniConvId || activeConversationId || urlConversationId || '',
+    agentUsername: liveAgent?.username || effectiveHomeAgent,
+    model: liveAgent?.model || '',
+    messages,
+    userId: user?.id,
+    speakEnabled: speakReplies,
+  })
+  const {
+    callState, callError, muted, lastHeard, startCall, endCall, retryCall,
+    toggleMute, notifyReply, beginSpeak, endSpeak, cancelSpeak, isCallActive,
+  } = s2sEnabled ? s2sVoice : cascadeVoice
   // Streaming STT types into the compose box as the caller speaks.
   useEffect(() => {
     if (callState === 'listening' && lastHeard && !muted) setInputValue(lastHeard)
@@ -455,6 +472,7 @@ function ChatHomeInner() {
   const lastLiveStreamRef = useRef('')
   const voiceConvId = miniConvId || ((callActive || speakReplies) ? activeConversationId : null)
   useEffect(() => {
+    if (s2sEnabled) return
     if (!voiceConvId || activeConversationId !== voiceConvId) return
     if (!speakReplies) return
     const live = streamingByConv?.[voiceConvId] || ''
@@ -482,13 +500,20 @@ function ChatHomeInner() {
     for (const sentence of sentences) {
       void speakDelta(sentence, { done: false })
     }
-  }, [beginSpeak, streamingByConv, speakReplies, callActive, voiceConvId, activeConversationId])
+  }, [beginSpeak, streamingByConv, speakReplies, callActive, voiceConvId, activeConversationId, s2sEnabled])
 
   // Persist is the end of the turn. Speak only leftover text. Re-listen once.
   // First eligibility on a thread absorbs existing history so Start Live does
   // not replay an hours-old last reply. A persist that just landed still speaks.
   useEffect(() => {
     if (!voiceConvId || activeConversationId !== voiceConvId) return
+    if (s2sEnabled) {
+      const list = Array.isArray(messages) ? messages : []
+      const last = list[list.length - 1]
+      const key = messageSpeakKey(last)
+      if (key) lastSpokenIdRef.current = key
+      return
+    }
     if (primedVoiceConvRef.current !== voiceConvId) {
       primedVoiceConvRef.current = voiceConvId
       lastSpokenIdRef.current = null
@@ -532,7 +557,7 @@ function ChatHomeInner() {
     emitLiveTrace('chat.persist', { leftover: leftover.slice(0, 160), speak: speakReplies ? 1 : 0 })
     if (callActive) notifyReply(leftover)
     else speakText(leftover)
-  }, [messages, speakReplies, callActive, notifyReply, endSpeak, voiceConvId, activeConversationId, user?.id])
+  }, [messages, speakReplies, callActive, notifyReply, endSpeak, voiceConvId, activeConversationId, user?.id, s2sEnabled])
 
   const toggleSpeakReplies = useCallback(() => {
     const next = !speakReplies
@@ -1032,9 +1057,10 @@ function ChatHomeInner() {
           callState={callState}
           muted={muted}
           lastHeard={lastHeard}
-          lastReply={lastAgentReply}
+          lastReply={s2sEnabled ? (s2sVoice.lastReply || lastAgentReply) : lastAgentReply}
           error={callError?.message || sendError || null}
           speakEnabled={speakReplies}
+          nativeVoice={s2sEnabled}
           onToggleSpeak={toggleSpeakReplies}
           onToggleMute={toggleMute}
           onEnd={endCall}

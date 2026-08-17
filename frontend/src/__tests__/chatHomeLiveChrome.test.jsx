@@ -32,6 +32,10 @@ vi.mock('../contexts/AuthContext', () => ({
   }),
 }))
 
+vi.mock('../hooks/useGrokVoiceS2S', () => ({
+  useGrokVoiceS2S: () => ({ ...voice, transport: 's2s', lastReply: '' }),
+}))
+
 vi.mock('../hooks/useVoice', () => ({
   useVoiceConversation: () => voice,
   useVoiceInput: () => ({ micState: 'idle', micSupported: true, toggleMic: vi.fn() }),

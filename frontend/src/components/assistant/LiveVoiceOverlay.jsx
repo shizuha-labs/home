@@ -21,6 +21,7 @@ export default function LiveVoiceOverlay({
   onRetry,
   ttsSpeed,
   onCycleSpeed,
+  nativeVoice = false,
 }) {
   const label =
     callState === 'connecting' ? 'Connecting'
@@ -49,6 +50,7 @@ export default function LiveVoiceOverlay({
       data-testid="live-voice-overlay"
       data-mode="hud"
       data-call-state={callState}
+      data-transport={nativeVoice ? 's2s' : 'cascade'}
     >
       <div
         role="region"
@@ -70,7 +72,7 @@ export default function LiveVoiceOverlay({
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
                 <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
               </span>
-              Live
+              {nativeVoice ? 'Voice' : 'Live'}
             </span>
             <span
               data-testid="live-voice-state"
