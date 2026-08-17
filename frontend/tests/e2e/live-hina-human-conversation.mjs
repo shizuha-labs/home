@@ -124,6 +124,51 @@ async function snapshot(page) {
   })
 }
 
+async function fetchTrace(page, callId = '') {
+  return page.evaluate(async (id) => {
+    const access = localStorage.getItem('shizuha_access_token') || ''
+    const q = new URLSearchParams({ include_messages: '1', limit: '400' })
+    if (id) q.set('call_id', id)
+    const res = await fetch(`/api/home/live-trace?${q}`, {
+      headers: { Authorization: `Bearer ${access}` },
+    })
+    if (!res.ok) return { ok: false, status: res.status, events: [] }
+    return res.json()
+  }, callId)
+}
+
+function lastCallId(trace) {
+  const events = trace.events || []
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const id = events[i]?.attrs?.call_id
+    if (id) return id
+    if (events[i]?.name === 'call.begin' && events[i]?.attrs?.call_id) return events[i].attrs.call_id
+  }
+  return trace.call_id || ''
+}
+
+function callEvents(trace, callId) {
+  const events = trace.events || []
+  if (!callId) return events
+  const out = []
+  let on = false
+  for (const event of events) {
+    if (event.name === 'call.begin') {
+      on = (event.attrs?.call_id || '') === callId
+    }
+    if (on) out.push(event)
+    if (event.name === 'call.end' && on) break
+  }
+  return out
+}
+
+function replyFinished(events, sinceTs) {
+  return events.some((event) => {
+    if (!event.ts || event.ts < sinceTs) return false
+    return event.name === 's2s.event' && /response\.(done|completed)/.test(event.attrs?.type || '')
+  })
+}
+
 function summarizeTrace(trace) {
   const events = (trace.events || []).map((e) => ({
     ts: e.ts,
@@ -192,23 +237,36 @@ async function main() {
   const token = await page.evaluate(() => localStorage.getItem('shizuha_access_token') || '')
   await page.screenshot({ path: path.join(OUT, '00-live-started.png'), fullPage: true })
 
+  let callId = ''
+  const primed = await fetchTrace(page)
+  callId = lastCallId(primed)
+
   for (let i = 0; i < TURNS.length; i += 1) {
     const said = TURNS[i]
+    const sinceTs = new Date().toISOString()
     await speak(page, said, token)
     const started = Date.now()
+    let finished = false
+    while (Date.now() - started < 45000) {
+      snap = await snapshot(page)
+      const live = await fetchTrace(page, callId)
+      if (!callId) callId = lastCallId(live)
+      const ev = callEvents(live, callId)
+      if (replyFinished(ev, sinceTs)) {
+        // Playhead can lag response.done; wait it out so we do not barge in.
+        const drain = Date.now()
+        while (Date.now() - drain < 8000) {
+          snap = await snapshot(page)
+          if (snap.state !== 'speaking' && snap.remainingMs < 40) break
+          await sleep(250)
+        }
+        await sleep(1200)
+        finished = true
+        break
+      }
+      await sleep(400)
+    }
     snap = await snapshot(page)
-    while (Date.now() - started < 32000) {
-      snap = await snapshot(page)
-      if ((snap.state === 'speaking' && snap.remainingMs > 60 && !snap.muted)
-        || (snap.caption && snap.caption !== said && snap.state === 'speaking')) break
-      await sleep(280)
-    }
-    const settle = Date.now()
-    while (Date.now() - settle < 22000) {
-      snap = await snapshot(page)
-      if (snap.state !== 'speaking' && snap.remainingMs < 40) break
-      await sleep(320)
-    }
     await page.screenshot({ path: path.join(OUT, `${String(i + 1).padStart(2, '0')}-after-${i}.png`), fullPage: true })
     const row = {
       n: i + 1,
@@ -217,22 +275,18 @@ async function main() {
       state: snap.state,
       remainingMs: snap.remainingMs,
       muted: snap.muted,
+      waited_ms: Date.now() - started,
+      reply_finished: finished,
     }
     log.push(row)
     fs.writeFileSync(path.join(OUT, 'transcript.json'), JSON.stringify(log, null, 2))
-    await sleep(900 + Math.random() * 700)
+    await sleep(1200 + Math.random() * 800)
   }
 
-  const trace = await page.evaluate(async () => {
-    const access = localStorage.getItem('shizuha_access_token') || ''
-    const res = await fetch('/api/home/live-trace?include_messages=1&limit=400', {
-      headers: { Authorization: `Bearer ${access}` },
-    })
-    if (!res.ok) return { ok: false, status: res.status }
-    return res.json()
-  })
+  const trace = await fetchTrace(page, callId)
   fs.writeFileSync(path.join(OUT, 'live-trace.json'), JSON.stringify(trace, null, 2))
-  const summary = { turns: log, ...summarizeTrace(trace) }
+  const thisCall = { ...trace, events: callEvents(trace, callId), call_id: callId }
+  const summary = { turns: log, callId, ...summarizeTrace(thisCall) }
   fs.writeFileSync(path.join(OUT, 'summary.json'), JSON.stringify(summary, null, 2))
   console.log(JSON.stringify(summary, null, 2))
   await page.locator('[aria-label="End Live"]').first().click({ force: true }).catch(() => {})
