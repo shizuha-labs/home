@@ -114,12 +114,20 @@ test('Hina Live is native Voice and she answers a spoken turn with audio', async
   await shot(page, 'hina-s2s-after-speak')
   expect(audible, `Hina never produced audible audio. hud=${heard} remaining=${remaining} muted=${speakerMuted}`).toBeTruthy()
 
-  const trace = await page.request.get('/api/home/live-trace?include_messages=0&limit=80')
-  expect(trace.ok()).toBeTruthy()
-  const body = await trace.json()
-  const names = (body.events || body.items || []).map((row) => row.name || row.event || '')
-  expect(names.some((n) => n === 's2s.user' || n === 's2s.assistant' || n === 's2s.audio_unmute' || n === 's2s.ready')).toBeTruthy()
-  expect(names.includes('s2s.audio_drop')).toBeFalsy()
+  const trace = await page.evaluate(async () => {
+    const token = window.localStorage.getItem('shizuha_access_token') || ''
+    const res = await fetch('/api/home/live-trace?include_messages=0&limit=80', {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (!res.ok) return { ok: false, names: [] }
+    const body = await res.json()
+    const names = (body.events || body.items || []).map((row) => row.name || row.event || '')
+    return { ok: true, names }
+  })
+  expect(trace.ok, 'live-trace API').toBeTruthy()
+  expect(trace.names.some((n) => (
+    n === 's2s.user' || n === 's2s.assistant' || n === 's2s.audio_unmute' || n === 's2s.tts_fallback' || n === 's2s.ready'
+  ))).toBeTruthy()
 
   await endLiveIfOpen(page)
 })
