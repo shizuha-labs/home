@@ -96,7 +96,7 @@ export default function GlobalNavBar() {
           </div>
 
           {/* Right Side */}
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-2">
             <button
               onClick={() => setIsSearchOpen(!isSearchOpen)}
               className="p-2 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-white dark:hover:bg-gray-800 transition-colors"
