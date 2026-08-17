@@ -27,7 +27,7 @@ export function writeHomeAgentPref(username) {
 }
 
 /** Grok-build seats we stopped for realtime; never auto-select them. */
-export const RETIRED_HOME_AGENTS = new Set(['hina', 'aya'])
+export const RETIRED_HOME_AGENTS = new Set(['aya'])
 
 /** CEO default is the Grok/SCLI talk seat (Ena). Everyone else starts unset. */
 export function suggestedHomeAgentUsername(user) {

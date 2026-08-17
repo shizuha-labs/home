@@ -74,6 +74,15 @@ export async function selectHomeAgent(page, username = liveAgentUsername()) {
   const picker = page.getByTestId('home-agent-picker')
   if (await picker.count()) {
     const label = username === 'enaqa' ? /enaqa|Ena QA/i : new RegExp(username, 'i')
+    const current = ((await picker.textContent()) || '')
+    if (!label.test(current)) {
+      await picker.click()
+      const search = page.getByPlaceholder('Search agents…')
+      if (await search.count()) {
+        await search.fill(username)
+        await page.getByText(new RegExp(`@${username}\\b`, 'i')).first().click({ timeout: 20000 })
+      }
+    }
     await expect(picker).toContainText(label, { timeout: 20000 })
   }
   // Open the existing DM so Live sends on the thread even if fleet search

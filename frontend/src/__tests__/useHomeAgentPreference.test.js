@@ -25,8 +25,8 @@ describe('home agent preference', () => {
     expect(suggestedHomeAgentUsername({ email: 'hritik@shizuha.com' })).toBe('ena')
   })
 
-  it('does not keep a retired Hina/Aya pick as the live default', () => {
-    expect(resolveHomeAgentUsername('hina', { email: 'hothritik1@gmail.com' })).toBe('ena')
+  it('does not keep a retired Aya pick as the live default', () => {
+    expect(resolveHomeAgentUsername('hina', { email: 'hothritik1@gmail.com' })).toBe('hina')
     expect(resolveHomeAgentUsername('aya', { email: 'hritik@shizuha.com' })).toBe('ena')
     expect(resolveHomeAgentUsername('yuna', { email: 'hothritik1@gmail.com' })).toBe('yuna')
   })
@@ -34,7 +34,7 @@ describe('home agent preference', () => {
   it('does not send a regular or QA user to the operator Ena seat', () => {
     expect(resolveHomeAgentUsername('', { email: 'liveqa@shizuha.com' })).toBe('yuna')
     expect(resolveHomeAgentUsername('', { email: 'someone@example.com' })).toBe('yuna')
-    expect(resolveHomeAgentUsername('hina', { email: 'liveqa@shizuha.com' })).toBe('yuna')
+    expect(resolveHomeAgentUsername('hina', { email: 'liveqa@shizuha.com' })).toBe('hina')
   })
 
   it('round-trips localStorage', () => {

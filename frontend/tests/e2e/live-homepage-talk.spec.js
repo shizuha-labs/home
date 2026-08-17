@@ -48,7 +48,7 @@ const OPERATOR = process.env.SHIZUHA_LIVE_OPERATOR_E2E === '1'
 
 test.skip(!LIVE, 'set SHIZUHA_LIVE_E2E=1 to run live homepage talk QA')
 test.skip(!CREDS.user || !CREDS.pass, 'live homepage talk QA needs ~/.shizuha/live-qa-creds')
-test.skip(/hritik/i.test(CREDS.user), 'live homepage talk QA must not use the operator mailbox')
+test.skip(!OPERATOR && /hritik/i.test(CREDS.user), 'live homepage talk QA must not use the operator mailbox')
 
 test.use({
   viewport: { width: 1440, height: 900 },
