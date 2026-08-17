@@ -22,7 +22,7 @@ import {
   RETIRED_HOME_AGENTS,
   writeHomeAgentPref,
 } from '../hooks/useHomeAgentPreference'
-import { useVoiceInput, useVoiceConversation, speakText, speakDelta, nextSpokenSentences, spokenCovers, stripSpeakableMarkup, isTalkAckText, isGhostTranscript, readTtsSpeed, cycleTtsSpeed } from '../hooks/useVoice'
+import { useVoiceInput, useVoiceConversation, speakText, speakDelta, nextSpokenSentences, readyToFlushSpokenSentences, spokenCovers, stripSpeakableMarkup, isTalkAckText, isGhostTranscript, readTtsSpeed, cycleTtsSpeed } from '../hooks/useVoice'
 import TtsSpeedButton from '../components/assistant/TtsSpeedButton'
 import { useHomeSummary } from '../hooks/useHomeSummary'
 import { useHomeActivity } from '../hooks/useHomeActivity'
@@ -460,13 +460,15 @@ function ChatHomeInner() {
       { flushRemainder: ended },
     )
     if (!sentences.length) return
+    const joined = sentences.join(' ')
+    if (!readyToFlushSpokenSentences(spokenStreamRef.current, joined, ended)) return
     spokenStreamRef.current = spoken
     emitLiveTrace('chat.stream', {
       ended: ended ? 1 : 0,
       sentences: sentences.length,
       text: sentences.join(' '),
     })
-    beginSpeak(sentences.join(' '))
+    beginSpeak(joined)
     for (const sentence of sentences) {
       void speakDelta(sentence, { done: false })
     }

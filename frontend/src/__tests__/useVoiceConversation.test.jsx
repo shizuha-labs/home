@@ -21,6 +21,8 @@ import {
   nextTtsSpeed,
   formatTtsSpeed,
   isEchoUtterance,
+  echoTokenOverlap,
+  readyToFlushSpokenSentences,
   normalizeHeardName,
   useVoiceConversation,
   speakText,
@@ -35,12 +37,23 @@ vi.mock('../utils/auth', () => ({
 }))
 
 const startStreamingStt = vi.fn()
-vi.mock('../utils/streamingStt', () => ({
-  startStreamingStt: (...args) => startStreamingStt(...args),
-}))
+vi.mock('../utils/streamingStt', async () => {
+  const actual = await vi.importActual('../utils/streamingStt')
+  return {
+    ...actual,
+    startStreamingStt: (...args) => startStreamingStt(...args),
+  }
+})
 
-function makeController() {
-  return { stop: vi.fn(), cancel: vi.fn(), setMicEnabled: vi.fn(), hintTurnComplete: vi.fn() }
+function makeController(pending = '') {
+  return {
+    stop: vi.fn(),
+    cancel: vi.fn(),
+    setMicEnabled: vi.fn(),
+    hintTurnComplete: vi.fn(),
+    discardPending: vi.fn(),
+    pendingText: vi.fn(() => pending),
+  }
 }
 
 /** Fire onError from the most recent startStreamingStt call. */
@@ -158,6 +171,20 @@ describe('talk-seat transcript hygiene', () => {
     expect(isEchoUtterance('What tasks are pending on me?', 'Here. What\'s up?', 1_500, spokenAt)).toBe(false)
     expect(isEchoUtterance('Hive.', 'Here. What\'s up?', 10_000, spokenAt)).toBe(true)
   })
+
+  it('drops a paraphrased echo of the last spoken question', () => {
+    const spokenAt = 1_000
+    expect(echoTokenOverlap('What can I do?', "Hey. I'm here. What do you need?")).toBeGreaterThanOrEqual(0.45)
+    expect(isEchoUtterance('What can I do?', "Hey. I'm here. What do you need?", 8_000, spokenAt)).toBe(true)
+    expect(isEchoUtterance('Ping Raunak about BKSG-48.', "Hey. I'm here. What do you need?", 8_000, spokenAt)).toBe(false)
+  })
+
+  it('holds the first Live flush until a real phrase lands', () => {
+    expect(readyToFlushSpokenSentences('', 'Hey.', false)).toBe(false)
+    expect(readyToFlushSpokenSentences('', "Hey. I'm here. What do you need?", false)).toBe(true)
+    expect(readyToFlushSpokenSentences('', 'Hey.', true)).toBe(true)
+    expect(readyToFlushSpokenSentences('Hey. ', 'More text.', false)).toBe(true)
+  })
 })
 
 describe('useVoiceConversation — utterance dedupe', () => {
@@ -226,8 +253,9 @@ describe('useVoiceConversation — utterance dedupe', () => {
     stop.mockRestore()
   })
 
-  it('mute only silences the mic and still delivers the in-flight utterance', () => {
+  it('mute only silences the mic and still delivers a finished in-flight utterance', () => {
     const onUtterance = vi.fn()
+    startStreamingStt.mockImplementation(() => makeController('check the s1 drive'))
     const { result } = renderHook(() => useVoiceConversation({ onUtterance }))
     act(() => {
       result.current.startCall()
@@ -243,10 +271,36 @@ describe('useVoiceConversation — utterance dedupe', () => {
     expect(first.cancel).not.toHaveBeenCalled()
     expect(first.setMicEnabled).toHaveBeenCalledWith(false)
     expect(first.hintTurnComplete).toHaveBeenCalled()
+    expect(first.discardPending).not.toHaveBeenCalled()
     act(() => {
       opts.onFinal?.('check the s1 drive')
     })
     expect(onUtterance).toHaveBeenCalledWith('check the s1 drive')
+    expect(result.current.muted).toBe(true)
+  })
+
+  it('mute discards a fragment like I\'m and does not send it', () => {
+    const onUtterance = vi.fn()
+    startStreamingStt.mockImplementation(() => makeController("I'm"))
+    const { result } = renderHook(() => useVoiceConversation({ onUtterance }))
+    act(() => {
+      result.current.startCall()
+    })
+    const first = startStreamingStt.mock.results[0]?.value
+    const opts = startStreamingStt.mock.calls.at(-1)[0]
+    act(() => {
+      opts.onPartial?.("I'm")
+    })
+    act(() => {
+      result.current.toggleMute()
+    })
+    expect(first.setMicEnabled).toHaveBeenCalledWith(false)
+    expect(first.hintTurnComplete).not.toHaveBeenCalled()
+    expect(first.discardPending).toHaveBeenCalled()
+    act(() => {
+      opts.onFinal?.("I'm")
+    })
+    expect(onUtterance).not.toHaveBeenCalled()
     expect(result.current.muted).toBe(true)
   })
 

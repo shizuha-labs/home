@@ -2,7 +2,7 @@
 export const STT_COMPLETE_HANGOVER_MS = 2200
 /** Human-like pause after a mid-thought, digit string, or period-only clause. */
 export const STT_INCOMPLETE_HANGOVER_MS = 4000
-/** After mute, commit soon — mute is “I’m done talking”, not “throw this away”. */
+/** After mute, commit a finished sentence soon — mute is not “throw this away”. */
 export const STT_MUTE_COMMIT_MS = 400
 
 const INCOMPLETE_TAIL = /\b(a|an|and|at|but|check|for|if|in|of|on|or|so|the|to|with|my|your|this|that|these|those|first|second|third|want|see|look|tell|give|pull|open|about|task|personally|perhaps|maybe|just|please|then|also)$/i
@@ -21,6 +21,17 @@ export function utteranceLooksIncomplete(text) {
 
 export function sttCommitHangoverMs(text) {
   return utteranceLooksIncomplete(text) ? STT_INCOMPLETE_HANGOVER_MS : STT_COMPLETE_HANGOVER_MS
+}
+
+/** Mute is phone-mute: send a finished sentence, never a 1–2 word fragment. */
+export function shouldCommitOnMute(text) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim()
+  if (!t) return false
+  const words = t.replace(/[.!?…]+$/g, '').split(/\s+/).filter(Boolean)
+  if (words.length <= 2) return false
+  if (/[?!…]$/.test(t)) return true
+  if (INCOMPLETE_TAIL.test(t.replace(/[.]+$/, ''))) return false
+  return words.length >= 4
 }
 
 /** Grok often resets the running transcript after a mid-thought pause.
@@ -191,15 +202,25 @@ export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, 
     tracks.forEach((track) => { track.enabled = micEnabled })
   }
 
+  const pendingText = () => (pendingFinal?.text || lastPartial || '').trim()
+
+  const discardPending = () => {
+    clearCommit()
+    lastPartial = ''
+    pendingFinal = null
+  }
+
   const hintTurnComplete = () => {
     if (finalDelivered || cancelled) return
-    const text = (pendingFinal?.text || lastPartial || '').trim()
+    const text = pendingText()
     if (!text) return
     armCommit(text, pendingFinal?.event || { type: 'transcript.partial', text, speech_final: true }, STT_MUTE_COMMIT_MS)
   }
 
   const controller = {
     setMicEnabled,
+    pendingText,
+    discardPending,
     hintTurnComplete,
     stop: () => {
       if (pendingFinal) {

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   startStreamingStt,
   utteranceLooksIncomplete,
+  shouldCommitOnMute,
   sttCommitHangoverMs,
   stitchHeard,
   isTranscriptExtension,
@@ -255,6 +256,33 @@ describe('startStreamingStt hangover', () => {
     expect(onFinal).toHaveBeenCalledTimes(1)
     expect(onFinal.mock.calls[0][0]).toMatch(/I want you to check/i)
     expect(onFinal.mock.calls[0][0]).toMatch(/five nine three six/i)
+  })
+
+  it('commits a finished sentence on mute and discards a fragment', () => {
+    expect(shouldCommitOnMute("I'm")).toBe(false)
+    expect(shouldCommitOnMute('Hey')).toBe(false)
+    expect(shouldCommitOnMute('check the s1 drive')).toBe(true)
+    expect(shouldCommitOnMute("What's on my queue?")).toBe(true)
+  })
+
+  it('discardPending prevents a later hangover commit', async () => {
+    const onFinal = vi.fn()
+    const controller = startStreamingStt({ token: 'token', onFinal })
+    for (let i = 0; i < 8; i += 1) await Promise.resolve()
+    const ws = sockets[0]
+    ws.onmessage({ data: JSON.stringify({ type: 'transcript.created' }) })
+    ws.onmessage({
+      data: JSON.stringify({
+        type: 'transcript.partial',
+        text: "I'm",
+        speech_final: true,
+      }),
+    })
+    expect(controller.pendingText()).toBe("I'm")
+    controller.discardPending()
+    expect(controller.pendingText()).toBe('')
+    await vi.advanceTimersByTimeAsync(STT_INCOMPLETE_HANGOVER_MS + 200)
+    expect(onFinal).not.toHaveBeenCalled()
   })
 
   it('hintTurnComplete commits the last partial after a short mute delay', async () => {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getAccessToken } from '../utils/auth'
 import { beginLiveCall, emitLiveTrace, endLiveCall, voiceCorrelation } from '../utils/liveTrace'
-import { startStreamingStt } from '../utils/streamingStt'
+import { shouldCommitOnMute, startStreamingStt } from '../utils/streamingStt'
 
 /**
  * Voice layer for the home mini-chat (operator 2026-07-11).
@@ -302,7 +302,13 @@ let gaplessCtx = null
 let gaplessHead = 0
 const gaplessSources = []
 let pcmRemainder = new Uint8Array(0)
+let fadeNextPcm = true
+let releasedUntil = 0
 const PCM_SAMPLE_RATE = 24000
+/** Room + AEC settle after the playhead ends before the mic opens again. */
+export const SPEAK_RELEASE_MS = 800
+/** First Live flush waits for a real phrase so Grok does not synth a lone "Hey." */
+export const FIRST_SPEAK_MIN_CHARS = 24
 
 async function probeStreamingTts() {
   if (streamingTtsAvailable !== null) return streamingTtsAvailable
@@ -334,6 +340,8 @@ function stopGaplessPlayback() {
     gaplessHead = 0
   }
   pcmRemainder = new Uint8Array(0)
+  fadeNextPcm = true
+  releasedUntil = 0
 }
 
 function isPcmMime(mime) {
@@ -346,9 +354,38 @@ function ensureGaplessCtx() {
     ? AudioContext
     : (typeof window !== 'undefined' ? window.webkitAudioContext : null)
   if (!Ctx) return null
-  if (!gaplessCtx) gaplessCtx = new Ctx()
+  if (!gaplessCtx) gaplessCtx = new Ctx({ sampleRate: PCM_SAMPLE_RATE })
   if (!speakMuted && gaplessCtx.state === 'suspended') void gaplessCtx.resume()
   return gaplessCtx
+}
+
+/** Must run in the Live-click turn so Safari/Chrome do not start TTS suspended. */
+export function warmSpeakOutput() {
+  const ctx = ensureGaplessCtx()
+  if (ctx && ctx.state === 'suspended') void ctx.resume()
+  return ctx
+}
+
+function pcmBytesWithoutWavHeader(bytes) {
+  if (
+    bytes.length < 12
+    || bytes[0] !== 0x52 || bytes[1] !== 0x49 || bytes[2] !== 0x46 || bytes[3] !== 0x46
+    || bytes[8] !== 0x57 || bytes[9] !== 0x41 || bytes[10] !== 0x56 || bytes[11] !== 0x45
+  ) return bytes
+  let i = 12
+  while (i + 8 <= bytes.length) {
+    const id = String.fromCharCode(bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3])
+    const size = bytes[i + 4] | (bytes[i + 5] << 8) | (bytes[i + 6] << 16) | (bytes[i + 7] << 24)
+    if (id === 'data') return bytes.subarray(i + 8, Math.min(bytes.length, i + 8 + Math.max(0, size)))
+    i += 8 + Math.max(0, size)
+  }
+  return bytes
+}
+
+function fadeInChannel(channel, sampleRate) {
+  const n = Math.min(channel.length, Math.round((sampleRate || PCM_SAMPLE_RATE) * 0.02))
+  if (n <= 1) return
+  for (let i = 0; i < n; i += 1) channel[i] *= i / n
 }
 
 function ensureSpeakGain() {
@@ -376,6 +413,7 @@ function scheduleAudioBuffer(buf, rate, epoch = speakEpoch) {
   src.start(gaplessHead)
   const dur = buf.duration / (rate || 1)
   gaplessHead += dur
+  releasedUntil = Date.now() + Math.ceil(dur * 1000) + SPEAK_RELEASE_MS
   gaplessSources.push(src)
   return new Promise((resolve) => {
     src.onended = () => {
@@ -398,10 +436,17 @@ function playPcmChunk(bytes, sampleRate = PCM_SAMPLE_RATE, rate = 1) {
   const even = merged.byteLength - (merged.byteLength % 2)
   pcmRemainder = even < merged.byteLength ? merged.slice(even) : new Uint8Array(0)
   if (even < 2) return Promise.resolve()
-  const samples = new Int16Array(merged.buffer, merged.byteOffset, even / 2)
+  const evenBytes = pcmBytesWithoutWavHeader(merged.subarray(0, even))
+  const evenLen = evenBytes.byteLength - (evenBytes.byteLength % 2)
+  if (evenLen < 2) return Promise.resolve()
+  const samples = new Int16Array(evenBytes.buffer, evenBytes.byteOffset, evenLen / 2)
   const buf = ctx.createBuffer(1, samples.length, sampleRate)
   const channel = buf.getChannelData(0)
   for (let i = 0; i < samples.length; i += 1) channel[i] = samples[i] / 32768
+  if (fadeNextPcm) {
+    fadeInChannel(channel, sampleRate)
+    fadeNextPcm = false
+  }
   return scheduleAudioBuffer(buf, rate, epoch)
 }
 
@@ -572,10 +617,12 @@ export const SPEAK_IDLE_TIMEOUT_MS = 90_000
 
 export function remainingSpeakMs() {
   if (speakMuted) return 0
+  const releaseMs = Math.max(0, releasedUntil - Date.now())
+  let playMs = 0
   if (gaplessCtx && typeof gaplessCtx.currentTime === 'number' && gaplessHead > gaplessCtx.currentTime) {
-    return Math.ceil((gaplessHead - gaplessCtx.currentTime) * 1000) + 200
+    playMs = Math.ceil((gaplessHead - gaplessCtx.currentTime) * 1000)
   }
-  return 0
+  return Math.max(playMs, releaseMs)
 }
 
 export function waitSpeakIdle(timeoutMs = SPEAK_IDLE_TIMEOUT_MS) {
@@ -614,15 +661,40 @@ export function normalizeHeardName(text) {
   return String(text || '').replace(/\bNawa\b/g, 'Ena').replace(/\bNawah\b/g, 'Ena')
 }
 
+const ECHO_STOP = new Set(['a', 'an', 'the', 'to', 'of', 'and', 'or', 'just', 'so', 'you', 'your'])
+
+function echoTokens(text) {
+  return normalizeUtterance(text)
+    .replace(/[.!?,;:'"]/g, '')
+    .split(/\s+/)
+    .map((w) => (w === "i'm" || w === 'im' ? 'i' : w))
+    .filter((w) => w && !ECHO_STOP.has(w))
+}
+
+export function echoTokenOverlap(heard, lastSpoken) {
+  const a = new Set(echoTokens(heard))
+  const b = new Set(echoTokens(lastSpoken))
+  if (!a.size || !b.size) return 0
+  let n = 0
+  for (const w of a) if (b.has(w)) n += 1
+  return n / Math.min(a.size, b.size)
+}
+
 /** TTS leaking back into STT (Hive/Pulse/etc. after we just spoke). */
-export function isEchoUtterance(heard, lastSpoken, now, spokenAt, windowMs = 8000) {
+export function isEchoUtterance(heard, lastSpoken, now, spokenAt, windowMs = 12000) {
   const a = normalizeUtterance(heard)
   const b = normalizeUtterance(lastSpoken)
   if (!a || !b) return false
   if (STT_KEYTERM_ONLY.test(a)) return true
   if (now - spokenAt > windowMs) return false
   if (a === b || b.includes(a) || (a.length >= 8 && a.includes(b))) return true
-  return false
+  return echoTokenOverlap(a, b) >= 0.45
+}
+
+export function readyToFlushSpokenSentences(alreadySpoken, joined, ended) {
+  if (alreadySpoken) return true
+  if (ended) return true
+  return String(joined || '').replace(/\s+/g, ' ').trim().length >= FIRST_SPEAK_MIN_CHARS
 }
 
 export function isDuplicateUtterance(next, prev, now, prevAt, windowMs = 2500) {
@@ -823,7 +895,13 @@ export function useVoiceConversation({ onUtterance } = {}) {
             utteranceDelivered = true
             return
           }
+          if (mutedRef.current && !shouldCommitOnMute(heard)) {
+            emitLiveTrace('stt.muted_drop', { text: heard })
+            utteranceDelivered = true
+            return
+          }
           if (isEchoUtterance(heard, lastSpokenRef.current.text, now, lastSpokenRef.current.at)) {
+            emitLiveTrace('stt.echo_drop', { text: heard })
             utteranceDelivered = true
             return
           }
@@ -904,7 +982,13 @@ export function useVoiceConversation({ onUtterance } = {}) {
     emitLiveTrace('tts.speak.begin', { text })
     teardownCapture()
     const clean = String(text || '').trim()
-    if (clean) lastSpokenRef.current = { text: clean, at: Date.now() }
+    if (clean) {
+      const prev = lastSpokenRef.current
+      const joined = prev.text && (Date.now() - prev.at) < 30_000
+        ? `${prev.text} ${clean}`
+        : clean
+      lastSpokenRef.current = { text: joined.slice(-400), at: Date.now() }
+    }
   }, [teardownCapture])
 
   const endSpeak = useCallback(async () => {
@@ -951,6 +1035,7 @@ export function useVoiceConversation({ onUtterance } = {}) {
     setMuted(false)
     setLastHeard('')
     setCallError(null)
+    warmSpeakOutput()
     void startSpeakStream()
     listenOnceRef.current?.()
   }, [])
@@ -979,10 +1064,11 @@ export function useVoiceConversation({ onUtterance } = {}) {
     setMuted(next)
     emitLiveTrace(next ? 'mic.mute' : 'mic.unmute', {})
     if (next) {
-      // Mute only stops sending new voice. Do not cancel the STT session —
-      // that dropped the hangover and the words the caller just said.
+      // Phone mute: stop new audio. Commit a finished sentence. Drop "I'm".
       streamingRef.current?.setMicEnabled?.(false)
-      streamingRef.current?.hintTurnComplete?.()
+      const pending = streamingRef.current?.pendingText?.() || ''
+      if (shouldCommitOnMute(pending)) streamingRef.current?.hintTurnComplete?.()
+      else streamingRef.current?.discardPending?.()
     } else if (streamingRef.current) {
       streamingRef.current.setMicEnabled?.(true)
     } else if (!speakingRef.current) {

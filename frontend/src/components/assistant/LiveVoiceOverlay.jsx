@@ -110,6 +110,7 @@ export default function LiveVoiceOverlay({
           )}
           <button
             type="button"
+            data-testid="hud-mute-button"
             onClick={onToggleMute}
             className={`flex h-10 w-10 items-center justify-center rounded-full transition ${
               muted ? 'bg-white text-neutral-900' : 'bg-white/15 text-white hover:bg-white/25'
