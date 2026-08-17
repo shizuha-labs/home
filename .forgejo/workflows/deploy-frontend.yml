@@ -55,6 +55,11 @@ jobs:
           REG="registry.registry.svc.cluster.local:5000"
           echo "Multi-arch build shizuha-home-frontend:${FTAG} (amd64 + arm64)"
           PREV_FRONTEND_IMAGE="$(kubectl -n shizuha get deploy shizuha-home-frontend -o jsonpath='{.spec.template.spec.containers[0].image}')"
+          # The live deployment references the registry via the node-local localhost:30500
+          # host, which is NOT reachable from inside the kaniko build pod (its own loopback).
+          # Normalize to the in-cluster registry service so kaniko can pull the previous
+          # image to carry forward the hashed CSS/JS assets.
+          PREV_FRONTEND_IMAGE="${PREV_FRONTEND_IMAGE//localhost:30500/${REG}}"
           echo "Carry forward hashed assets from ${PREV_FRONTEND_IMAGE}"
 
           render_build_job() {  # $1=arch $2=attempt $3=cache-enabled
