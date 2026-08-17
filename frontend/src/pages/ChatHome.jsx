@@ -292,6 +292,16 @@ function ChatHomeInner() {
     return mergeAgentSearchHits(localAgents, hiveHits, idHits, connectHits).slice(0, 16)
   }, [allAgents, user?.id])
 
+  const sendOnOpenThread = useCallback((text) => {
+    const dest = urlConversationId || activeConversationId
+    if (dest) {
+      emitLiveTrace('chat.send', { via: 'thread', text, conversation_id: dest })
+      sendMessage(text, dest)
+      return true
+    }
+    return false
+  }, [activeConversationId, sendMessage, urlConversationId])
+
   const sendToShizuha = useCallback(async (message) => {
     if (!message.trim() || isSending) return
     emitLiveTrace('chat.send', { via: 'compose', text: message, agent: resolveHomeAgentUsername(homeAgent, user) })
@@ -356,9 +366,8 @@ function ChatHomeInner() {
   // below once it streams in.
   const { callState, callError, muted, lastHeard, startCall, endCall, retryCall, toggleMute, notifyReply, beginSpeak, endSpeak, cancelSpeak, isCallActive } = useVoiceConversation({
     onUtterance: (text) => {
-      emitLiveTrace('chat.send', { via: 'utterance', text, conversation_id: activeConversationId || miniConvId || '' })
-      if (activeConversationId) sendMessage(text)
-      else sendToShizuha(text)
+      emitLiveTrace('chat.send', { via: 'utterance', text, conversation_id: activeConversationId || miniConvId || urlConversationId || '' })
+      if (!sendOnOpenThread(text)) sendToShizuha(text)
     },
   })
   // Streaming STT types into the compose box as the caller speaks.
@@ -544,7 +553,7 @@ function ChatHomeInner() {
     onTranscript: (text, { final }) => {
       setInputValue(text)
       if (final && text.trim()) {
-        sendToShizuha(text)
+        if (!sendOnOpenThread(text)) sendToShizuha(text)
         setInputValue('')
       }
     },
@@ -764,9 +773,13 @@ function ChatHomeInner() {
             initialUnreadCount={activeInitialUnread}
           />
           <MessageInput
-            onSend={sendMessage}
-            disabled={!isConnected}
-            placeholder={isConnected ? `Message ${activeName}...` : 'Connecting...'}
+            onSend={(text) => {
+              sendOnOpenThread(text)
+              setInputValue('')
+            }}
+            value={inputValue}
+            onChange={setInputValue}
+            placeholder={isConnected ? `Message ${activeName}...` : 'Connecting… send still works'}
           />
         </div>
       </div>

@@ -90,6 +90,8 @@ vi.mock('../components/assistant/HomeAgentPicker', () => ({
 const chat = {
   messages: [],
   streamingByConv: {},
+  isConnected: true,
+  sendMessage: vi.fn(),
 }
 
 vi.mock('@shizuha/chat', () => {
@@ -108,14 +110,14 @@ vi.mock('@shizuha/chat', () => {
       activeInitialUnread: 0,
       setActiveConversation: vi.fn(),
       createDirectConversation: vi.fn(),
-      isConnected: true,
+      get isConnected() { return chat.isConnected },
       get messages() { return chat.messages },
       typingUsers: new Map(),
       onlineUsers: new Set(),
       hasMore: false,
       isLoadingMessages: false,
       loadMore: vi.fn(),
-      sendMessage: vi.fn(),
+      sendMessage: (...args) => chat.sendMessage(...args),
       get streamingByConv() { return chat.streamingByConv },
     }),
     MessageList: ({ messages }) => React.createElement(
@@ -123,7 +125,16 @@ vi.mock('@shizuha/chat', () => {
       { 'data-testid': 'message-list' },
       (messages || []).map((m) => m.content).join(' | '),
     ),
-    MessageInput: () => React.createElement('div', { 'data-testid': 'message-input' }, 'input'),
+    MessageInput: ({ onSend, disabled, placeholder }) => React.createElement(
+      'div',
+      { 'data-testid': 'message-input' },
+      React.createElement('button', {
+        type: 'button',
+        'data-testid': 'thread-send-button',
+        disabled: !!disabled,
+        onClick: () => onSend?.('thread send probe'),
+      }, placeholder || 'input'),
+    ),
     Avatar: () => React.createElement('div', { 'data-testid': 'avatar' }),
     NewChatModal: () => null,
   }
@@ -178,7 +189,20 @@ describe('ChatHome Live chrome', () => {
     speakText.stop.mockClear()
     chat.messages = []
     chat.streamingByConv = {}
+    chat.isConnected = true
+    chat.sendMessage.mockClear()
     localStorage.clear()
+  })
+
+  it('sends on the open /c/:id thread even when the socket is reconnecting', () => {
+    chat.isConnected = false
+    renderAt(`/c/${CONV}`)
+    const send = screen.getByTestId('thread-send-button')
+    expect(send).not.toBeDisabled()
+    act(() => {
+      send.click()
+    })
+    expect(chat.sendMessage).toHaveBeenCalledWith('thread send probe', CONV)
   })
 
   it('shows Live + speak + mic on the expanded thread', () => {
