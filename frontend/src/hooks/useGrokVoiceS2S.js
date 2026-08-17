@@ -159,6 +159,13 @@ export function useGrokVoiceS2S({
     if (spoken) lastSpokenRef.current = { text: spoken, at: Date.now() }
     applyMicGate()
     setCallState('speaking')
+    releaseTimerRef.current = window.setTimeout(() => {
+      releaseTimerRef.current = null
+      if (!holdMicRef.current) return
+      holdMicRef.current = false
+      applyMicGate()
+      if (activeRef.current && !mutedRef.current) setCallState('listening')
+    }, 8000)
   }, [applyMicGate])
 
   const releaseMicAfterSpeak = useCallback(() => {
