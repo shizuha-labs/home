@@ -30,21 +30,45 @@ function toPcm16(samples) {
   return pcm.buffer
 }
 
-function playS2SPcm(bytes, onPlay) {
+const PREROLL_SAMPLES = 24000 * 0.08
+
+function concatPcm(chunks) {
+  const total = chunks.reduce((n, chunk) => n + chunk.byteLength, 0)
+  const merged = new Uint8Array(total)
+  let offset = 0
+  chunks.forEach((chunk) => {
+    merged.set(chunk, offset)
+    offset += chunk.byteLength
+  })
+  return merged
+}
+
+function playS2SPcm(bytes, onPlay, preroll) {
   // speakText.stop() latches speakMuted so leftover cascade TTS dies.
   // Cascade unmutes before its next play. S2S must do the same or her
   // audio is dropped after the first speech_started.
   unmuteSpeakOutput()
   onPlay?.()
-  void playPcmChunk(bytes, 24000, 1, { fade: false })
+  const chunk = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)
+  if (preroll && !preroll.flushed) {
+    preroll.chunks.push(chunk)
+    preroll.samples += Math.floor(chunk.byteLength / 2)
+    if (preroll.samples < PREROLL_SAMPLES) return
+    const merged = concatPcm(preroll.chunks)
+    preroll.chunks = []
+    preroll.flushed = true
+    void playPcmChunk(merged, 24000, 1, { fade: false })
+    return
+  }
+  void playPcmChunk(chunk, 24000, 1, { fade: false })
 }
 
-function playBase64Pcm(b64, onPlay) {
+function playBase64Pcm(b64, onPlay, preroll) {
   if (!b64) return
   const binary = atob(b64)
   const bytes = new Uint8Array(binary.length)
   for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
-  playS2SPcm(bytes, onPlay)
+  playS2SPcm(bytes, onPlay, preroll)
 }
 
 /**
@@ -82,6 +106,7 @@ export function useGrokVoiceS2S({
   const fallbackTimerRef = useRef(null)
   const pingTimerRef = useRef(null)
   const releaseTimerRef = useRef(null)
+  const prerollRef = useRef({ chunks: [], samples: 0, flushed: false })
   const optsRef = useRef({ conversationId, agentUsername, model, messages, userId })
   const onFallbackRef = useRef(onFallback)
   speakEnabledRef.current = speakEnabled
@@ -148,7 +173,9 @@ export function useGrokVoiceS2S({
     const open = activeRef.current && !mutedRef.current && !holdMicRef.current
     captureRef.current?.setMicEnabled?.(open)
     sendJson({ type: 'mic', enabled: open })
-    if (!open) sendJson({ type: 'input_audio_buffer.clear' })
+    // Human mute may discard an unfinished user utterance. Clearing
+    // while she is speaking is barge-in and clips her first/last word.
+    if (!open && mutedRef.current) sendJson({ type: 'input_audio_buffer.clear' })
   }, [sendJson])
 
   const holdMicForSpeak = useCallback((text) => {
@@ -251,9 +278,11 @@ export function useGrokVoiceS2S({
     socket.onmessage = (event) => {
       if (cancelled || !activeRef.current) return
       if (typeof event.data !== 'string') {
+        if (!heardAudioRef.current) emitLiveTrace('s2s.audio.start', { via: 'binary' })
         heardAudioRef.current = true
+        holdMicForSpeak()
         if (speakEnabledRef.current) {
-          playS2SPcm(new Uint8Array(event.data), () => { lastPlayAtRef.current = Date.now() })
+          playS2SPcm(new Uint8Array(event.data), () => { lastPlayAtRef.current = Date.now() }, prerollRef.current)
         } else emitLiveTrace('s2s.audio_drop', { reason: 'speak_off', via: 'binary' })
         return
       }
@@ -285,10 +314,11 @@ export function useGrokVoiceS2S({
         return
       }
       if (type === 'speech_started' || type === 'input_audio_buffer.speech_started') {
-        // Echo of her speaker is not barge-in. Ignore VAD for 800ms after
-        // her audio starts so the first/last syllable is not cut off.
+        // Echo of her speaker is not barge-in. Never cut a reply that is
+        // still on the playhead — that was the start/end clip.
         if (holdMicRef.current || mutedRef.current) return
-        if (Date.now() - lastPlayAtRef.current < 800) return
+        if (remainingSpeakMs() > 80) return
+        if (Date.now() - lastPlayAtRef.current < 2000) return
         interruptSpeakOutput()
         setCallState('listening')
         return
@@ -345,6 +375,7 @@ export function useGrokVoiceS2S({
         setLastHeard(surface.text)
         emitLiveTrace('s2s.user', { text: surface.text })
         heardAudioRef.current = false
+        prerollRef.current = { chunks: [], samples: 0, flushed: false }
         droppedReplyRef.current = ''
         setLastReply('')
         if (!mutedRef.current && !holdMicRef.current) setCallState('thinking')
@@ -398,7 +429,7 @@ export function useGrokVoiceS2S({
           return
         }
         if (isSpeakOutputMuted()) emitLiveTrace('s2s.audio_unmute', { reason: 'after_stop' })
-        playBase64Pcm(msg.delta || msg.audio, () => { lastPlayAtRef.current = Date.now() })
+        playBase64Pcm(msg.delta || msg.audio, () => { lastPlayAtRef.current = Date.now() }, prerollRef.current)
         return
       }
       if (type === 'response.done' || type === 'response.completed') {
@@ -497,6 +528,7 @@ export function useGrokVoiceS2S({
     holdMicRef.current = false
     lastSpokenRef.current = { text: '', at: 0 }
     heardAudioRef.current = false
+    prerollRef.current = { chunks: [], samples: 0, flushed: false }
     streamAttemptsRef.current = 0
     beginLiveCall()
     emitLiveTrace('call.start', { transport: 's2s' })

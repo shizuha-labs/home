@@ -58,12 +58,42 @@ describe('useGrokVoiceS2S', () => {
       },
     })
     globalThis.AudioContext = class {
-      constructor() { this.sampleRate = 24000; this.state = 'running' }
+      constructor() {
+        this.sampleRate = 24000
+        this.state = 'running'
+        this.currentTime = 0.1
+        this.destination = {}
+      }
       resume() { return Promise.resolve() }
       close() { return Promise.resolve() }
+      suspend() { return Promise.resolve() }
       createMediaStreamSource() { return { connect() {}, disconnect() {} } }
       createScriptProcessor() { return { connect() {}, disconnect() {}, onaudioprocess: null } }
-      createGain() { return { gain: { value: 0 }, connect() {}, disconnect() {} } }
+      createGain() {
+        return {
+          gain: { value: 0, cancelScheduledValues() {}, setValueAtTime() {} },
+          connect() {},
+          disconnect() {},
+          context: this,
+        }
+      }
+      createBuffer(_ch, length) {
+        const data = new Float32Array(length)
+        return { duration: length / this.sampleRate, getChannelData: () => data }
+      }
+      createBufferSource() {
+        return {
+          buffer: null,
+          playbackRate: { value: 1 },
+          connect() {},
+          start() {},
+          stop() {},
+          onended: null,
+        }
+      }
+      createOscillator() {
+        return { frequency: { value: 0 }, connect() {}, start() {}, stop() {} }
+      }
     }
     globalThis.webkitAudioContext = globalThis.AudioContext
   })
@@ -140,6 +170,11 @@ describe('useGrokVoiceS2S', () => {
       try { return JSON.parse(row) } catch { return null }
     }).filter(Boolean).filter((row) => row.type === 'mic')
     expect(micOff.at(-1)).toMatchObject({ type: 'mic', enabled: false })
+    const clears = socket.sent.map((row) => {
+      if (typeof row !== 'string') return null
+      try { return JSON.parse(row) } catch { return null }
+    }).filter(Boolean).filter((row) => row.type === 'input_audio_buffer.clear')
+    expect(clears).toEqual([])
     await act(async () => {
       socket.emit(JSON.stringify({
         type: 'conversation.item.input_audio_transcription.completed',
@@ -153,6 +188,25 @@ describe('useGrokVoiceS2S', () => {
     })
     expect(result.current.callState).toBe('listening')
     vi.useRealTimers()
+  })
+
+  it('holds the mic when her voice arrives as binary PCM', async () => {
+    const { result } = renderHook(() => useGrokVoiceS2S({
+      conversationId: 'conv-1',
+      agentUsername: 'hina',
+      model: 'cortex/grok-voice-think-fast-2.0',
+    }))
+    await act(async () => { result.current.startCall() })
+    const socket = FakeSocket.instances.at(-1)
+    await act(async () => { socket.open() })
+    await act(async () => { socket.emit(JSON.stringify({ type: 'ready' })) })
+    await act(async () => { socket.emit(new Uint8Array(480).buffer) })
+    expect(result.current.callState).toBe('speaking')
+    const micOff = socket.sent.map((row) => {
+      if (typeof row !== 'string') return null
+      try { return JSON.parse(row) } catch { return null }
+    }).filter(Boolean).filter((row) => row.type === 'mic')
+    expect(micOff.at(-1)).toMatchObject({ type: 'mic', enabled: false })
   })
 
   it('speaks a text-only S2S reply after the speaker latch', async () => {
