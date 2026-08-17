@@ -315,6 +315,28 @@ describe('useVoiceConversation — utterance dedupe', () => {
     expect(result.current.muted).toBe(true)
   })
 
+  it('reopens listen with leftover text when STT ends mid-sentence', () => {
+    const onUtterance = vi.fn()
+    const { result } = renderHook(() => useVoiceConversation({ onUtterance }))
+    act(() => {
+      result.current.startCall()
+    })
+    const first = startStreamingStt.mock.calls.at(-1)[0]
+    act(() => {
+      first.onDone?.({
+        hold: true,
+        text: 'can you check into S one like log in there',
+        holdCount: 1,
+      })
+    })
+    act(() => {
+      vi.advanceTimersByTime(100)
+    })
+    expect(startStreamingStt.mock.calls.length).toBeGreaterThan(1)
+    expect(startStreamingStt.mock.calls.at(-1)[0].seed).toMatch(/log in there/)
+    expect(onUtterance).not.toHaveBeenCalled()
+  })
+
   it('does not send Good. after a long reply even outside the echo window', async () => {
     const onUtterance = vi.fn()
     const { result } = renderHook(() => useVoiceConversation({ onUtterance }))

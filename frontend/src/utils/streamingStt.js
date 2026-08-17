@@ -1,21 +1,24 @@
 /** After a clearly finished question, wait this long for a late clause. */
-export const STT_COMPLETE_HANGOVER_MS = 2200
+export const STT_COMPLETE_HANGOVER_MS = 3200
 /** Human-like pause after a mid-thought, digit string, or period-only clause. */
 export const STT_INCOMPLETE_HANGOVER_MS = 4000
+/** Never send while the mic is still loud — hangover is not a hard cut. */
+export const STT_COMMIT_QUIET_MS = 1400
 /** After mute, commit a finished sentence soon — mute is not “throw this away”. */
 export const STT_MUTE_COMMIT_MS = 400
 
-const INCOMPLETE_TAIL = /\b(a|an|and|at|but|check|for|if|in|of|on|or|so|the|to|with|my|your|this|that|these|those|first|second|third|want|see|look|tell|give|pull|open|about|task|personally|perhaps|maybe|just|please|then|also)$/i
+const INCOMPLETE_TAIL = /\b(a|an|and|at|but|check|for|if|in|of|on|or|so|the|to|with|my|your|this|that|these|those|first|second|third|want|see|look|tell|give|pull|open|about|task|personally|perhaps|maybe|just|please|then|also|there|here|like|into|login|log)$/i
+const NUMBER_WORDS = /\b(zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b/i
 
 /** True when the transcript is a mid-thought, not a finished command.
- * Grok often appends a period on an unfinished clause, so `.` is not a stop. */
+ * Grok often appends a period or ? on an unfinished clause. */
 export function utteranceLooksIncomplete(text) {
   const t = String(text || '').replace(/\s+/g, ' ').trim()
   if (!t) return true
-  const stripped = t.replace(/[.]+$/, '')
-  if (/\b\d(?:\s+\d)+\b/.test(stripped)) return true
-  if (/[?!…]$/.test(t) && stripped.split(/\s+/).length >= 2) return false
+  const stripped = t.replace(/[.!?…]+$/g, '')
+  if (/\b\d(?:\s+\d)+\b/.test(stripped) || NUMBER_WORDS.test(stripped)) return true
   if (INCOMPLETE_TAIL.test(stripped)) return true
+  if (/[?!…]$/.test(t) && stripped.split(/\s+/).length >= 2) return false
   return true
 }
 
@@ -88,7 +91,7 @@ const toPcm16 = (samples) => {
  * Permission/context startup continues in the background, checking cancellation
  * after every await before it can create or connect the next resource.
  */
-export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, onError, call_id, trace_id, conversation_id, session_id } = {}) {
+export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, onError, call_id, trace_id, conversation_id, session_id, seed, holdCount = 0 } = {}) {
   let stream = null
   let context = null
   let source = null
@@ -106,9 +109,12 @@ export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, 
   let firstPartialMs = null
   let lastLoudAt = 0
   let commitTimer = null
-  let pendingFinal = null
-  let lastPartial = ''
+  const seedText = String(seed || '').trim()
+  let pendingFinal = seedText ? { text: seedText, event: { type: 'seed', text: seedText } } : null
+  let lastPartial = seedText
   let micEnabled = true
+
+  const stillLoud = () => !!(lastLoudAt && (performance.now() - lastLoudAt) < STT_COMMIT_QUIET_MS)
 
   const emitIdle = () => {
     if (idleDelivered) return
@@ -183,8 +189,12 @@ export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, 
   const commitPending = () => {
     const pending = pendingFinal
     commitTimer = null
-    pendingFinal = null
     if (!pending || finalDelivered) return
+    if (micEnabled && stillLoud()) {
+      commitTimer = window.setTimeout(commitPending, STT_COMMIT_QUIET_MS)
+      return
+    }
+    pendingFinal = null
     finishCapture(true)
     deliverFinal(pending.text, pending.event)
   }
@@ -307,6 +317,9 @@ export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, 
         } else {
           source?.connect(processor)
           onState?.('listening')
+          if (pendingFinal && !commitTimer && !finalDelivered) {
+            armCommit(pendingFinal.text, pendingFinal.event)
+          }
         }
         return
       }
@@ -344,6 +357,19 @@ export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, 
       }
       if (event.type === 'transcript.done') {
         const text = stitchHeard(pendingFinal?.text || lastPartial, event.text)
+        const grew = !seedText || text.length > seedText.length
+        const hold = !!(
+          text
+          && holdCount < 3
+          && (stillLoud() || (utteranceLooksIncomplete(text) && grew))
+        )
+        if (hold) {
+          lastPartial = text
+          pendingFinal = { text, event }
+          onDone?.({ ...event, hold: true, text, holdCount: holdCount + 1 })
+          close()
+          return
+        }
         deliverFinal(text, event)
         onDone?.(event)
         close()

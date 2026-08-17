@@ -892,8 +892,10 @@ export function useVoiceConversation({ onUtterance } = {}) {
     }, delay)
   }, [failCall])
 
-  const listenOnce = useCallback(() => {
+  const listenOnce = useCallback((opts = {}) => {
     if (!activeRef.current || mutedRef.current) return
+    const seed = String(opts.seed || '').trim()
+    const holdCount = Number(opts.holdCount) || 0
     clearTimers()
     setCallError(null)
     if (!speakingRef.current) setCallState('connecting')
@@ -902,6 +904,8 @@ export function useVoiceConversation({ onUtterance } = {}) {
       const controller = startStreamingStt({
         token: getAccessToken(),
         ...voiceCorrelation(),
+        seed,
+        holdCount,
         onState: (state) => {
           if (!activeRef.current) return
           // Promote connecting → listening once the stream is live. Ignore
@@ -966,16 +970,22 @@ export function useVoiceConversation({ onUtterance } = {}) {
           setCallState('thinking')
           onUtteranceRef.current?.(heard)
         },
-        onDone: () => {
-          // Successful stream close with no utterance (silence) — re-arm listen
-          // once. This is the conversation loop, not a failure path, so it does
-          // not consume the stream-retry budget.
+        onDone: (event) => {
+          streamingRef.current = null
+          // Grok ended the session mid-thought: reopen with the leftover
+          // seed so "login there" and the rest stay one turn.
           if (activeRef.current && !utteranceDelivered && !mutedRef.current) {
+            const holdSeed = event?.hold ? String(event.text || seed || '') : ''
+            if (holdSeed) emitLiveTrace('stt.hold', { text: holdSeed.slice(0, 160), hold: event.holdCount || 1 })
             if (silenceTimerRef.current != null) window.clearTimeout(silenceTimerRef.current)
             silenceTimerRef.current = window.setTimeout(() => {
               silenceTimerRef.current = null
-              if (activeRef.current && !mutedRef.current) listenOnceRef.current?.()
-            }, 250)
+              if (activeRef.current && !mutedRef.current) {
+                listenOnceRef.current?.(holdSeed
+                  ? { seed: holdSeed, holdCount: event.holdCount || 1 }
+                  : {})
+              }
+            }, holdSeed ? 80 : 250)
           }
         },
         onError: (error) => {

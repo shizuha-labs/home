@@ -7,6 +7,8 @@ import {
   stitchHeard,
   isTranscriptExtension,
   STT_INCOMPLETE_HANGOVER_MS,
+  STT_COMPLETE_HANGOVER_MS,
+  STT_COMMIT_QUIET_MS,
   STT_MUTE_COMMIT_MS,
 } from '../utils/streamingStt'
 
@@ -122,15 +124,27 @@ describe('utterance endpointing', () => {
     expect(utteranceLooksIncomplete('check the second task if it is relevant.')).toBe(true)
     expect(utteranceLooksIncomplete("What's up?")).toBe(false)
     expect(sttCommitHangoverMs('I want you to check')).toBe(STT_INCOMPLETE_HANGOVER_MS)
+    expect(sttCommitHangoverMs("What's up?")).toBe(STT_COMPLETE_HANGOVER_MS)
+  })
+
+  it('keeps five-nine-three-six and like-log-in-there open', () => {
+    expect(utteranceLooksIncomplete(
+      'So regarding the five nine three six task can you check into S one like log in there?',
+    )).toBe(true)
+    expect(sttCommitHangoverMs(
+      'So regarding the five nine three six task can you check into S one like log in there?',
+    )).toBe(STT_INCOMPLETE_HANGOVER_MS)
   })
 })
 
 describe('startStreamingStt hangover', () => {
   let sockets
+  let processor
 
   beforeEach(() => {
     vi.useFakeTimers()
     sockets = []
+    processor = { connect: vi.fn(), disconnect: vi.fn(), onaudioprocess: null }
     class FakeWebSocket {
       static OPEN = 1
       static CONNECTING = 0
@@ -147,7 +161,7 @@ describe('startStreamingStt hangover', () => {
       resume: vi.fn().mockResolvedValue(undefined),
       close: vi.fn().mockResolvedValue(undefined),
       createMediaStreamSource: vi.fn(() => ({ connect: vi.fn(), disconnect: vi.fn() })),
-      createScriptProcessor: vi.fn(() => ({ connect: vi.fn(), disconnect: vi.fn(), onaudioprocess: null })),
+      createScriptProcessor: vi.fn(() => processor),
       createGain: vi.fn(() => ({ connect: vi.fn(), disconnect: vi.fn(), gain: { value: 1 } })),
       destination: {},
     }
@@ -256,6 +270,52 @@ describe('startStreamingStt hangover', () => {
     expect(onFinal).toHaveBeenCalledTimes(1)
     expect(onFinal.mock.calls[0][0]).toMatch(/I want you to check/i)
     expect(onFinal.mock.calls[0][0]).toMatch(/five nine three six/i)
+  })
+
+  it('does not let transcript.done skip hangover on an unfinished clause', async () => {
+    const onFinal = vi.fn()
+    const onDone = vi.fn()
+    startStreamingStt({ token: 'token', onFinal, onDone })
+    for (let i = 0; i < 8; i += 1) await Promise.resolve()
+    const ws = sockets[0]
+    ws.onmessage({ data: JSON.stringify({ type: 'transcript.created' }) })
+    ws.onmessage({
+      data: JSON.stringify({
+        type: 'transcript.partial',
+        text: 'So regarding the five nine three six task can you check into S one like log in there?',
+        speech_final: true,
+      }),
+    })
+    ws.onmessage({
+      data: JSON.stringify({
+        type: 'transcript.done',
+        text: 'So regarding the five nine three six task can you check into S one like log in there?',
+      }),
+    })
+    expect(onFinal).not.toHaveBeenCalled()
+    expect(onDone).toHaveBeenCalledWith(expect.objectContaining({ hold: true }))
+  })
+
+  it('defers commit while the mic is still loud (production: keep talking after there)', async () => {
+    const onFinal = vi.fn()
+    const ws = await readyAndPartial(onFinal)
+    expect(typeof processor.onaudioprocess).toBe('function')
+    const loud = {
+      inputBuffer: { getChannelData: () => Float32Array.from({ length: 2048 }, () => 0.2) },
+    }
+    ws.onmessage({
+      data: JSON.stringify({
+        type: 'transcript.partial',
+        text: 'like log in there?',
+        speech_final: true,
+      }),
+    })
+    await vi.advanceTimersByTimeAsync(STT_INCOMPLETE_HANGOVER_MS - 100)
+    processor.onaudioprocess(loud)
+    await vi.advanceTimersByTimeAsync(200)
+    expect(onFinal).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(STT_COMMIT_QUIET_MS + 200)
+    expect(onFinal).toHaveBeenCalledTimes(1)
   })
 
   it('commits a finished sentence on mute and discards a fragment', () => {
