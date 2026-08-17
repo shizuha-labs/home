@@ -112,4 +112,46 @@ describe('useGrokVoiceS2S', () => {
     expect(result.current.lastHeard).toBe('What is on my queue?')
     expect(result.current.callState).toBe('thinking')
   })
+
+  it('holds the mic while she speaks and ignores her own line as a user turn', async () => {
+    vi.useFakeTimers()
+    const { result } = renderHook(() => useGrokVoiceS2S({
+      conversationId: 'conv-1',
+      agentUsername: 'hina',
+      model: 'cortex/grok-voice-think-fast-2.0',
+    }))
+    await act(async () => { result.current.startCall() })
+    const socket = FakeSocket.instances.at(-1)
+    await act(async () => { socket.open() })
+    await act(async () => { socket.emit(JSON.stringify({ type: 'ready' })) })
+    await act(async () => {
+      socket.emit(JSON.stringify({
+        type: 'response.output_audio.delta',
+        delta: '',
+      }))
+      socket.emit(JSON.stringify({
+        type: 'response.output_audio_transcript.done',
+        transcript: "Hi. Queue's clean. How can I help?",
+      }))
+    })
+    expect(result.current.callState).toBe('speaking')
+    const micOff = socket.sent.map((row) => {
+      if (typeof row !== 'string') return null
+      try { return JSON.parse(row) } catch { return null }
+    }).filter(Boolean).filter((row) => row.type === 'mic')
+    expect(micOff.at(-1)).toMatchObject({ type: 'mic', enabled: false })
+    await act(async () => {
+      socket.emit(JSON.stringify({
+        type: 'conversation.item.input_audio_transcription.completed',
+        transcript: "Hi. Queue's clean. How can I help?",
+      }))
+    })
+    expect(result.current.lastHeard).toBe('')
+    await act(async () => {
+      socket.emit(JSON.stringify({ type: 'response.done' }))
+      vi.advanceTimersByTime(2000)
+    })
+    expect(result.current.callState).toBe('listening')
+    vi.useRealTimers()
+  })
 })

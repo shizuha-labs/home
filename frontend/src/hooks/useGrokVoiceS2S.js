@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getAccessToken } from '../utils/auth'
 import { beginLiveCall, emitLiveTrace, endLiveCall, voiceCorrelation } from '../utils/liveTrace'
-import { historyToVoiceItems, realtimeVoiceUrl } from '../utils/grokVoice'
+import { historyToVoiceItems, realtimeVoiceUrl, shouldHoldMicWhileSpeaking } from '../utils/grokVoice'
 import {
   classifyVoiceError,
   playPcmChunk,
   speakText,
+  shouldSurfaceHeard,
   warmSpeakOutput,
   remainingSpeakMs,
+  SPEAK_RELEASE_MS,
   VOICE_STREAM_BASE_BACKOFF_MS,
   VOICE_STREAM_MAX_RETRIES,
 } from './useVoice'
@@ -62,6 +64,9 @@ export function useGrokVoiceS2S({
   const streamAttemptsRef = useRef(0)
   const connectRef = useRef(null)
   const retryRef = useRef(null)
+  const holdMicRef = useRef(false)
+  const lastSpokenRef = useRef({ text: '', at: 0 })
+  const releaseTimerRef = useRef(null)
   const optsRef = useRef({ conversationId, agentUsername, model, messages, userId })
   speakEnabledRef.current = speakEnabled
   optsRef.current = { conversationId, agentUsername, model, messages, userId }
@@ -70,6 +75,10 @@ export function useGrokVoiceS2S({
     if (retryTimerRef.current != null) {
       window.clearTimeout(retryTimerRef.current)
       retryTimerRef.current = null
+    }
+    if (releaseTimerRef.current != null) {
+      window.clearTimeout(releaseTimerRef.current)
+      releaseTimerRef.current = null
     }
   }, [])
 
@@ -98,6 +107,41 @@ export function useGrokVoiceS2S({
     const socket = socketRef.current
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(payload))
   }, [])
+
+  const applyMicGate = useCallback(() => {
+    const open = activeRef.current && !mutedRef.current && !holdMicRef.current
+    captureRef.current?.setMicEnabled?.(open)
+    sendJson({ type: 'mic', enabled: open })
+    if (!open) sendJson({ type: 'input_audio_buffer.clear' })
+  }, [sendJson])
+
+  const holdMicForSpeak = useCallback((text) => {
+    holdMicRef.current = true
+    if (releaseTimerRef.current != null) {
+      window.clearTimeout(releaseTimerRef.current)
+      releaseTimerRef.current = null
+    }
+    const spoken = String(text || '').trim()
+    if (spoken) lastSpokenRef.current = { text: spoken, at: Date.now() }
+    applyMicGate()
+    setCallState('speaking')
+  }, [applyMicGate])
+
+  const releaseMicAfterSpeak = useCallback(() => {
+    const wait = Math.max(remainingSpeakMs(), SPEAK_RELEASE_MS)
+    if (releaseTimerRef.current != null) window.clearTimeout(releaseTimerRef.current)
+    releaseTimerRef.current = window.setTimeout(() => {
+      releaseTimerRef.current = null
+      if (shouldHoldMicWhileSpeaking({ speaking: false, remainingMs: remainingSpeakMs() })) {
+        releaseMicAfterSpeak()
+        return
+      }
+      holdMicRef.current = false
+      if (!activeRef.current) return
+      applyMicGate()
+      if (!mutedRef.current) setCallState('listening')
+    }, wait)
+  }, [applyMicGate])
 
   const connectSession = useCallback(() => {
     if (!activeRef.current) return
@@ -186,8 +230,10 @@ export function useGrokVoiceS2S({
         return
       }
       if (type === 'speech_started' || type === 'input_audio_buffer.speech_started') {
+        // Echo of her speaker is not barge-in. Mic is already held while she talks.
+        if (holdMicRef.current || mutedRef.current) return
         speakText.stop()
-        setCallState(mutedRef.current ? 'listening' : 'listening')
+        setCallState('listening')
         return
       }
       if (
@@ -195,7 +241,17 @@ export function useGrokVoiceS2S({
         || type === 'conversation.item.input_audio_transcription.delta'
       ) {
         const text = String(msg.delta || msg.text || msg.transcript || '').trim()
-        if (text && !mutedRef.current) setLastHeard(text)
+        if (!text || mutedRef.current) return
+        const surface = shouldSurfaceHeard(text, {
+          muted: mutedRef.current || holdMicRef.current,
+          lastSpoken: lastSpokenRef.current.text,
+          spokenAt: lastSpokenRef.current.at,
+        })
+        if (!surface.ok) {
+          if (surface.reason === 'echo') emitLiveTrace('s2s.echo_drop', { text: surface.text })
+          return
+        }
+        setLastHeard(surface.text)
         return
       }
       if (
@@ -203,11 +259,18 @@ export function useGrokVoiceS2S({
         || type === 'conversation.item.input_audio_transcription.completed'
       ) {
         const text = String(msg.transcript || msg.text || '').trim()
-        if (text) {
-          setLastHeard(text)
-          emitLiveTrace('s2s.user', { text })
+        const surface = shouldSurfaceHeard(text, {
+          muted: mutedRef.current || holdMicRef.current,
+          lastSpoken: lastSpokenRef.current.text,
+          spokenAt: lastSpokenRef.current.at,
+        })
+        if (!surface.ok) {
+          if (surface.reason === 'echo') emitLiveTrace('s2s.echo_drop', { text: surface.text })
+          return
         }
-        if (!mutedRef.current) setCallState('thinking')
+        setLastHeard(surface.text)
+        emitLiveTrace('s2s.user', { text: surface.text })
+        if (!mutedRef.current && !holdMicRef.current) setCallState('thinking')
         return
       }
       if (
@@ -215,11 +278,9 @@ export function useGrokVoiceS2S({
         || type === 'response.audio_transcript.delta'
         || type === 'response.output_text.delta'
       ) {
-        const text = String(msg.delta || msg.text || '').trim()
-        if (text) {
-          setLastReply((prev) => `${prev}${msg.delta || msg.text || ''}`)
-          setCallState('speaking')
-        }
+        const text = String(msg.delta || msg.text || '')
+        if (text) setLastReply((prev) => `${prev}${text}`)
+        holdMicForSpeak(text)
         return
       }
       if (
@@ -230,17 +291,19 @@ export function useGrokVoiceS2S({
         const text = String(msg.transcript || msg.text || '').trim()
         if (text) {
           setLastReply(text)
+          lastSpokenRef.current = { text, at: Date.now() }
           emitLiveTrace('s2s.assistant', { text })
         }
+        holdMicForSpeak(text)
         return
       }
       if (type === 'response.output_audio.delta' || type === 'response.audio.delta') {
+        holdMicForSpeak()
         if (speakEnabledRef.current) playBase64Pcm(msg.delta || msg.audio)
-        setCallState('speaking')
         return
       }
       if (type === 'response.done' || type === 'response.completed') {
-        if (!mutedRef.current) setCallState('listening')
+        releaseMicAfterSpeak()
       }
     }
 
@@ -309,7 +372,7 @@ export function useGrokVoiceS2S({
         }
       }
     })()
-  }, [failCall, teardown])
+  }, [failCall, holdMicForSpeak, releaseMicAfterSpeak, teardown])
   connectRef.current = connectSession
 
   const scheduleRetry = useCallback(() => {
@@ -335,6 +398,8 @@ export function useGrokVoiceS2S({
     if (activeRef.current) return
     activeRef.current = true
     mutedRef.current = false
+    holdMicRef.current = false
+    lastSpokenRef.current = { text: '', at: 0 }
     streamAttemptsRef.current = 0
     beginLiveCall()
     emitLiveTrace('call.start', { transport: 's2s' })
@@ -367,16 +432,21 @@ export function useGrokVoiceS2S({
     mutedRef.current = next
     setMuted(next)
     emitLiveTrace(next ? 'mic.mute' : 'mic.unmute', { transport: 's2s' })
-    captureRef.current?.setMicEnabled?.(!next)
-    sendJson({ type: 'mic', enabled: !next })
-  }, [sendJson])
+    applyMicGate()
+  }, [applyMicGate])
 
   const cancelSpeak = useCallback(() => {
     emitLiveTrace('tts.cancel', { remaining_ms: remainingSpeakMs(), transport: 's2s' })
     speakText.stop()
     sendJson({ type: 'response.cancel' })
+    holdMicRef.current = false
+    if (releaseTimerRef.current != null) {
+      window.clearTimeout(releaseTimerRef.current)
+      releaseTimerRef.current = null
+    }
+    applyMicGate()
     if (activeRef.current && !mutedRef.current) setCallState('listening')
-  }, [sendJson])
+  }, [applyMicGate, sendJson])
 
   const retryCall = useCallback(() => {
     activeRef.current = false

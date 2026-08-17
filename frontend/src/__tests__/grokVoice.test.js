@@ -4,7 +4,9 @@ import {
   findAgentByUsername,
   historyToVoiceItems,
   isGrokVoiceOmniModel,
+  isVoiceEchoText,
   liveVoiceAgent,
+  shouldHoldMicWhileSpeaking,
   stripGrokVoicePrefix,
 } from '../utils/grokVoice'
 
@@ -57,5 +59,33 @@ describe('historyToVoiceItems', () => {
       { role: 'user', text: 'Hi' },
       { role: 'assistant', text: 'Hello' },
     ])
+  })
+
+  it('drops a user turn that is her previous line leaking back in', () => {
+    const items = historyToVoiceItems([
+      { sender_id: 1, content: 'Hi, what is up?' },
+      { sender_id: 698, content: 'Hi. Queue\'s clean. How can I help?' },
+      { sender_id: 1, content: 'Hi. Queue\'s clean. How can I help?' },
+    ], 1)
+    expect(items).toEqual([
+      { role: 'user', text: 'Hi, what is up?' },
+      { role: 'assistant', text: 'Hi. Queue\'s clean. How can I help?' },
+    ])
+  })
+})
+
+describe('voice echo hold', () => {
+  it('treats her own last sentence as echo', () => {
+    expect(isVoiceEchoText(
+      "Hi. Queue's clean. How can I help?",
+      "Hi. Queue's clean. How can I help?",
+    )).toBe(true)
+    expect(isVoiceEchoText('What is on my queue?', 'Hi. Queue\'s clean. How can I help?')).toBe(false)
+  })
+
+  it('holds the mic while she is speaking or audio is still draining', () => {
+    expect(shouldHoldMicWhileSpeaking({ speaking: true, remainingMs: 0 })).toBe(true)
+    expect(shouldHoldMicWhileSpeaking({ speaking: false, remainingMs: 400 })).toBe(true)
+    expect(shouldHoldMicWhileSpeaking({ speaking: false, remainingMs: 0 })).toBe(false)
   })
 })
