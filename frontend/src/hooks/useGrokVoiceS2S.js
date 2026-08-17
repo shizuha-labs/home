@@ -7,6 +7,8 @@ import {
   playPcmChunk,
   speakText,
   shouldSurfaceHeard,
+  unmuteSpeakOutput,
+  isSpeakOutputMuted,
   warmSpeakOutput,
   remainingSpeakMs,
   SPEAK_RELEASE_MS,
@@ -30,12 +32,20 @@ function toPcm16(samples) {
   return pcm.buffer
 }
 
+function playS2SPcm(bytes) {
+  // speakText.stop() latches speakMuted so leftover cascade TTS dies.
+  // Cascade unmutes before its next play. S2S must do the same or her
+  // audio is dropped after the first speech_started.
+  unmuteSpeakOutput()
+  void playPcmChunk(bytes, 24000, 1)
+}
+
 function playBase64Pcm(b64) {
   if (!b64) return
   const binary = atob(b64)
   const bytes = new Uint8Array(binary.length)
   for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
-  void playPcmChunk(bytes, 24000, 1)
+  playS2SPcm(bytes)
 }
 
 /**
@@ -218,7 +228,8 @@ export function useGrokVoiceS2S({
     socket.onmessage = (event) => {
       if (cancelled || !activeRef.current) return
       if (typeof event.data !== 'string') {
-        if (speakEnabledRef.current) void playPcmChunk(new Uint8Array(event.data), 24000, 1)
+        if (speakEnabledRef.current) playS2SPcm(new Uint8Array(event.data))
+        else emitLiveTrace('s2s.audio_drop', { reason: 'speak_off', via: 'binary' })
         return
       }
       let msg
@@ -313,7 +324,12 @@ export function useGrokVoiceS2S({
       }
       if (type === 'response.output_audio.delta' || type === 'response.audio.delta') {
         holdMicForSpeak()
-        if (speakEnabledRef.current) playBase64Pcm(msg.delta || msg.audio)
+        if (!speakEnabledRef.current) {
+          emitLiveTrace('s2s.audio_drop', { reason: 'speak_off' })
+          return
+        }
+        if (isSpeakOutputMuted()) emitLiveTrace('s2s.audio_unmute', { reason: 'after_stop' })
+        playBase64Pcm(msg.delta || msg.audio)
         return
       }
       if (type === 'response.done' || type === 'response.completed') {
@@ -422,6 +438,7 @@ export function useGrokVoiceS2S({
     setLastReply('')
     setCallError(null)
     warmSpeakOutput()
+    unmuteSpeakOutput()
     connectRef.current?.()
   }, [])
 

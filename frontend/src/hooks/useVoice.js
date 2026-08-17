@@ -161,7 +161,7 @@ function muteSpeakOutput() {
   }
 }
 
-function unmuteSpeakOutput() {
+export function unmuteSpeakOutput() {
   speakMuted = false
   if (gaplessCtx && gaplessCtx.state === 'suspended') {
     try { void gaplessCtx.resume() } catch { /* noop */ }
@@ -361,6 +361,7 @@ function ensureGaplessCtx() {
 
 /** Must run in the Live-click turn so Safari/Chrome do not start TTS suspended. */
 export function warmSpeakOutput() {
+  unmuteSpeakOutput()
   const ctx = ensureGaplessCtx()
   if (ctx && ctx.state === 'suspended') void ctx.resume()
   return ctx

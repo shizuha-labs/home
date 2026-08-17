@@ -6,9 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   isSpeakOutputMuted,
   playAudioChunk,
+  playPcmChunk,
   remainingSpeakMs,
   resetSpeakOutputForTests,
   speakText,
+  unmuteSpeakOutput,
 } from '../hooks/useVoice'
 
 function pcmB64(sampleCount = 8) {
@@ -185,5 +187,18 @@ describe('TTS stop / Voice replies off', () => {
     await playAudioChunk(pcmB64(), 'audio/mpeg', 24000)
     expect(play).not.toHaveBeenCalled()
     expect(isSpeakOutputMuted()).toBe(true)
+  })
+
+  it('S2S can play again after stop once it unmutes the shared speaker', async () => {
+    const { started } = installFakeAudioContext()
+    resetSpeakOutputForTests()
+    void playPcmChunk(new Uint8Array(16), 24000, 1)
+    speakText.stop()
+    expect(isSpeakOutputMuted()).toBe(true)
+    const before = started.length
+    unmuteSpeakOutput()
+    void playPcmChunk(new Uint8Array(16), 24000, 1)
+    expect(isSpeakOutputMuted()).toBe(false)
+    expect(started.length).toBeGreaterThan(before)
   })
 })
