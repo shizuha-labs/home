@@ -36,6 +36,73 @@ export function liveVoiceAgent(agents, conversation, currentUserId, fallbackUser
   return findAgentByUsername(agents, peer) || findAgentByUsername(agents, fallbackUsername)
 }
 
+export const LIVE_S2S_MEMORY_KEY = 'shizuha_live_s2s_by_agent'
+
+export function readRememberedLiveS2S(username) {
+  const key = String(username || '').trim().toLowerCase()
+  if (!key || typeof localStorage === 'undefined') return null
+  try {
+    const map = JSON.parse(localStorage.getItem(LIVE_S2S_MEMORY_KEY) || '{}')
+    if (typeof map[key] === 'boolean') return map[key]
+  } catch { /* private mode */ }
+  return null
+}
+
+export function rememberLiveS2S(username, s2s) {
+  const key = String(username || '').trim().toLowerCase()
+  if (!key || typeof localStorage === 'undefined') return
+  try {
+    const map = JSON.parse(localStorage.getItem(LIVE_S2S_MEMORY_KEY) || '{}')
+    map[key] = Boolean(s2s)
+    localStorage.setItem(LIVE_S2S_MEMORY_KEY, JSON.stringify(map))
+  } catch { /* private mode */ }
+}
+
+/**
+ * Pick who Live is talking to, then which audio path to use.
+ *
+ * Homepage compose follows the picker (Ena vs Hina), not a leftover mini-chat
+ * thread. An open /c/:id thread follows that peer. Unknown / missing model
+ * stays on the STT → Connect → TTS cascade unless this browser already saw
+ * that seat on Grok Voice.
+ */
+export function resolveLiveVoiceTarget({
+  agents,
+  conversation,
+  preferPeer = false,
+  pickerUsername,
+  currentUserId,
+} = {}) {
+  const picker = String(pickerUsername || '').trim().toLowerCase()
+  const peer = conversationPeerUsername(conversation, currentUserId)
+  const username = preferPeer && peer ? peer : (picker || peer)
+  const agent = findAgentByUsername(agents, username)
+  const model = agent?.model || ''
+  const resolvedUsername = String(agent?.username || username || '').trim().toLowerCase()
+  let s2s = isGrokVoiceOmniModel(model)
+  if (model && resolvedUsername) {
+    rememberLiveS2S(resolvedUsername, s2s)
+  } else if (!model && resolvedUsername) {
+    const remembered = readRememberedLiveS2S(resolvedUsername)
+    if (remembered != null) s2s = remembered
+  }
+  return {
+    username: resolvedUsername,
+    model,
+    s2s,
+  }
+}
+
+/** HUD / startCall follow the hook that is actually in a call. */
+export function pickActiveLiveVoice(s2sVoice, cascadeVoice, preferS2S) {
+  const s2sBusy = s2sVoice?.callState && s2sVoice.callState !== 'idle'
+  const cascadeBusy = cascadeVoice?.callState && cascadeVoice.callState !== 'idle'
+  if (s2sBusy && !cascadeBusy) return { voice: s2sVoice, path: 's2s' }
+  if (cascadeBusy && !s2sBusy) return { voice: cascadeVoice, path: 'cascade' }
+  if (preferS2S) return { voice: s2sVoice, path: 's2s' }
+  return { voice: cascadeVoice, path: 'cascade' }
+}
+
 export function realtimeVoiceUrl() {
   if (typeof window === 'undefined') return '/voice/api/realtime/stream'
   const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'

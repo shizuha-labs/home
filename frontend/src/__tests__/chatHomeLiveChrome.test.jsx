@@ -8,6 +8,10 @@ import { act, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
 const CONV = 'bb516974-4152-427a-a2ac-04535b5f393f'
+const HINA_CONV = '18e75133-2913-4200-bde3-f452f909e810'
+const s2sStart = vi.fn()
+const s2sEnd = vi.fn()
+const activityState = { agents: [] }
 const voice = {
   callState: 'idle',
   callError: null,
@@ -33,7 +37,14 @@ vi.mock('../contexts/AuthContext', () => ({
 }))
 
 vi.mock('../hooks/useGrokVoiceS2S', () => ({
-  useGrokVoiceS2S: () => ({ ...voice, transport: 's2s', lastReply: '' }),
+  useGrokVoiceS2S: () => ({
+    ...voice,
+    transport: 's2s',
+    lastReply: '',
+    startCall: s2sStart,
+    endCall: s2sEnd,
+    isCallActive: () => false,
+  }),
 }))
 
 vi.mock('../hooks/useVoice', () => ({
@@ -63,7 +74,11 @@ vi.mock('../hooks/useHomeSummary', () => ({
 
 vi.mock('../hooks/useHomeActivity', () => ({
   useHomeActivity: () => ({
-    widget: () => ({ status: 'ok', data: [] }),
+    widget: (key) => (
+      key === 'agents'
+        ? { status: 'ok', data: activityState.agents }
+        : { status: 'ok', data: [] }
+    ),
   }),
 }))
 
@@ -108,6 +123,12 @@ vi.mock('@shizuha/chat', () => {
         participants: [
           { user_id: 1, username: 'hritik', first_name: 'Hritik' },
           { user_id: 2, username: 'ena', first_name: 'Ena', email: 'ena@shizuha.com' },
+        ],
+      }, {
+        id: HINA_CONV,
+        participants: [
+          { user_id: 1, username: 'hritik', first_name: 'Hritik' },
+          { user_id: 698, username: 'hina', first_name: 'Hina', email: 'hina@shizuha.com' },
         ],
       }],
       activeConversationId: CONV,
@@ -188,6 +209,9 @@ describe('ChatHome Live chrome', () => {
     voice.beginSpeak.mockClear()
     voice.startCall.mockClear()
     voice.endCall.mockClear()
+    s2sStart.mockClear()
+    s2sEnd.mockClear()
+    activityState.agents = []
     voice.notifyReply.mockClear()
     speakText.mockClear()
     speakText.stop.mockClear()
@@ -414,5 +438,50 @@ describe('ChatHome Live chrome', () => {
     expect(voice.cancelSpeak).toHaveBeenCalled()
     expect(screen.getByTestId('mini-speak-button')).toHaveAttribute('aria-pressed', 'false')
     expect(screen.getByTestId('mini-speak-button')).toHaveAttribute('title', 'Voice replies off')
+  })
+
+  it('starts cascade for Ena even when a leftover Hina thread exists', () => {
+    activityState.agents = [
+      { username: 'ena', model: 'cortex/grok-4.6', status: 'running' },
+      { username: 'hina', model: 'cortex/grok-voice-think-fast-2.0', status: 'running' },
+    ]
+    localStorage.setItem('shizuha_home_agent', 'ena')
+    renderAt('/')
+    const button = screen.getByTestId('home-live-button')
+    expect(button).toHaveAttribute('data-live-agent', 'ena')
+    expect(button).toHaveAttribute('data-live-path', 'cascade')
+    act(() => { button.click() })
+    expect(voice.startCall).toHaveBeenCalled()
+    expect(s2sStart).not.toHaveBeenCalled()
+  })
+
+  it('starts native Voice for Hina on the homepage picker', () => {
+    activityState.agents = [
+      { username: 'ena', model: 'cortex/grok-4.6', status: 'running' },
+      { username: 'hina', model: 'cortex/grok-voice-think-fast-2.0', status: 'running' },
+    ]
+    localStorage.setItem('shizuha_home_agent', 'hina')
+    renderAt('/')
+    const button = screen.getByTestId('home-live-button')
+    expect(button).toHaveAttribute('data-live-agent', 'hina')
+    expect(button).toHaveAttribute('data-live-path', 's2s')
+    act(() => { button.click() })
+    expect(s2sStart).toHaveBeenCalled()
+    expect(voice.startCall).not.toHaveBeenCalled()
+  })
+
+  it('uses the /c/:id peer path even if the homepage picker is the other seat', () => {
+    activityState.agents = [
+      { username: 'ena', model: 'cortex/grok-4.6', status: 'running' },
+      { username: 'hina', model: 'cortex/grok-voice-think-fast-2.0', status: 'running' },
+    ]
+    localStorage.setItem('shizuha_home_agent', 'ena')
+    renderAt(`/c/${HINA_CONV}`)
+    const button = screen.getByTestId('thread-live-button')
+    expect(button).toHaveAttribute('data-live-agent', 'hina')
+    expect(button).toHaveAttribute('data-live-path', 's2s')
+    act(() => { button.click() })
+    expect(s2sStart).toHaveBeenCalled()
+    expect(voice.startCall).not.toHaveBeenCalled()
   })
 })

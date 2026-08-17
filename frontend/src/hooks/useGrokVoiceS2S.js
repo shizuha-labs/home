@@ -49,6 +49,7 @@ export function useGrokVoiceS2S({
   messages,
   userId,
   speakEnabled = true,
+  onFallback,
 } = {}) {
   const [callState, setCallState] = useState('idle')
   const [callError, setCallError] = useState(null)
@@ -68,7 +69,9 @@ export function useGrokVoiceS2S({
   const lastSpokenRef = useRef({ text: '', at: 0 })
   const releaseTimerRef = useRef(null)
   const optsRef = useRef({ conversationId, agentUsername, model, messages, userId })
+  const onFallbackRef = useRef(onFallback)
   speakEnabledRef.current = speakEnabled
+  onFallbackRef.current = onFallback
   optsRef.current = { conversationId, agentUsername, model, messages, userId }
 
   const clearTimers = useCallback(() => {
@@ -93,6 +96,17 @@ export function useGrokVoiceS2S({
   }, [])
 
   const failCall = useCallback((kind, message, canRetry) => {
+    if (onFallbackRef.current?.(kind, message)) {
+      activeRef.current = false
+      clearTimers()
+      teardown()
+      speakText.stop()
+      streamAttemptsRef.current = 0
+      emitLiveTrace('s2s.fallback', { kind, message, transport: 's2s' })
+      setCallError(null)
+      setCallState('idle')
+      return
+    }
     activeRef.current = false
     clearTimers()
     teardown()
@@ -223,7 +237,7 @@ export function useGrokVoiceS2S({
         if (kind === 'no_mic' || kind === 'permission_denied') {
           failCall(kind, MIC_ERROR_MESSAGES[kind], false)
         } else if (msg.code === 'not_voice_agent') {
-          failCall('stream_unavailable', 'This agent is not on Grok Voice.', false)
+          failCall('not_voice_agent', 'This agent is not on Grok Voice.', false)
         } else {
           retryRef.current?.()
         }

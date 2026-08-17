@@ -24,7 +24,7 @@ import {
 } from '../hooks/useHomeAgentPreference'
 import { useVoiceInput, useVoiceConversation, speakText, speakDelta, nextSpokenSentences, readyToFlushSpokenSentences, spokenCovers, stripSpeakableMarkup, isTalkAckText, isGhostTranscript, readTtsSpeed, cycleTtsSpeed } from '../hooks/useVoice'
 import { useGrokVoiceS2S } from '../hooks/useGrokVoiceS2S'
-import { isGrokVoiceOmniModel, liveVoiceAgent } from '../utils/grokVoice'
+import { pickActiveLiveVoice, readRememberedLiveS2S, resolveLiveVoiceTarget } from '../utils/grokVoice'
 import TtsSpeedButton from '../components/assistant/TtsSpeedButton'
 import { useHomeSummary } from '../hooks/useHomeSummary'
 import { useHomeActivity } from '../hooks/useHomeActivity'
@@ -146,13 +146,10 @@ function ChatHomeInner() {
       ? (agentsWidget.data || []).filter((a) => a.status === 'running')
       : []
   const allAgents = useMemo(
-    () => (
-      agentsWidget.status === 'ok' || agentsWidget.status === 'stale'
-        ? agentsWidget.data || []
-        : []
-    ),
-    [agentsWidget.status, agentsWidget.data],
+    () => (Array.isArray(agentsWidget.data) ? agentsWidget.data : []),
+    [agentsWidget.data],
   )
+  const agentsHydrating = agentsWidget.status === 'loading'
   // HIVE-602 cockpit peeks: drill into agents/orgs/tasks without leaving home.
   const [peekStack, setPeekStack] = useState([])
   const pushPeek = (p) => setPeekStack((st) => [...st.slice(-4), p])
@@ -227,10 +224,22 @@ function ChatHomeInner() {
     (row) => String(row.username).toLowerCase() === String(effectiveHomeAgent).toLowerCase(),
   )
   const liveConversation = conversations.find((c) => (
-    c.id === (miniConvId || activeConversationId || urlConversationId)
+    c.id === (urlConversationId || miniConvId || activeConversationId)
   )) || null
-  const liveAgent = liveVoiceAgent(allAgents, liveConversation, user?.id, effectiveHomeAgent)
-  const s2sEnabled = isGrokVoiceOmniModel(liveAgent?.model)
+  const liveTarget = resolveLiveVoiceTarget({
+    agents: allAgents,
+    conversation: liveConversation,
+    preferPeer: Boolean(urlConversationId),
+    pickerUsername: effectiveHomeAgent,
+    currentUserId: user?.id,
+  })
+  const [forceCascade, setForceCascade] = useState(false)
+  const [awaitingVoicePath, setAwaitingVoicePath] = useState(false)
+  const wantLiveRef = useRef(false)
+  const preferS2S = liveTarget.s2s && !forceCascade
+  useEffect(() => {
+    setForceCascade(false)
+  }, [liveTarget.username])
 
   const chooseHomeAgent = useCallback((row) => {
     const username = writeHomeAgentPref(row?.username)
@@ -378,16 +387,64 @@ function ChatHomeInner() {
   })
   const s2sVoice = useGrokVoiceS2S({
     conversationId: miniConvId || activeConversationId || urlConversationId || '',
-    agentUsername: liveAgent?.username || effectiveHomeAgent,
-    model: liveAgent?.model || '',
+    agentUsername: liveTarget.username || effectiveHomeAgent,
+    model: liveTarget.model || '',
     messages,
     userId: user?.id,
     speakEnabled: speakReplies,
+    onFallback: (kind) => {
+      if (kind !== 'not_voice_agent' && kind !== 'stream_unavailable') return false
+      wantLiveRef.current = true
+      setForceCascade(true)
+      return true
+    },
   })
+  const cascadeVoiceRef = useRef(cascadeVoice)
+  const s2sVoiceRef = useRef(s2sVoice)
+  cascadeVoiceRef.current = cascadeVoice
+  s2sVoiceRef.current = s2sVoice
+  useEffect(() => {
+    if (!forceCascade || !wantLiveRef.current) return
+    if (s2sVoiceRef.current.isCallActive()) return
+    if (!cascadeVoiceRef.current.isCallActive()) cascadeVoiceRef.current.startCall()
+  }, [forceCascade])
+  const { voice: liveVoice, path: livePath } = pickActiveLiveVoice(s2sVoice, cascadeVoice, preferS2S)
+  const s2sEnabled = livePath === 's2s'
   const {
-    callState, callError, muted, lastHeard, startCall, endCall, retryCall,
-    toggleMute, notifyReply, beginSpeak, endSpeak, cancelSpeak, isCallActive,
-  } = s2sEnabled ? s2sVoice : cascadeVoice
+    callState, callError, muted, lastHeard, retryCall,
+    toggleMute, notifyReply, beginSpeak, endSpeak, cancelSpeak,
+  } = liveVoice
+  const startPreferredCall = useCallback(() => {
+    setAwaitingVoicePath(false)
+    if (preferS2S) s2sVoice.startCall()
+    else cascadeVoice.startCall()
+  }, [cascadeVoice, preferS2S, s2sVoice])
+  const startCall = useCallback(() => {
+    wantLiveRef.current = true
+    const known = Boolean(liveTarget.model) || readRememberedLiveS2S(liveTarget.username) != null
+    if (!known && agentsHydrating) {
+      setAwaitingVoicePath(true)
+      return
+    }
+    startPreferredCall()
+  }, [agentsHydrating, liveTarget.model, liveTarget.username, startPreferredCall])
+  useEffect(() => {
+    if (!awaitingVoicePath || !wantLiveRef.current) return
+    const known = Boolean(liveTarget.model) || readRememberedLiveS2S(liveTarget.username) != null
+    if (agentsHydrating && !known) return
+    startPreferredCall()
+  }, [agentsHydrating, awaitingVoicePath, liveTarget.model, liveTarget.username, startPreferredCall])
+  const endCall = useCallback(() => {
+    wantLiveRef.current = false
+    setAwaitingVoicePath(false)
+    setForceCascade(false)
+    s2sVoice.endCall()
+    cascadeVoice.endCall()
+  }, [cascadeVoice, s2sVoice])
+  const isCallActive = useCallback(
+    () => awaitingVoicePath || s2sVoice.isCallActive() || cascadeVoice.isCallActive(),
+    [awaitingVoicePath, cascadeVoice, s2sVoice],
+  )
   // Streaming STT types into the compose box as the caller speaks.
   useEffect(() => {
     if (callState === 'listening' && lastHeard && !muted) setInputValue(lastHeard)
@@ -406,8 +463,9 @@ function ChatHomeInner() {
     [messages],
   )
   // Active = mid-call only. 'error' is a terminal surface with guidance/retry, not "on call".
-  const callActive = callState !== 'idle' && callState !== 'error'
-  const callFailed = callState === 'error'
+  const hudCallState = awaitingVoicePath && (callState === 'idle' || !callState) ? 'connecting' : callState
+  const callActive = awaitingVoicePath || (callState !== 'idle' && callState !== 'error')
+  const callFailed = !awaitingVoicePath && callState === 'error'
 
   useEffect(() => {
     setLiveTraceContext({
@@ -660,6 +718,8 @@ function ChatHomeInner() {
     <button
       type="button"
       data-testid={testId}
+      data-live-agent={liveTarget.username || ''}
+      data-live-path={awaitingVoicePath ? 'pending' : livePath}
       onClick={toggleCall}
       title={
         callActive
@@ -1054,7 +1114,7 @@ function ChatHomeInner() {
       {(callActive || callFailed) && (
         <LiveVoiceOverlay
           agentLabel={voiceAgentLabel}
-          callState={callState}
+          callState={hudCallState}
           muted={muted}
           lastHeard={lastHeard}
           lastReply={s2sEnabled ? (s2sVoice.lastReply || lastAgentReply) : lastAgentReply}

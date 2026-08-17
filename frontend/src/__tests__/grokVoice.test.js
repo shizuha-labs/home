@@ -1,14 +1,23 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import {
   conversationPeerUsername,
   findAgentByUsername,
   historyToVoiceItems,
   isGrokVoiceOmniModel,
   isVoiceEchoText,
+  LIVE_S2S_MEMORY_KEY,
   liveVoiceAgent,
+  pickActiveLiveVoice,
+  readRememberedLiveS2S,
+  rememberLiveS2S,
+  resolveLiveVoiceTarget,
   shouldHoldMicWhileSpeaking,
   stripGrokVoicePrefix,
 } from '../utils/grokVoice'
+
+afterEach(() => {
+  localStorage.removeItem(LIVE_S2S_MEMORY_KEY)
+})
 
 describe('isGrokVoiceOmniModel', () => {
   it('matches the Hina seat and aliases', () => {
@@ -46,6 +55,102 @@ describe('liveVoiceAgent', () => {
     expect(findAgentByUsername(agents, 'ena').model).toContain('grok-4.6')
     expect(conversationPeerUsername({ participants: [] }, 1)).toBe('')
     expect(stripGrokVoicePrefix('cortex/xai/grok-voice-latest')).toBe('grok-voice-latest')
+  })
+})
+
+describe('resolveLiveVoiceTarget', () => {
+  const agents = [
+    { username: 'ena', model: 'cortex/grok-4.6' },
+    { username: 'hina', model: 'cortex/grok-voice-think-fast-2.0' },
+  ]
+  const hinaThread = {
+    participants: [
+      { user_id: 1, username: 'hritik' },
+      { user_id: 698, username: 'hina' },
+    ],
+  }
+  const enaThread = {
+    participants: [
+      { user_id: 1, username: 'hritik' },
+      { user_id: 2, username: 'ena' },
+    ],
+  }
+
+  it('keeps homepage Live on the picker so a leftover Hina thread cannot steal Ena', () => {
+    const target = resolveLiveVoiceTarget({
+      agents,
+      conversation: hinaThread,
+      preferPeer: false,
+      pickerUsername: 'ena',
+      currentUserId: 1,
+    })
+    expect(target).toMatchObject({ username: 'ena', s2s: false })
+  })
+
+  it('uses native Voice on homepage when the picker is Hina', () => {
+    const target = resolveLiveVoiceTarget({
+      agents,
+      conversation: enaThread,
+      preferPeer: false,
+      pickerUsername: 'hina',
+      currentUserId: 1,
+    })
+    expect(target).toMatchObject({ username: 'hina', s2s: true })
+    expect(target.model).toContain('grok-voice')
+  })
+
+  it('follows the open /c/:id peer even if the homepage picker is someone else', () => {
+    const onHina = resolveLiveVoiceTarget({
+      agents,
+      conversation: hinaThread,
+      preferPeer: true,
+      pickerUsername: 'ena',
+      currentUserId: 1,
+    })
+    expect(onHina).toMatchObject({ username: 'hina', s2s: true })
+    const onEna = resolveLiveVoiceTarget({
+      agents,
+      conversation: enaThread,
+      preferPeer: true,
+      pickerUsername: 'hina',
+      currentUserId: 1,
+    })
+    expect(onEna).toMatchObject({ username: 'ena', s2s: false })
+  })
+
+  it('stays on cascade when the model is unknown and nothing is remembered', () => {
+    const target = resolveLiveVoiceTarget({
+      agents: [],
+      pickerUsername: 'yuna',
+      currentUserId: 1,
+    })
+    expect(target).toMatchObject({ username: 'yuna', model: '', s2s: false })
+  })
+
+  it('recalls a previous Grok Voice seat before the roster hydrates', () => {
+    rememberLiveS2S('hina', true)
+    expect(readRememberedLiveS2S('hina')).toBe(true)
+    const target = resolveLiveVoiceTarget({
+      agents: [],
+      pickerUsername: 'hina',
+      currentUserId: 1,
+    })
+    expect(target).toMatchObject({ username: 'hina', s2s: true })
+  })
+})
+
+describe('pickActiveLiveVoice', () => {
+  const idle = { callState: 'idle' }
+  const live = { callState: 'listening' }
+
+  it('locks HUD and controls to the hook that is already in a call', () => {
+    expect(pickActiveLiveVoice(live, idle, false).path).toBe('s2s')
+    expect(pickActiveLiveVoice(idle, live, true).path).toBe('cascade')
+  })
+
+  it('follows the preferred path only when both hooks are idle', () => {
+    expect(pickActiveLiveVoice(idle, idle, true).path).toBe('s2s')
+    expect(pickActiveLiveVoice(idle, idle, false).path).toBe('cascade')
   })
 })
 

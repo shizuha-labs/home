@@ -154,4 +154,52 @@ describe('useGrokVoiceS2S', () => {
     expect(result.current.callState).toBe('listening')
     vi.useRealTimers()
   })
+
+  it('hands a non-voice seat back to cascade instead of showing an error HUD', async () => {
+    const onFallback = vi.fn(() => true)
+    const { result } = renderHook(() => useGrokVoiceS2S({
+      conversationId: 'conv-1',
+      agentUsername: 'ena',
+      model: 'cortex/grok-4.6',
+      onFallback,
+    }))
+    await act(async () => { result.current.startCall() })
+    const socket = FakeSocket.instances.at(-1)
+    await act(async () => { socket.open() })
+    await act(async () => {
+      socket.emit(JSON.stringify({
+        type: 'error',
+        code: 'not_voice_agent',
+        message: 'This agent is not on Grok Voice.',
+      }))
+    })
+    expect(onFallback).toHaveBeenCalledWith('not_voice_agent', 'This agent is not on Grok Voice.')
+    expect(result.current.callState).toBe('idle')
+    expect(result.current.callError).toBe(null)
+    expect(result.current.isCallActive()).toBe(false)
+  })
+
+  it('hands an exhausted realtime outage back to cascade', async () => {
+    vi.useFakeTimers()
+    const onFallback = vi.fn(() => true)
+    const { result } = renderHook(() => useGrokVoiceS2S({
+      conversationId: 'conv-1',
+      agentUsername: 'hina',
+      model: 'cortex/grok-voice-think-fast-2.0',
+      onFallback,
+    }))
+    await act(async () => { result.current.startCall() })
+    for (let i = 0; i < 6; i += 1) {
+      const socket = FakeSocket.instances.at(-1)
+      await act(async () => { socket.open(); socket.onclose?.() })
+      await act(async () => { vi.advanceTimersByTime(8000) })
+    }
+    expect(onFallback).toHaveBeenCalledWith(
+      'stream_unavailable',
+      expect.stringMatching(/temporarily unavailable/i),
+    )
+    expect(result.current.callState).toBe('idle')
+    expect(result.current.callError).toBe(null)
+    vi.useRealTimers()
+  })
 })
