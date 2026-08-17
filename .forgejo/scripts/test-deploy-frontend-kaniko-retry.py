@@ -31,6 +31,7 @@ def main() -> None:
     require("--cache-copy-layers=${CACHE_ENABLED}")
     require("--build-arg=PREV_FRONTEND_IMAGE=${PREV_FRONTEND_IMAGE}")
     require("Carry forward hashed assets from")
+    require("${PREV_FRONTEND_IMAGE//localhost:30500/${REG}}")
 
     if SOURCE.count('render_build_job "${ARCH}" 2 false') != 1:
         raise AssertionError("cache bypass must be exactly one bounded retry")
