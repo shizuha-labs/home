@@ -189,9 +189,10 @@ function summarizeTrace(trace) {
 
 async function main() {
   const { user, pass } = creds()
-  const headed = process.env.HEADED === '1'
+  const headed = process.env.HEADED === '1' && !!process.env.DISPLAY
   const browser = await chromium.launch({
     headless: !headed,
+    timeout: 60_000,
     args: [
       '--use-fake-ui-for-media-stream',
       '--autoplay-policy=no-user-gesture-required',
@@ -226,8 +227,17 @@ async function main() {
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForSelector('[data-testid="home-live-button"]', { timeout: 20000 })
   await sleep(1400)
-  await humanClick(page, page.locator('[data-testid="home-live-button"]'))
-  await page.waitForSelector('[data-testid="live-voice-overlay"]', { timeout: 20000 })
+  try {
+    await humanClick(page, page.locator('[data-testid="home-live-button"]'))
+  } catch {
+    await page.locator('[data-testid="home-live-button"]').click({ force: true })
+  }
+  try {
+    await page.waitForSelector('[data-testid="live-voice-overlay"]', { timeout: 8000 })
+  } catch {
+    await page.locator('[data-testid="home-live-button"]').click({ force: true })
+    await page.waitForSelector('[data-testid="live-voice-overlay"]', { timeout: 25000 })
+  }
   const readyAt = Date.now()
   let snap = await snapshot(page)
   while (Date.now() - readyAt < 12000 && snap.state !== 'listening') {
@@ -288,10 +298,29 @@ async function main() {
   const thisCall = { ...trace, events: callEvents(trace, callId), call_id: callId }
   const summary = { turns: log, callId, ...summarizeTrace(thisCall) }
   fs.writeFileSync(path.join(OUT, 'summary.json'), JSON.stringify(summary, null, 2))
+  const vias = [...new Set(summary.events.map((e) => e.via).filter(Boolean))]
+  const toolEvents = (thisCall.events || []).filter((e) =>
+    /tool|function_call|debug\.tool/.test(`${e.name || ''} ${e.attrs?.type || ''}`),
+  )
+  summary.vias = vias
+  summary.toolEvents = toolEvents.map((e) => ({
+    name: e.name,
+    type: e.attrs?.type || '',
+    tool: e.attrs?.name || e.attrs?.tool || '',
+  }))
+  fs.writeFileSync(path.join(OUT, 'summary.json'), JSON.stringify(summary, null, 2))
   console.log(JSON.stringify(summary, null, 2))
   await page.locator('[aria-label="End Live"]').first().click({ force: true }).catch(() => {})
   await browser.close()
   if (!summary.assistant.length) process.exit(2)
+  if (!vias.includes('scli')) {
+    console.error(`expected via=scli, got vias=${JSON.stringify(vias)}`)
+    process.exit(3)
+  }
+  if (vias.includes('voice-xai') && !vias.includes('scli')) {
+    console.error('fell back to voice-xai stubs; SCLI path was not used')
+    process.exit(3)
+  }
 }
 
 main().catch((err) => {

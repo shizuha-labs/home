@@ -313,7 +313,11 @@ export function useGrokVoiceS2S({
       if (type === 'ready' || type === 'session.updated') {
         streamAttemptsRef.current = 0
         if (!mutedRef.current) setCallState('listening')
-        emitLiveTrace('s2s.ready', { model: msg.model || opts.model || '' })
+        emitLiveTrace('s2s.ready', {
+          model: msg.model || opts.model || '',
+          via: msg.via || '',
+          tools: Array.isArray(msg.tools) ? msg.tools.length : 0,
+        })
         if (pingTimerRef.current == null) {
           pingTimerRef.current = window.setInterval(() => {
             sendJson({ type: 'ping' })
