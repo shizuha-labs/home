@@ -153,3 +153,25 @@ export function historyToVoiceItems(messages, userId, limit = 12) {
   }
   return out
 }
+
+export async function persistVoiceTurn({ conversationId, userText = '', assistantText = '' }) {
+  const { getAccessToken } = await import('./auth')
+  const token = getAccessToken()
+  const cid = String(conversationId || '').trim()
+  const user = String(userText || '').trim()
+  const assistant = String(assistantText || '').trim()
+  if (!token || !cid || !(user || assistant)) return { ok: false, status: 0 }
+  const res = await fetch('/connect/api/messaging/voice-turn/', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      conversation_id: cid,
+      user_text: user,
+      assistant_text: assistant,
+    }),
+  })
+  return { ok: res.ok, status: res.status }
+}

@@ -416,20 +416,34 @@ function ChatHomeInner() {
     callState, callError, muted, lastHeard, retryCall,
     toggleMute, notifyReply, beginSpeak, endSpeak, cancelSpeak,
   } = liveVoice
-  const startPreferredCall = useCallback(() => {
+  const bindLiveConversation = useCallback(() => {
+    const dest = urlConversationId
+      || selectedPicker?.conversationId
+      || findAgentConversation(conversations, effectiveHomeAgent)?.id
+      || miniConvId
+      || activeConversationId
+      || ''
+    if (dest) {
+      if (dest !== miniConvId) setMiniConvId(dest)
+      if (dest !== activeConversationId) setActiveConversation(dest)
+    }
+    return dest
+  }, [activeConversationId, conversations, effectiveHomeAgent, miniConvId, selectedPicker, setActiveConversation, urlConversationId])
+  const startPreferredCall = useCallback((overrides = {}) => {
     setAwaitingVoicePath(false)
-    if (preferS2S) s2sVoice.startCall()
+    if (preferS2S) s2sVoice.startCall(overrides)
     else cascadeVoice.startCall()
   }, [cascadeVoice, preferS2S, s2sVoice])
   const startCall = useCallback(() => {
     wantLiveRef.current = true
+    const dest = bindLiveConversation()
     const known = Boolean(liveTarget.model) || readRememberedLiveS2S(liveTarget.username) != null
     if (!known && agentsHydrating) {
       setAwaitingVoicePath(true)
       return
     }
-    startPreferredCall()
-  }, [agentsHydrating, liveTarget.model, liveTarget.username, startPreferredCall])
+    startPreferredCall({ conversationId: dest })
+  }, [agentsHydrating, bindLiveConversation, liveTarget.model, liveTarget.username, startPreferredCall])
   useEffect(() => {
     if (!awaitingVoicePath || !wantLiveRef.current) return
     const known = Boolean(liveTarget.model) || readRememberedLiveS2S(liveTarget.username) != null
@@ -512,17 +526,7 @@ function ChatHomeInner() {
     // A Live call is a voice call — hear her unless the caller turns speaker off.
     if (!speakReplies) setSpeakReplies(true)
     startCall()
-    // Homepage Live needs a thread immediately so Open full / sidebar stay
-    // in-app. Waiting for the first utterance left no expand target.
-    if (!urlConversationId) {
-      const dest = selectedPicker?.conversationId
-        || findAgentConversation(conversations, effectiveHomeAgent)?.id
-      if (dest) {
-        setMiniConvId(dest)
-        if (dest !== activeConversationId) setActiveConversation(dest)
-      }
-    }
-  }, [activeConversationId, callError, callState, conversations, effectiveHomeAgent, endCall, isCallActive, retryCall, selectedPicker, setActiveConversation, speakReplies, startCall, urlConversationId])
+  }, [callError, callState, endCall, isCallActive, retryCall, speakReplies, startCall])
 
   // Speak tokens as they stream in (Grok TTS websocket). Fallback: full
   // message once persisted. Persist must NOT reset the spoken prefix or the

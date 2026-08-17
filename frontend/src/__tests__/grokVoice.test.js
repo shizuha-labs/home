@@ -11,6 +11,7 @@ import {
   readRememberedLiveS2S,
   rememberLiveS2S,
   resolveLiveVoiceTarget,
+  persistVoiceTurn,
   shouldHoldMicWhileSpeaking,
   stripGrokVoicePrefix,
 } from '../utils/grokVoice'
@@ -192,5 +193,12 @@ describe('voice echo hold', () => {
     expect(shouldHoldMicWhileSpeaking({ speaking: true, remainingMs: 0 })).toBe(true)
     expect(shouldHoldMicWhileSpeaking({ speaking: false, remainingMs: 400 })).toBe(true)
     expect(shouldHoldMicWhileSpeaking({ speaking: false, remainingMs: 0 })).toBe(false)
+  })
+})
+
+describe('persistVoiceTurn', () => {
+  it('skips when conversation or text is missing', async () => {
+    expect(await persistVoiceTurn({ conversationId: '', userText: 'hi' })).toEqual({ ok: false, status: 0 })
+    expect(await persistVoiceTurn({ conversationId: 'c1' })).toEqual({ ok: false, status: 0 })
   })
 })

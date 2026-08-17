@@ -2,6 +2,14 @@ import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useGrokVoiceS2S } from '../hooks/useGrokVoiceS2S'
 
+vi.mock('../utils/grokVoice', async (orig) => {
+  const actual = await orig()
+  return {
+    ...actual,
+    persistVoiceTurn: vi.fn(async () => ({ ok: true, status: 201 })),
+  }
+})
+
 class FakeSocket {
   static instances = []
   constructor(url) {
