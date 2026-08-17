@@ -22,7 +22,7 @@ import {
   RETIRED_HOME_AGENTS,
   writeHomeAgentPref,
 } from '../hooks/useHomeAgentPreference'
-import { useVoiceInput, useVoiceConversation, speakText, speakDelta, nextSpokenSentences, readyToFlushSpokenSentences, spokenCovers, stripSpeakableMarkup, isTalkAckText, isGhostTranscript, readTtsSpeed, cycleTtsSpeed } from '../hooks/useVoice'
+import { useVoiceInput, useVoiceConversation, speakText, speakDelta, nextSpokenSentences, readyToFlushSpokenSentences, leftoverAfterStream, isTalkAckText, isGhostTranscript, readTtsSpeed, cycleTtsSpeed, setUserSpeakEnabled } from '../hooks/useVoice'
 import { useGrokVoiceS2S } from '../hooks/useGrokVoiceS2S'
 import { pickActiveLiveVoice, readRememberedLiveS2S, resolveLiveVoiceTarget } from '../utils/grokVoice'
 import TtsSpeedButton from '../components/assistant/TtsSpeedButton'
@@ -32,7 +32,7 @@ import { getAccessToken, handleUnauthorized } from '../utils/auth'
 import { emitLiveTrace, setLiveTraceContext } from '../utils/liveTrace'
 import { conversationPeerName } from '../utils/conversationLabel'
 import { conversationIdFromPath, isHomeAppPath, nextThreadAfterRouteChange, threadInitialUnreadCount } from '../utils/conversationRoute'
-import { isFreshAgentPersist, messageSpeakKey, persistAgeMs } from '../utils/voicePersist'
+import { alreadySpokePersist, isFreshAgentPersist, markPersistSpoken, messageSpeakKey, persistAgeMs } from '../utils/voicePersist'
 
 function getAuthToken() {
   return getAccessToken()
@@ -125,7 +125,9 @@ function ChatHomeInner() {
   const [ttsSpeed, setTtsSpeed] = useState(() => readTtsSpeed())
   const cycleTalkSpeed = useCallback(() => setTtsSpeed(cycleTtsSpeed()), [])
   const lastSpokenIdRef = useRef(null)
+  const spokenPersistKeysRef = useRef(new Set())
   const primedVoiceConvRef = useRef(null)
+  useEffect(() => { setUserSpeakEnabled(speakReplies) }, [speakReplies])
   const [showApps, setShowApps] = useState(false)
   const [showNewChat, setShowNewChat] = useState(false)
   const [showCommandPalette, setShowCommandPalette] = useState(false)
@@ -575,6 +577,7 @@ function ChatHomeInner() {
     if (primedVoiceConvRef.current !== voiceConvId) {
       primedVoiceConvRef.current = voiceConvId
       lastSpokenIdRef.current = null
+      spokenPersistKeysRef.current = new Set()
     }
     const list = Array.isArray(messages) ? messages : []
     if (!list.length) return
@@ -585,6 +588,7 @@ function ChatHomeInner() {
       const agent = last.sender_id === user?.id ? null : last
       if (!agent || !isFreshAgentPersist(agent)) {
         lastSpokenIdRef.current = key
+        markPersistSpoken(spokenPersistKeysRef.current, last)
         emitLiveTrace('chat.persist.prime', {
           key,
           age_ms: agent ? persistAgeMs(agent) : -1,
@@ -593,16 +597,15 @@ function ChatHomeInner() {
       }
     }
     if (last.sender_id === user?.id) return
-    if (lastSpokenIdRef.current === key) return
+    if (alreadySpokePersist(spokenPersistKeysRef.current, last)) return
     lastSpokenIdRef.current = key
+    markPersistSpoken(spokenPersistKeysRef.current, last)
     if (isTalkAckText(last.content)) {
       lastLiveStreamRef.current = ''
       if (callActive) void endSpeak()
       return
     }
-    const leftover = spokenCovers(last.content, spokenStreamRef.current)
-      ? ''
-      : stripSpeakableMarkup(last.content || '')
+    const leftover = leftoverAfterStream(last.content, spokenStreamRef.current)
     lastLiveStreamRef.current = ''
     if (!leftover) {
       if (callActive) void endSpeak()
@@ -625,6 +628,7 @@ function ChatHomeInner() {
       during_call: callActive ? 1 : 0,
       call_state: callState,
     })
+    setUserSpeakEnabled(next)
     if (!next) {
       speakText.stop()
       if (callActive) cancelSpeak()

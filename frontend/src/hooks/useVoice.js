@@ -130,9 +130,19 @@ let currentAudio = null
 let speakEpoch = 0
 let speakMuted = false
 let speakGain = null
+let userSpeakEnabled = true
+const liveHtmlAudio = new Set()
+
+export function setUserSpeakEnabled(on) {
+  userSpeakEnabled = !!on
+}
+
+export function isUserSpeakEnabled() {
+  return userSpeakEnabled
+}
 
 export function isSpeakOutputMuted() {
-  return speakMuted
+  return speakMuted || !userSpeakEnabled
 }
 
 if (typeof window !== 'undefined') {
@@ -162,6 +172,7 @@ function muteSpeakOutput() {
 }
 
 export function unmuteSpeakOutput() {
+  if (!userSpeakEnabled) return
   speakMuted = false
   if (gaplessCtx && gaplessCtx.state === 'suspended') {
     try { void gaplessCtx.resume() } catch { /* noop */ }
@@ -197,6 +208,7 @@ export async function speakText(text) {
   if (!clean) return
   speakText.stop()
   const epoch = speakEpoch
+  if (!userSpeakEnabled) return
   unmuteSpeakOutput()
   try {
     const serverReady = await probeVoiceService()
@@ -217,16 +229,22 @@ export async function speakText(text) {
         const audio = new Audio(url)
         audio.playbackRate = readTtsSpeed()
         currentAudio = audio
+        liveHtmlAudio.add(audio)
         await new Promise((resolve) => {
-          audio.onended = () => { URL.revokeObjectURL(url); if (currentAudio === audio) currentAudio = null; resolve() }
-          audio.onerror = () => { URL.revokeObjectURL(url); if (currentAudio === audio) currentAudio = null; resolve() }
-          if (epoch !== speakEpoch || speakMuted) {
+          const done = () => {
             URL.revokeObjectURL(url)
+            liveHtmlAudio.delete(audio)
             if (currentAudio === audio) currentAudio = null
             resolve()
+          }
+          audio.onended = done
+          audio.onerror = done
+          if (epoch !== speakEpoch || speakMuted || !userSpeakEnabled) {
+            try { audio.pause() } catch { /* noop */ }
+            done()
             return
           }
-          audio.play().catch(() => resolve())
+          audio.play().catch(() => done())
         })
         return
       }
@@ -249,12 +267,13 @@ speakText.stop = () => {
   speakEpoch += 1
   muteSpeakOutput()
   emitLiveTrace('tts.stop', { remaining_ms: remaining, epoch: speakEpoch })
-  if (currentAudio) {
-    try { currentAudio.pause() } catch { /* noop */ }
-    try { currentAudio.volume = 0 } catch { /* noop */ }
-    try { currentAudio.src = '' } catch { /* noop */ }
-    currentAudio = null
+  for (const audio of liveHtmlAudio) {
+    try { audio.pause() } catch { /* noop */ }
+    try { audio.volume = 0 } catch { /* noop */ }
+    try { audio.src = '' } catch { /* noop */ }
   }
+  liveHtmlAudio.clear()
+  currentAudio = null
   stopGaplessPlayback()
   if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel()
   stopSpeakStream()
@@ -465,7 +484,7 @@ function scheduleAudioBuffer(buf, rate, epoch = speakEpoch) {
 
 export function playPcmChunk(bytes, sampleRate = PCM_SAMPLE_RATE, rate = 1, { fade = true } = {}) {
   const epoch = speakEpoch
-  if (speakMuted) return Promise.resolve()
+  if (speakMuted || !userSpeakEnabled) return Promise.resolve()
   const ctx = ensureGaplessCtx()
   if (!ctx) return playHtmlAudioChunk(bytes, 'audio/wav', rate)
   if (speakMuted || epoch !== speakEpoch) return Promise.resolve()
@@ -493,22 +512,28 @@ export function playPcmChunk(bytes, sampleRate = PCM_SAMPLE_RATE, rate = 1, { fa
 
 function playHtmlAudioChunk(bytes, mime, rate) {
   const epoch = speakEpoch
-  if (speakMuted || epoch !== speakEpoch) return Promise.resolve()
+  if (speakMuted || !userSpeakEnabled || epoch !== speakEpoch) return Promise.resolve()
   const blob = new Blob([bytes], { type: mime })
   const url = URL.createObjectURL(blob)
   const audio = new Audio(url)
   audio.playbackRate = rate
   currentAudio = audio
+  liveHtmlAudio.add(audio)
   return new Promise((resolve) => {
-    audio.onended = () => { URL.revokeObjectURL(url); if (currentAudio === audio) currentAudio = null; resolve() }
-    audio.onerror = () => { URL.revokeObjectURL(url); if (currentAudio === audio) currentAudio = null; resolve() }
-    if (speakMuted || epoch !== speakEpoch) {
+    const done = () => {
       URL.revokeObjectURL(url)
+      liveHtmlAudio.delete(audio)
       if (currentAudio === audio) currentAudio = null
       resolve()
+    }
+    audio.onended = done
+    audio.onerror = done
+    if (speakMuted || !userSpeakEnabled || epoch !== speakEpoch) {
+      try { audio.pause() } catch { /* noop */ }
+      done()
       return
     }
-    audio.play().catch(() => resolve())
+    audio.play().catch(() => done())
   })
 }
 
@@ -582,7 +607,7 @@ export function startSpeakStream({ voice } = {}) {
           clearTimeout(timer)
           resolve(true)
         } else if (msg.type === 'audio.delta' && msg.delta) {
-          if (speakWs !== ws || speakMuted) return
+          if (speakWs !== ws || speakMuted || !userSpeakEnabled) return
           ttsDeltaCount += 1
           ttsDeltaChars += String(msg.delta).length
           if (ttsDeltaCount === 1) emitLiveTrace('tts.audio.start', { mime: msg.mime || '', provider: speakProvider })
@@ -622,10 +647,12 @@ export function stripSpeakableMarkup(text) {
 export async function speakDelta(text, { done = true } = {}) {
   const clean = stripSpeakableMarkup(text)
   if (!clean) return
+  if (!userSpeakEnabled) return
   const epoch = speakEpoch
   const ready = await startSpeakStream()
-  if (epoch !== speakEpoch) return
+  if (epoch !== speakEpoch || !userSpeakEnabled) return
   unmuteSpeakOutput()
+  if (speakMuted || !userSpeakEnabled) return
   if (!ready || !speakWs || speakWs.readyState !== WebSocket.OPEN) {
     await speakText(clean)
     return
@@ -637,12 +664,14 @@ export async function speakDelta(text, { done = true } = {}) {
 export function resetSpeakOutputForTests() {
   speakEpoch += 1
   speakMuted = false
+  userSpeakEnabled = true
   stopGaplessPlayback()
   stopSpeakStream()
-  if (currentAudio) {
-    try { currentAudio.pause() } catch { /* noop */ }
-    currentAudio = null
+  for (const audio of liveHtmlAudio) {
+    try { audio.pause() } catch { /* noop */ }
   }
+  liveHtmlAudio.clear()
+  currentAudio = null
   gaplessCtx = null
   speakGain = null
   keepAliveOsc = null
@@ -658,7 +687,7 @@ export function finishSpeakStream() {
 export const SPEAK_IDLE_TIMEOUT_MS = 90_000
 
 export function remainingSpeakMs() {
-  if (speakMuted) return 0
+  if (speakMuted || !userSpeakEnabled) return 0
   const releaseMs = Math.max(0, releasedUntil - Date.now())
   let playMs = 0
   if (gaplessCtx && typeof gaplessCtx.currentTime === 'number' && gaplessHead > gaplessCtx.currentTime) {
@@ -783,6 +812,23 @@ export function spokenCovers(full, spoken) {
   const a = String(full || '').replace(/\s+/g, ' ').trim()
   const b = String(spoken || '').replace(/\s+/g, ' ').trim()
   return !!b && a.startsWith(b)
+}
+
+/**
+ * Persist leftover after streaming TTS. If the stream already spoke a
+ * prefix, return only the tail. If the persist text does not continue
+ * the stream (markup / id swap), return empty — never replay the full
+ * reply in parallel.
+ */
+export function leftoverAfterStream(persistContent, alreadySpoken) {
+  const full = stripSpeakableMarkup(persistContent).replace(/\s+/g, ' ').trim()
+  const spoken = stripSpeakableMarkup(alreadySpoken).replace(/\s+/g, ' ').trim()
+  if (!full) return ''
+  if (!spoken) return full
+  if (full.startsWith(spoken)) {
+    return full.slice(spoken.length).replace(/^[\s.!?…,;:—-]+/, '').trim()
+  }
+  return ''
 }
 
 export function nextSpokenSentences(buffer, alreadySpoken, { flushRemainder = false } = {}) {

@@ -15,6 +15,7 @@ import {
   nextSpokenSentences,
   stripSpeakableMarkup,
   spokenCovers,
+  leftoverAfterStream,
   isTalkAckText,
   isGhostTranscript,
   clampTtsSpeed,
@@ -115,6 +116,26 @@ describe('spokenCovers', () => {
     expect(spokenCovers('Hey Hritik. All good here.', 'Hey Hritik.')).toBe(true)
     expect(spokenCovers('Hey Hritik. All good here.', '  Hey   Hritik.  ')).toBe(true)
     expect(spokenCovers('Hey Hritik.', 'Something else.')).toBe(false)
+  })
+})
+
+describe('leftoverAfterStream', () => {
+  it('returns only the unsaid tail when persist continues the stream', () => {
+    expect(leftoverAfterStream(
+      'They should not have been on you. PLS-962 is already on Merge.',
+      'They should not have been on you.',
+    )).toBe('PLS-962 is already on Merge.')
+  })
+
+  it('does not replay the full persist when the stream prefix does not match', () => {
+    expect(leftoverAfterStream(
+      'They should not have been on you. PLS-962 is already on Merge.',
+      'They should not have been on you',
+    )).toBe('PLS-962 is already on Merge.')
+    expect(leftoverAfterStream(
+      'They should not have been on you. PLS-962 is already on Merge.',
+      'Something else I already spoke.',
+    )).toBe('')
   })
 })
 

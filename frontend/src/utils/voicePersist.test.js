@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
   FRESH_AGENT_PERSIST_MS,
+  alreadySpokePersist,
   isFreshAgentPersist,
+  markPersistSpoken,
   messageSpeakKey,
   persistAgeMs,
+  persistSpeakKeys,
   shouldPrimePersistedHistory,
 } from './voicePersist'
 
@@ -14,6 +17,16 @@ describe('voicePersist leftover policy', () => {
     expect(messageSpeakKey({ id: 'srv', client_message_id: 'cli' })).toBe('srv')
     expect(messageSpeakKey({ client_message_id: 'cli' })).toBe('cli')
     expect(messageSpeakKey({})).toBeNull()
+  })
+
+  it('treats client-id then server-id as the same spoken persist', () => {
+    const spoken = new Set()
+    const first = { client_message_id: 'cli', content: 'Here.' }
+    const second = { id: 'srv', client_message_id: 'cli', content: 'Here.' }
+    expect(persistSpeakKeys(first)).toEqual(['cli'])
+    markPersistSpoken(spoken, first)
+    expect(alreadySpokePersist(spoken, first)).toBe(true)
+    expect(alreadySpokePersist(spoken, second)).toBe(true)
   })
 
   it('treats missing created_at as ancient', () => {

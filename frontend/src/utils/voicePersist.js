@@ -10,6 +10,21 @@ export function messageSpeakKey(message) {
   return message?.id || message?.client_message_id || null
 }
 
+/** Every identity a persist can wear as it hydrates client-id → server id. */
+export function persistSpeakKeys(message) {
+  return [message?.id, message?.client_message_id].filter(Boolean).map(String)
+}
+
+export function alreadySpokePersist(spokenKeys, message) {
+  if (!spokenKeys) return false
+  return persistSpeakKeys(message).some((key) => spokenKeys.has(key))
+}
+
+export function markPersistSpoken(spokenKeys, message) {
+  persistSpeakKeys(message).forEach((key) => spokenKeys.add(key))
+  return spokenKeys
+}
+
 export function persistAgeMs(message, now = Date.now()) {
   const ts = Date.parse(message?.created_at || '')
   if (!Number.isFinite(ts)) return Number.POSITIVE_INFINITY

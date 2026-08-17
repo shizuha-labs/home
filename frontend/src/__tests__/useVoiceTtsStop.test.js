@@ -10,6 +10,7 @@ import {
   playPcmChunk,
   remainingSpeakMs,
   resetSpeakOutputForTests,
+  setUserSpeakEnabled,
   speakText,
   unmuteSpeakOutput,
 } from '../hooks/useVoice'
@@ -200,6 +201,23 @@ describe('TTS stop / Voice replies off', () => {
     unmuteSpeakOutput()
     void playPcmChunk(new Uint8Array(16), 24000, 1)
     expect(isSpeakOutputMuted()).toBe(false)
+    expect(started.length).toBeGreaterThan(before)
+  })
+
+  it('user mute stays latched through unmuteSpeakOutput and leftover speakText', async () => {
+    const { started } = installFakeAudioContext()
+    resetSpeakOutputForTests()
+    setUserSpeakEnabled(false)
+    speakText.stop()
+    unmuteSpeakOutput()
+    expect(isSpeakOutputMuted()).toBe(true)
+    const before = started.length
+    await speakText('They should not have been on you.')
+    void playPcmChunk(new Uint8Array(16), 24000, 1)
+    expect(started.length).toBe(before)
+    setUserSpeakEnabled(true)
+    unmuteSpeakOutput()
+    void playPcmChunk(new Uint8Array(16), 24000, 1)
     expect(started.length).toBeGreaterThan(before)
   })
 

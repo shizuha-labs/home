@@ -53,6 +53,15 @@ vi.mock('../hooks/useVoice', () => ({
   speakText: Object.assign(vi.fn(), { stop: vi.fn() }),
   speakDelta: vi.fn(),
   nextSpokenSentences: () => ({ sentences: [], spoken: '' }),
+  leftoverAfterStream: (full, spoken) => {
+    const a = String(full || '').replace(/\s+/g, ' ').trim()
+    const b = String(spoken || '').replace(/\s+/g, ' ').trim()
+    if (!a) return ''
+    if (!b) return a
+    if (a.startsWith(b)) return a.slice(b.length).replace(/^[\s.!?…,;:—-]+/, '').trim()
+    return ''
+  },
+  setUserSpeakEnabled: vi.fn(),
   spokenCovers: (full, spoken) => {
     const a = String(full || '').replace(/\s+/g, ' ').trim()
     const b = String(spoken || '').replace(/\s+/g, ' ').trim()
@@ -348,6 +357,46 @@ describe('ChatHome Live chrome', () => {
     })
     expect(speakText.mock.calls[0]?.[0] || voice.notifyReply.mock.calls[0]?.[0])
       .toBe('Just said this.')
+  })
+
+  it('does not re-speak when persist grows a server id on the same client message', () => {
+    // Production order: optimistic persist (client id) speaks once →
+    // confirmed persist (server id + same client id) must not start a
+    // second TTS. That was the delayed parallel Ena voice.
+    const now = new Date().toISOString()
+    chat.messages = []
+    voice.callState = 'idle'
+    render(<PersistHarness />)
+    act(() => {
+      screen.getByTestId('home-live-button').click()
+    })
+    voice.callState = 'listening'
+    voice.notifyReply.mockClear()
+    speakText.mockClear()
+    chat.messages = [
+      {
+        client_message_id: 'cli-ena-1',
+        sender_id: 2,
+        sender_name: 'Ena',
+        content: 'They should not have been on you.',
+        created_at: now,
+      },
+    ]
+    act(() => { PersistHarness.tick() })
+    expect(voice.notifyReply).toHaveBeenCalledTimes(1)
+    chat.messages = [
+      {
+        id: 'srv-ena-1',
+        client_message_id: 'cli-ena-1',
+        sender_id: 2,
+        sender_name: 'Ena',
+        content: 'They should not have been on you.',
+        created_at: now,
+      },
+    ]
+    act(() => { PersistHarness.tick() })
+    expect(voice.notifyReply).toHaveBeenCalledTimes(1)
+    expect(speakText).not.toHaveBeenCalled()
   })
 
   it('does not replay history that hydrates after Live starts', () => {
