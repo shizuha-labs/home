@@ -29,7 +29,7 @@ import { useHomeActivity } from '../hooks/useHomeActivity'
 import { getAccessToken, handleUnauthorized } from '../utils/auth'
 import { emitLiveTrace, setLiveTraceContext } from '../utils/liveTrace'
 import { conversationPeerName } from '../utils/conversationLabel'
-import { conversationIdFromPath, isHomeAppPath, nextThreadAfterRouteChange } from '../utils/conversationRoute'
+import { conversationIdFromPath, isHomeAppPath, nextThreadAfterRouteChange, threadInitialUnreadCount } from '../utils/conversationRoute'
 import { isFreshAgentPersist, messageSpeakKey, persistAgeMs } from '../utils/voicePersist'
 
 function getAuthToken() {
@@ -771,7 +771,11 @@ function ChatHomeInner() {
             hasMore={hasMore}
             isLoadingMore={isLoadingMessages}
             onLoadMore={loadMore}
-            initialUnreadCount={activeInitialUnread}
+            initialUnreadCount={threadInitialUnreadCount({
+              miniConvId,
+              activeConversationId,
+              captured: activeInitialUnread,
+            })}
           />
           <MessageInput
             onSend={(text) => {

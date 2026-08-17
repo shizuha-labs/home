@@ -3,6 +3,7 @@ import {
   conversationIdFromPath,
   isHomeAppPath,
   nextThreadAfterRouteChange,
+  threadInitialUnreadCount,
 } from './conversationRoute'
 
 describe('conversationIdFromPath', () => {
@@ -75,5 +76,25 @@ describe('nextThreadAfterRouteChange', () => {
       miniConvId: thread,
       callState: 'speaking',
     })).toEqual({ activeConversationId: thread, miniConvId: thread })
+  })
+})
+
+describe('threadInitialUnreadCount', () => {
+  const thread = 'bb516974-4152-427a-a2ac-04535b5f393f'
+
+  it('drops leftover unread when expanding the already-open mini-chat', () => {
+    expect(threadInitialUnreadCount({
+      miniConvId: thread,
+      activeConversationId: thread,
+      captured: 6,
+    })).toBe(0)
+  })
+
+  it('keeps the captured unread on a cold /c/:id open', () => {
+    expect(threadInitialUnreadCount({
+      miniConvId: null,
+      activeConversationId: thread,
+      captured: 6,
+    })).toBe(6)
   })
 })

@@ -36,3 +36,9 @@ export function nextThreadAfterRouteChange({
   }
   return { activeConversationId: null, miniConvId }
 }
+
+/** Expanding the already-open mini-chat must not resurrect a leftover unread chip. */
+export function threadInitialUnreadCount({ miniConvId, activeConversationId, captured } = {}) {
+  if (miniConvId && miniConvId === activeConversationId) return 0
+  return Number(captured) || 0
+}
