@@ -363,8 +363,8 @@ function ChatHomeInner() {
   })
   // Streaming STT types into the compose box as the caller speaks.
   useEffect(() => {
-    if (callState === 'listening' && lastHeard) setInputValue(lastHeard)
-  }, [callState, lastHeard])
+    if (callState === 'listening' && lastHeard && !muted) setInputValue(lastHeard)
+  }, [callState, lastHeard, muted])
   const lastAgentReply = useMemo(() => {
     const list = Array.isArray(messages) ? messages : []
     const last = [...list].reverse().find((m) => (

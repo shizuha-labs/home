@@ -23,6 +23,7 @@ import {
   isEchoUtterance,
   echoTokenOverlap,
   readyToFlushSpokenSentences,
+  shouldSurfaceHeard,
   normalizeHeardName,
   useVoiceConversation,
   speakText,
@@ -179,6 +180,22 @@ describe('talk-seat transcript hygiene', () => {
     expect(isEchoUtterance('Ping Raunak about BKSG-48.', "Hey. I'm here. What do you need?", 8_000, spokenAt)).toBe(false)
   })
 
+  it('does not surface mute fragments or question paraphrases as heard text', () => {
+    expect(shouldSurfaceHeard("I'm", { muted: true }).ok).toBe(false)
+    expect(shouldSurfaceHeard("I'm", { muted: true }).reason).toBe('muted_fragment')
+    expect(shouldSurfaceHeard('What can I do?', {
+      lastSpoken: "Hey. I'm here. What do you need?",
+      spokenAt: 1_000,
+      now: 8_000,
+    }).ok).toBe(false)
+    expect(shouldSurfaceHeard('Ping Raunak about BKSG-48.', {
+      lastSpoken: "Hey. I'm here. What do you need?",
+      spokenAt: 1_000,
+      now: 8_000,
+    }).ok).toBe(true)
+    expect(shouldSurfaceHeard('check the s1 drive', { muted: true }).ok).toBe(true)
+  })
+
   it('holds the first Live flush until a real phrase lands', () => {
     expect(readyToFlushSpokenSentences('', 'Hey.', false)).toBe(false)
     expect(readyToFlushSpokenSentences('', "Hey. I'm here. What do you need?", false)).toBe(true)
@@ -277,6 +294,30 @@ describe('useVoiceConversation — utterance dedupe', () => {
     })
     expect(onUtterance).toHaveBeenCalledWith('check the s1 drive')
     expect(result.current.muted).toBe(true)
+  })
+
+  it('does not paint or send a paraphrased echo after she just spoke', async () => {
+    const onUtterance = vi.fn()
+    const { result } = renderHook(() => useVoiceConversation({ onUtterance }))
+    act(() => {
+      result.current.startCall()
+    })
+    act(() => {
+      result.current.beginSpeak("Hey. I'm here. What do you need?")
+    })
+    await act(async () => {
+      await result.current.endSpeak()
+    })
+    const opts = startStreamingStt.mock.calls.at(-1)[0]
+    act(() => {
+      opts.onPartial?.('What can I do?')
+    })
+    expect(result.current.lastHeard).not.toMatch(/what can i do/i)
+    act(() => {
+      opts.onFinal?.('What can I do?')
+    })
+    expect(onUtterance).not.toHaveBeenCalled()
+    expect(result.current.lastHeard).not.toMatch(/what can i do/i)
   })
 
   it('mute discards a fragment like I\'m and does not send it', () => {

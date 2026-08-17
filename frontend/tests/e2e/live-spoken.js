@@ -240,8 +240,17 @@ function newTurnsForRole(before, now, role) {
   return added
 }
 
-function newUserTurns(before, now) {
+export function newUserTurns(before, now) {
   return newTurnsForRole(before, now, 'user')
+}
+
+/** After she talks, silence must not invent a user bubble. */
+export async function assertNoPhantomUserTurns(page, before, waitMs = 8000) {
+  await page.waitForTimeout(waitMs)
+  const after = await miniChatTurns(page)
+  const extra = newUserTurns(before, after)
+  expect(extra, `phantom user turns: ${JSON.stringify(extra.map((r) => r.text))}`).toEqual([])
+  return after
 }
 
 function newAgentTurns(before, now) {
@@ -468,7 +477,8 @@ export async function speakWithPauses(page, parts, gapMs = 800) {
 }
 
 export async function muteLive(page) {
-  await page.getByRole('button', { name: /^Mute$/ }).click()
+  const btn = page.getByTestId('hud-mute-button').or(page.getByRole('button', { name: /^Mute$/ }))
+  await btn.click()
   await expect(page.getByTestId('live-voice-state')).toHaveText(/Muted/i, { timeout: 5000 })
 }
 

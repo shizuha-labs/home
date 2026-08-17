@@ -39,6 +39,7 @@ import {
   waitHudLeavesSpeaking,
   waitUntilListening,
   assertSafeReply,
+  assertNoPhantomUserTurns,
 } from './live-spoken.js'
 
 const STATE = path.join(os.tmpdir(), `shizuha-spoken-qa-${process.pid}.json`)
@@ -117,6 +118,9 @@ test('spoken Live: realistic multi-turn investigation as the test user', async (
     expect(turn.heard, `heard as Nawa: ${turn.heard}`).not.toMatch(/\bNawa\b/i)
     expect(turn.heard, `did not hear Ena or the greeting: ${turn.heard}`).toMatch(/Ena|what's up|whats up|you there|live check/i)
     await waitHudLeavesSpeaking(page, 40000)
+    await waitUntilListening(page, 15000)
+    const afterGreet = await miniChatTurns(page)
+    await assertNoPhantomUserTurns(page, afterGreet, 8000)
     await snapshotSpoken(page, 'spoken-inv-01-greet')
   })
 

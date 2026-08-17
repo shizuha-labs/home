@@ -697,6 +697,21 @@ export function readyToFlushSpokenSentences(alreadySpoken, joined, ended) {
   return String(joined || '').replace(/\s+/g, ' ').trim().length >= FIRST_SPEAK_MIN_CHARS
 }
 
+/** One gate for HUD caption, compose echo, and send — same class as mute/echo drops. */
+export function shouldSurfaceHeard(heard, {
+  muted = false,
+  lastSpoken = '',
+  spokenAt = 0,
+  now = Date.now(),
+} = {}) {
+  const text = normalizeHeardName(String(heard || '').trim())
+  if (!text) return { ok: false, reason: 'empty', text: '' }
+  if (isGhostTranscript(text) || isTalkAckText(text)) return { ok: false, reason: 'ghost', text }
+  if (muted && !shouldCommitOnMute(text)) return { ok: false, reason: 'muted_fragment', text }
+  if (isEchoUtterance(text, lastSpoken, now, spokenAt)) return { ok: false, reason: 'echo', text }
+  return { ok: true, reason: '', text }
+}
+
 export function isDuplicateUtterance(next, prev, now, prevAt, windowMs = 2500) {
   const a = normalizeUtterance(next)
   const b = normalizeUtterance(prev)
@@ -883,28 +898,37 @@ export function useVoiceConversation({ onUtterance } = {}) {
         },
         onPartial: (text) => {
           if (!activeRef.current) return
-          const heard = normalizeHeardName(String(text || '').trim())
-          if (heard && !isGhostTranscript(heard) && !isTalkAckText(heard)) setLastHeard(heard)
+          const surface = shouldSurfaceHeard(text, {
+            muted: mutedRef.current,
+            lastSpoken: lastSpokenRef.current.text,
+            spokenAt: lastSpokenRef.current.at,
+          })
+          if (!surface.ok) {
+            if (surface.reason === 'echo' || surface.reason === 'muted_fragment') setLastHeard('')
+            return
+          }
+          setLastHeard(surface.text)
         },
         onFinal: (text) => {
           streamingRef.current = null
           if (!activeRef.current || !text.trim()) return
-          const heard = normalizeHeardName(text.trim())
           const now = Date.now()
-          if (isGhostTranscript(heard) || isTalkAckText(heard)) {
+          const surface = shouldSurfaceHeard(text, {
+            muted: mutedRef.current,
+            lastSpoken: lastSpokenRef.current.text,
+            spokenAt: lastSpokenRef.current.at,
+            now,
+          })
+          if (!surface.ok) {
+            if (surface.reason === 'muted_fragment') emitLiveTrace('stt.muted_drop', { text: surface.text })
+            if (surface.reason === 'echo') emitLiveTrace('stt.echo_drop', { text: surface.text })
+            if (surface.reason === 'echo' || surface.reason === 'muted_fragment' || surface.reason === 'ghost') {
+              setLastHeard('')
+            }
             utteranceDelivered = true
             return
           }
-          if (mutedRef.current && !shouldCommitOnMute(heard)) {
-            emitLiveTrace('stt.muted_drop', { text: heard })
-            utteranceDelivered = true
-            return
-          }
-          if (isEchoUtterance(heard, lastSpokenRef.current.text, now, lastSpokenRef.current.at)) {
-            emitLiveTrace('stt.echo_drop', { text: heard })
-            utteranceDelivered = true
-            return
-          }
+          const heard = surface.text
           if (isDuplicateUtterance(heard, lastUtteranceRef.current.text, now, lastUtteranceRef.current.at)) {
             utteranceDelivered = true
             return

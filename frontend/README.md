@@ -53,10 +53,13 @@ npm test
 The bugs that shipped half-baked (leftover `Replied.`, Keyterms ghosts, HUD stuck on Speaking, unscrollable mini-chat, Live dying on Dashboard / Open full chat) are only caught by driving **https://shizuha.com** as a logged-in user.
 
 ```bash
+npm run test:e2e:live:qa
 npm run test:e2e:live
 ```
 
-That sets `SHIZUHA_LIVE_E2E=1` and `BASE_URL=https://shizuha.com`, then runs `tests/e2e/live-homepage-talk.spec.js`. Credentials come from `LIVE_QA_USER` / `LIVE_QA_PASS` or `~/.shizuha/live-qa-creds` (two lines: username, password) and talk to **Yuna**, not the operator Ena thread. Do not commit or print the password. Operator-path chrome is opt-in via `SHIZUHA_LIVE_OPERATOR_E2E=1`.
+`test:e2e:live:qa` is the class pack that should have caught the operator Live bugs (Start Live replay, HUD mute sending `I'm`, silence after her reply inventing `What can I do?`). `test:e2e:live` also runs homepage talk, Voice replies off, and live-trace.
+
+Both set `SHIZUHA_LIVE_E2E=1` and `BASE_URL=https://shizuha.com`. Credentials come from `LIVE_QA_USER` / `LIVE_QA_PASS` or `~/.shizuha/live-qa-creds` (two lines: username, password) and talk to **Ena QA / Yuna**, not the operator Ena thread. Do not commit or print the password. Operator-path chrome is opt-in via `SHIZUHA_LIVE_OPERATOR_E2E=1`.
 
 The live suite logs in through `/id/login?continue=/`, starts Live, types a unique turn, waits for a **new** agent reply, and asserts the same surfaces the operator sees:
 
