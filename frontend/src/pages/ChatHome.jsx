@@ -30,6 +30,7 @@ import { getAccessToken, handleUnauthorized } from '../utils/auth'
 import { emitLiveTrace, setLiveTraceContext } from '../utils/liveTrace'
 import { conversationPeerName } from '../utils/conversationLabel'
 import { conversationIdFromPath, isHomeAppPath, nextThreadAfterRouteChange } from '../utils/conversationRoute'
+import { isFreshAgentPersist, messageSpeakKey, persistAgeMs } from '../utils/voicePersist'
 
 function getAuthToken() {
   return getAccessToken()
@@ -122,6 +123,7 @@ function ChatHomeInner() {
   const [ttsSpeed, setTtsSpeed] = useState(() => readTtsSpeed())
   const cycleTalkSpeed = useCallback(() => setTtsSpeed(cycleTtsSpeed()), [])
   const lastSpokenIdRef = useRef(null)
+  const primedVoiceConvRef = useRef(null)
   const [showApps, setShowApps] = useState(false)
   const [showNewChat, setShowNewChat] = useState(false)
   const [showCommandPalette, setShowCommandPalette] = useState(false)
@@ -471,13 +473,32 @@ function ChatHomeInner() {
   }, [beginSpeak, streamingByConv, speakReplies, callActive, voiceConvId, activeConversationId])
 
   // Persist is the end of the turn. Speak only leftover text. Re-listen once.
+  // First eligibility on a thread absorbs existing history so Start Live does
+  // not replay an hours-old last reply. A persist that just landed still speaks.
   useEffect(() => {
     if (!voiceConvId || activeConversationId !== voiceConvId) return
+    if (primedVoiceConvRef.current !== voiceConvId) {
+      primedVoiceConvRef.current = voiceConvId
+      lastSpokenIdRef.current = null
+    }
     const list = Array.isArray(messages) ? messages : []
+    if (!list.length) return
     const last = list[list.length - 1]
-    if (!last || last.sender_id === user?.id) return
-    const key = last.id || last.client_message_id
-    if (!key || lastSpokenIdRef.current === key) return
+    const key = messageSpeakKey(last)
+    if (!key) return
+    if (lastSpokenIdRef.current == null) {
+      const agent = last.sender_id === user?.id ? null : last
+      if (!agent || !isFreshAgentPersist(agent)) {
+        lastSpokenIdRef.current = key
+        emitLiveTrace('chat.persist.prime', {
+          key,
+          age_ms: agent ? persistAgeMs(agent) : -1,
+        })
+        return
+      }
+    }
+    if (last.sender_id === user?.id) return
+    if (lastSpokenIdRef.current === key) return
     lastSpokenIdRef.current = key
     if (isTalkAckText(last.content)) {
       lastLiveStreamRef.current = ''

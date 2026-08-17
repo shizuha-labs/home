@@ -38,7 +38,11 @@ vi.mock('../hooks/useVoice', () => ({
   speakText: Object.assign(vi.fn(), { stop: vi.fn() }),
   speakDelta: vi.fn(),
   nextSpokenSentences: () => ({ sentences: [], spoken: '' }),
-  spokenCovers: () => true,
+  spokenCovers: (full, spoken) => {
+    const a = String(full || '').replace(/\s+/g, ' ').trim()
+    const b = String(spoken || '').replace(/\s+/g, ' ').trim()
+    return !!b && a.startsWith(b)
+  },
   waitSpeakIdle: async () => {},
   finishSpeakStream: vi.fn(),
   stripSpeakableMarkup: (s) => s,
@@ -169,6 +173,8 @@ describe('ChatHome Live chrome', () => {
     voice.beginSpeak.mockClear()
     voice.startCall.mockClear()
     voice.endCall.mockClear()
+    voice.notifyReply.mockClear()
+    speakText.mockClear()
     speakText.stop.mockClear()
     chat.messages = []
     chat.streamingByConv = {}
@@ -229,6 +235,91 @@ describe('ChatHome Live chrome', () => {
     expect(screen.getByTestId('message-list').textContent).toMatch(/hey\. i'm here/i)
     expect(screen.getByTestId('message-list').textContent).not.toMatch(/replied/i)
     expect(screen.getByTestId('message-list').textContent).not.toMatch(/keyterms/i)
+  })
+
+  it('does not replay an hours-old last reply when Live starts, then speaks a new persist', () => {
+    // Production order: open thread with last agent turn from hours ago →
+    // Start Live with no new utterance → must stay silent. A persist that
+    // lands after start still speaks.
+    chat.messages = [
+      {
+        id: 'a1',
+        sender_id: 2,
+        sender_name: 'Ena',
+        content: "Let's do BKSG-48.",
+        created_at: '2026-08-16T16:46:26Z',
+      },
+    ]
+    voice.callState = 'idle'
+    render(<PersistHarness />)
+    act(() => {
+      screen.getByTestId('home-live-button').click()
+    })
+    expect(voice.startCall).toHaveBeenCalled()
+    expect(speakText).not.toHaveBeenCalled()
+    expect(voice.notifyReply).not.toHaveBeenCalled()
+
+    voice.callState = 'listening'
+    voice.notifyReply.mockClear()
+    speakText.mockClear()
+    chat.messages = [
+      ...chat.messages,
+      {
+        id: 'a2',
+        sender_id: 2,
+        sender_name: 'Ena',
+        content: 'Here. I just said this.',
+        created_at: new Date().toISOString(),
+      },
+    ]
+    act(() => {
+      PersistHarness.tick()
+    })
+    expect(voice.notifyReply).toHaveBeenCalledWith('Here. I just said this.')
+    expect(speakText).not.toHaveBeenCalled()
+  })
+
+  it('speaks a reply that just landed when Live starts', () => {
+    chat.messages = [
+      {
+        id: 'a1',
+        sender_id: 2,
+        sender_name: 'Ena',
+        content: 'Just said this.',
+        created_at: new Date().toISOString(),
+      },
+    ]
+    voice.callState = 'idle'
+    render(<PersistHarness />)
+    act(() => {
+      screen.getByTestId('home-live-button').click()
+    })
+    expect(speakText.mock.calls[0]?.[0] || voice.notifyReply.mock.calls[0]?.[0])
+      .toBe('Just said this.')
+  })
+
+  it('does not replay history that hydrates after Live starts', () => {
+    chat.messages = []
+    voice.callState = 'idle'
+    render(<PersistHarness />)
+    act(() => {
+      screen.getByTestId('home-live-button').click()
+    })
+    voice.callState = 'listening'
+    chat.messages = [
+      {
+        id: 'a1',
+        sender_id: 2,
+        sender_name: 'Ena',
+        content: "Let's do BKSG-48.",
+        created_at: '2026-08-16T16:46:26Z',
+      },
+    ]
+    act(() => {
+      PersistHarness.tick()
+    })
+    expect(speakText).not.toHaveBeenCalled()
+    expect(voice.notifyReply).not.toHaveBeenCalled()
   })
 
   it('ends speak after a Replied. persist on the same mount so Live does not freeze on Speaking', () => {
