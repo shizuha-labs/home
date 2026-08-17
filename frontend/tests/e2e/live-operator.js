@@ -84,13 +84,17 @@ export async function selectHomeAgent(page, username = liveAgentUsername()) {
       }
     }
     await expect(picker).toContainText(label, { timeout: 20000 })
+    await page.keyboard.press('Escape')
   }
-  // Open the existing DM so Live sends on the thread even if fleet search
-  // is staff-only on the current deploy.
-  const thread = page.getByRole('button', { name: username === 'enaqa' ? /Ena QA/i : new RegExp(username, 'i') }).first()
-  await expect(thread).toBeVisible({ timeout: 20000 })
-  await thread.click()
-  await page.waitForURL(/\/c\//, { timeout: 15000 })
+  // Open the existing DM when the rail shows it. Homepage Live can stay on
+  // `/` once the picker already names the target agent.
+  const rail = page.getByRole('button', {
+    name: username === 'enaqa' ? /^Ena QA$/i : new RegExp(`^${username}$`, 'i'),
+  }).first()
+  if (await rail.count()) {
+    await rail.click()
+    await page.waitForURL(/\/c\//, { timeout: 8000 }).catch(() => {})
+  }
 }
 
 export async function loginHome(page) {
