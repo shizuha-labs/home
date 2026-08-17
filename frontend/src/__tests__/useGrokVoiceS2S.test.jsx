@@ -203,7 +203,7 @@ describe('useGrokVoiceS2S', () => {
     expect(result.current.isCallActive()).toBe(false)
   })
 
-  it('hands an exhausted realtime outage back to cascade', async () => {
+  it('keeps reconnecting a live S2S call instead of giving up after a few drops', async () => {
     vi.useFakeTimers()
     const onFallback = vi.fn(() => true)
     const { result } = renderHook(() => useGrokVoiceS2S({
@@ -213,17 +213,15 @@ describe('useGrokVoiceS2S', () => {
       onFallback,
     }))
     await act(async () => { result.current.startCall() })
-    for (let i = 0; i < 6; i += 1) {
+    const before = FakeSocket.instances.length
+    for (let i = 0; i < 5; i += 1) {
       const socket = FakeSocket.instances.at(-1)
       await act(async () => { socket.open(); socket.onclose?.() })
       await act(async () => { vi.advanceTimersByTime(8000) })
     }
-    expect(onFallback).toHaveBeenCalledWith(
-      'stream_unavailable',
-      expect.stringMatching(/temporarily unavailable/i),
-    )
-    expect(result.current.callState).toBe('idle')
-    expect(result.current.callError).toBe(null)
+    expect(onFallback).not.toHaveBeenCalled()
+    expect(result.current.isCallActive()).toBe(true)
+    expect(FakeSocket.instances.length).toBeGreaterThan(before)
     vi.useRealTimers()
   })
 })

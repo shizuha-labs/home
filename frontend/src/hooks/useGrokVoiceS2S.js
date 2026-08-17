@@ -8,20 +8,18 @@ import {
   speakText,
   shouldSurfaceHeard,
   unmuteSpeakOutput,
+  interruptSpeakOutput,
   isSpeakOutputMuted,
   warmSpeakOutput,
   remainingSpeakMs,
   SPEAK_RELEASE_MS,
   VOICE_STREAM_BASE_BACKOFF_MS,
-  VOICE_STREAM_MAX_RETRIES,
 } from './useVoice'
 
 const MIC_ERROR_MESSAGES = {
   no_mic: 'No microphone found. Connect a mic or type instead.',
   permission_denied: 'Microphone permission denied. Allow mic access in your browser settings, then try again.',
 }
-
-const STREAM_UNAVAILABLE_MESSAGE = 'Voice is temporarily unavailable. Try again in a moment.'
 
 function toPcm16(samples) {
   const pcm = new Int16Array(samples.length)
@@ -78,6 +76,9 @@ export function useGrokVoiceS2S({
   const holdMicRef = useRef(false)
   const lastSpokenRef = useRef({ text: '', at: 0 })
   const heardAudioRef = useRef(false)
+  const droppedReplyRef = useRef('')
+  const fallbackTimerRef = useRef(null)
+  const pingTimerRef = useRef(null)
   const releaseTimerRef = useRef(null)
   const optsRef = useRef({ conversationId, agentUsername, model, messages, userId })
   const onFallbackRef = useRef(onFallback)
@@ -93,6 +94,14 @@ export function useGrokVoiceS2S({
     if (releaseTimerRef.current != null) {
       window.clearTimeout(releaseTimerRef.current)
       releaseTimerRef.current = null
+    }
+    if (fallbackTimerRef.current != null) {
+      window.clearTimeout(fallbackTimerRef.current)
+      fallbackTimerRef.current = null
+    }
+    if (pingTimerRef.current != null) {
+      window.clearInterval(pingTimerRef.current)
+      pingTimerRef.current = null
     }
   }, [])
 
@@ -241,6 +250,11 @@ export function useGrokVoiceS2S({
         streamAttemptsRef.current = 0
         if (!mutedRef.current) setCallState('listening')
         emitLiveTrace('s2s.ready', { model: msg.model || opts.model || '' })
+        if (pingTimerRef.current == null) {
+          pingTimerRef.current = window.setInterval(() => {
+            sendJson({ type: 'ping' })
+          }, 20000)
+        }
         return
       }
       if (type === 'error') {
@@ -259,7 +273,7 @@ export function useGrokVoiceS2S({
       if (type === 'speech_started' || type === 'input_audio_buffer.speech_started') {
         // Echo of her speaker is not barge-in. Mic is already held while she talks.
         if (holdMicRef.current || mutedRef.current) return
-        speakText.stop()
+        interruptSpeakOutput()
         setCallState('listening')
         return
       }
@@ -298,6 +312,8 @@ export function useGrokVoiceS2S({
         setLastHeard(surface.text)
         emitLiveTrace('s2s.user', { text: surface.text })
         heardAudioRef.current = false
+        droppedReplyRef.current = ''
+        setLastReply('')
         if (!mutedRef.current && !holdMicRef.current) setCallState('thinking')
         return
       }
@@ -324,16 +340,26 @@ export function useGrokVoiceS2S({
         }
         holdMicForSpeak(text)
         if (text && speakEnabledRef.current && !heardAudioRef.current) {
-          emitLiveTrace('s2s.tts_fallback', { text })
-          unmuteSpeakOutput()
-          void speakText(text)
+          if (fallbackTimerRef.current != null) window.clearTimeout(fallbackTimerRef.current)
+          fallbackTimerRef.current = window.setTimeout(() => {
+            fallbackTimerRef.current = null
+            if (!activeRef.current || heardAudioRef.current || !speakEnabledRef.current) return
+            emitLiveTrace('s2s.tts_fallback', { text })
+            unmuteSpeakOutput()
+            void speakText(text)
+          }, 700)
         }
         return
       }
       if (type === 'response.output_audio.delta' || type === 'response.audio.delta') {
         heardAudioRef.current = true
+        if (fallbackTimerRef.current != null) {
+          window.clearTimeout(fallbackTimerRef.current)
+          fallbackTimerRef.current = null
+        }
         holdMicForSpeak()
         if (!speakEnabledRef.current) {
+          droppedReplyRef.current = lastSpokenRef.current.text || droppedReplyRef.current
           emitLiveTrace('s2s.audio_drop', { reason: 'speak_off' })
           return
         }
@@ -411,7 +437,7 @@ export function useGrokVoiceS2S({
         }
       }
     })()
-  }, [failCall, holdMicForSpeak, releaseMicAfterSpeak, teardown])
+  }, [failCall, holdMicForSpeak, releaseMicAfterSpeak, sendJson, teardown])
   connectRef.current = connectSession
 
   const scheduleRetry = useCallback(() => {
@@ -419,18 +445,15 @@ export function useGrokVoiceS2S({
     const failed = streamAttemptsRef.current + 1
     streamAttemptsRef.current = failed
     teardown()
-    if (failed > VOICE_STREAM_MAX_RETRIES) {
-      failCall('stream_unavailable', STREAM_UNAVAILABLE_MESSAGE, true)
-      return
-    }
     setCallState('connecting')
-    const delay = VOICE_STREAM_BASE_BACKOFF_MS * (2 ** (failed - 1))
+    const delay = Math.min(8000, VOICE_STREAM_BASE_BACKOFF_MS * (2 ** Math.min(failed - 1, 4)))
+    emitLiveTrace('s2s.reconnect', { attempt: failed, delay_ms: delay })
     if (retryTimerRef.current != null) window.clearTimeout(retryTimerRef.current)
     retryTimerRef.current = window.setTimeout(() => {
       retryTimerRef.current = null
       if (activeRef.current) connectRef.current?.()
     }, delay)
-  }, [failCall, teardown])
+  }, [teardown])
   retryRef.current = scheduleRetry
 
   const startCall = useCallback(() => {
@@ -504,8 +527,18 @@ export function useGrokVoiceS2S({
 
   useEffect(() => {
     if (!activeRef.current) return
-    if (!speakEnabled) cancelSpeak()
-  }, [speakEnabled, cancelSpeak])
+    if (!speakEnabled) {
+      cancelSpeak()
+      return
+    }
+    unmuteSpeakOutput()
+    const dropped = droppedReplyRef.current
+    if (!dropped) return
+    droppedReplyRef.current = ''
+    emitLiveTrace('s2s.replay', { text: dropped })
+    holdMicForSpeak(dropped)
+    void speakText(dropped)
+  }, [speakEnabled, cancelSpeak, holdMicForSpeak])
 
   useEffect(() => () => {
     activeRef.current = false

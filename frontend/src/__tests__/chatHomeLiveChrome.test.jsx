@@ -410,7 +410,7 @@ describe('ChatHome Live chrome', () => {
     expect(voice.cancelSpeak).toHaveBeenCalled()
     expect(voice.endSpeak).not.toHaveBeenCalled()
     expect(screen.getByTestId('thread-speak-button')).toHaveAttribute('aria-pressed', 'false')
-    expect(screen.getByTestId('thread-speak-button')).toHaveAttribute('title', 'Voice replies off')
+    expect(screen.getByTestId('thread-speak-button')).toHaveAttribute('title', 'Her voice is muted — click to hear')
   })
 
   it('cuts in-flight TTS from the HUD Voice replies button', () => {
@@ -423,7 +423,7 @@ describe('ChatHome Live chrome', () => {
     expect(speakText.stop).toHaveBeenCalled()
     expect(voice.cancelSpeak).toHaveBeenCalled()
     expect(screen.getByTestId('hud-speak-button')).toHaveAttribute('aria-pressed', 'false')
-    expect(screen.getByTestId('hud-speak-button')).toHaveAttribute('title', 'Voice replies off')
+    expect(screen.getByTestId('hud-speak-button')).toHaveAttribute('title', 'Her voice is muted — click to hear')
   })
 
   it('cuts in-flight TTS from the mini-chat Voice replies button', () => {
@@ -437,7 +437,7 @@ describe('ChatHome Live chrome', () => {
     expect(speakText.stop).toHaveBeenCalled()
     expect(voice.cancelSpeak).toHaveBeenCalled()
     expect(screen.getByTestId('mini-speak-button')).toHaveAttribute('aria-pressed', 'false')
-    expect(screen.getByTestId('mini-speak-button')).toHaveAttribute('title', 'Voice replies off')
+    expect(screen.getByTestId('mini-speak-button')).toHaveAttribute('title', 'Her voice is muted — click to hear')
   })
 
   it('starts cascade for Ena even when a leftover Hina thread exists', () => {

@@ -69,6 +69,31 @@ test.afterAll(() => {
   try { fs.unlinkSync(STATE) } catch { /* tmp */ }
 })
 
+async function waitAudible(page, timeout = 50000) {
+  const deadline = Date.now() + timeout
+  let heard = ''
+  let remaining = 0
+  let speakerMuted = true
+  while (Date.now() < deadline) {
+    heard = await hudCaption(page)
+    remaining = await page.evaluate(() => window.__shizuhaSpeakOutput?.()?.remainingMs || 0)
+    speakerMuted = await page.evaluate(() => window.__shizuhaSpeakOutput?.()?.muted === true)
+    if (remaining > 80 && !speakerMuted) return { heard, remaining, speakerMuted }
+    await page.waitForTimeout(300)
+  }
+  return { heard, remaining, speakerMuted }
+}
+
+async function waitPlaybackSettle(page, timeout = 20000) {
+  const deadline = Date.now() + timeout
+  while (Date.now() < deadline) {
+    const remaining = await page.evaluate(() => window.__shizuhaSpeakOutput?.()?.remainingMs || 0)
+    const state = (await hudState(page)).state
+    if (remaining < 40 && state !== 'speaking') return
+    await page.waitForTimeout(250)
+  }
+}
+
 test('Hina Live is native Voice and she answers a spoken turn with audio', async ({ page }) => {
   await installSpokenMic(page)
   await page.goto('/')
@@ -95,24 +120,21 @@ test('Hina Live is native Voice and she answers a spoken turn with audio', async
   const mutedAfterStart = await page.evaluate(() => window.__shizuhaSpeakOutput?.()?.muted)
   expect(mutedAfterStart, 'speaker must not stay latched muted after Live start').toBe(false)
 
-  await speakLikeHuman(page, 'Hey Hina, say your name in one short sentence.')
-  const deadline = Date.now() + 50000
-  let heard = ''
-  let remaining = 0
-  let speakerMuted = true
-  let audible = false
-  while (Date.now() < deadline) {
-    heard = await hudCaption(page)
-    remaining = await page.evaluate(() => window.__shizuhaSpeakOutput?.()?.remainingMs || 0)
-    speakerMuted = await page.evaluate(() => window.__shizuhaSpeakOutput?.()?.muted === true)
-    if (remaining > 80 && !speakerMuted) {
-      audible = true
-      break
-    }
-    await page.waitForTimeout(300)
-  }
+  await speakLikeHuman(page, 'Hey, can you hear me?')
+  const first = await waitAudible(page)
   await shot(page, 'hina-s2s-after-speak')
-  expect(audible, `Hina never produced audible audio. hud=${heard} remaining=${remaining} muted=${speakerMuted}`).toBeTruthy()
+  expect(
+    first.remaining > 80 && !first.speakerMuted,
+    `first reply not audible. hud=${first.heard} remaining=${first.remaining} muted=${first.speakerMuted}`,
+  ).toBeTruthy()
+  await waitPlaybackSettle(page)
+  await speakLikeHuman(page, 'What is two plus two? Say the number only.')
+  const second = await waitAudible(page)
+  await shot(page, 'hina-s2s-second-turn')
+  expect(
+    second.remaining > 80 && !second.speakerMuted,
+    `follow-up reply not audible. hud=${second.heard} remaining=${second.remaining} muted=${second.speakerMuted}`,
+  ).toBeTruthy()
 
   const trace = await page.evaluate(async () => {
     const token = window.localStorage.getItem('shizuha_access_token') || ''

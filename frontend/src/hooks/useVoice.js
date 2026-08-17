@@ -175,6 +175,20 @@ export function unmuteSpeakOutput() {
   }
 }
 
+/** Stop in-flight audio without latching mute. Barge-in must not kill the next play. */
+export function interruptSpeakOutput() {
+  speakEpoch += 1
+  stopGaplessPlayback()
+  stopSpeakStream()
+  if (currentAudio) {
+    try { currentAudio.pause() } catch { /* noop */ }
+    currentAudio = null
+  }
+  if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel()
+  speakQueue = Promise.resolve()
+  unmuteSpeakOutput()
+}
+
 /** Speak `text` aloud — self-hosted TTS when available, speechSynthesis
  * otherwise. Returns a promise that resolves when playback FINISHES (so a
  * voice-conversation loop can resume listening after the reply is spoken). */
@@ -349,13 +363,37 @@ function isPcmMime(mime) {
   return t.includes('pcm') || t.includes('l16') || t.includes('raw')
 }
 
+let keepAliveOsc = null
+
+function ensureKeepAlive(ctx) {
+  if (!ctx || keepAliveOsc) return
+  try {
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    gain.gain.value = 0.00001
+    osc.frequency.value = 20
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+    osc.start()
+    keepAliveOsc = osc
+  } catch { /* optional */ }
+}
+
 function ensureGaplessCtx() {
   const Ctx = typeof AudioContext !== 'undefined'
     ? AudioContext
     : (typeof window !== 'undefined' ? window.webkitAudioContext : null)
   if (!Ctx) return null
-  if (!gaplessCtx) gaplessCtx = new Ctx({ sampleRate: PCM_SAMPLE_RATE })
+  if (!gaplessCtx) {
+    gaplessCtx = new Ctx({ sampleRate: PCM_SAMPLE_RATE })
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') unmuteSpeakOutput()
+      })
+    }
+  }
   if (!speakMuted && gaplessCtx.state === 'suspended') void gaplessCtx.resume()
+  ensureKeepAlive(gaplessCtx)
   return gaplessCtx
 }
 
@@ -605,6 +643,7 @@ export function resetSpeakOutputForTests() {
   }
   gaplessCtx = null
   speakGain = null
+  keepAliveOsc = null
   speakQueue = Promise.resolve()
 }
 

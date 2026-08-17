@@ -829,9 +829,9 @@ function ChatHomeInner() {
                 type="button"
                 data-testid="thread-speak-button"
                 onClick={toggleSpeakReplies}
-                title={speakReplies ? 'Voice replies on' : 'Voice replies off'}
+                title={speakReplies ? 'Hearing her — click to mute' : 'Her voice is muted — click to hear'}
                 aria-pressed={speakReplies}
-                aria-label={speakReplies ? 'Voice replies on' : 'Voice replies off'}
+                aria-label={speakReplies ? 'Mute her voice' : 'Hear her voice'}
                 className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors shadow-sm ${
                   speakReplies
                     ? 'bg-brand-50 text-brand-600 dark:bg-brand-950/40 dark:text-brand-400'

@@ -4,6 +4,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  interruptSpeakOutput,
   isSpeakOutputMuted,
   playAudioChunk,
   playPcmChunk,
@@ -199,6 +200,17 @@ describe('TTS stop / Voice replies off', () => {
     unmuteSpeakOutput()
     void playPcmChunk(new Uint8Array(16), 24000, 1)
     expect(isSpeakOutputMuted()).toBe(false)
+    expect(started.length).toBeGreaterThan(before)
+  })
+
+  it('barge-in interrupt does not latch the speaker mute', async () => {
+    const { started } = installFakeAudioContext()
+    resetSpeakOutputForTests()
+    void playPcmChunk(new Uint8Array(16), 24000, 1)
+    interruptSpeakOutput()
+    expect(isSpeakOutputMuted()).toBe(false)
+    const before = started.length
+    void playPcmChunk(new Uint8Array(16), 24000, 1)
     expect(started.length).toBeGreaterThan(before)
   })
 })

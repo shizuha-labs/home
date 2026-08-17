@@ -748,7 +748,7 @@ describe('MiniShizuhaChat — voice failure surface', () => {
     expect(hud).toHaveClass('pointer-events-none')
     expect(hud.className).toMatch(/top-\[7\.5rem\]/)
     expect(hud.className).not.toMatch(/\binset-0\b/)
-    expect(screen.getByTestId('hud-speak-button')).toHaveAttribute('title', 'Voice replies on')
+    expect(screen.getByTestId('hud-speak-button')).toHaveAttribute('title', 'Hearing her — click to mute')
     expect(screen.getByRole('region', { name: /live voice/i })).toHaveClass('bg-gray-950')
     expect(screen.getByRole('region', { name: /live voice/i })).toBeInTheDocument()
     expect(screen.queryByRole('dialog')).toBeNull()
