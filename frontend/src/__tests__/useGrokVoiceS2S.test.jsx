@@ -155,6 +155,30 @@ describe('useGrokVoiceS2S', () => {
     vi.useRealTimers()
   })
 
+  it('speaks a text-only S2S reply after the speaker latch', async () => {
+    const { speakText } = await import('../hooks/useVoice')
+    const spy = vi.spyOn(speakText, 'stop')
+    const { result } = renderHook(() => useGrokVoiceS2S({
+      conversationId: 'conv-1',
+      agentUsername: 'hina',
+      model: 'cortex/grok-voice-think-fast-2.0',
+    }))
+    await act(async () => { result.current.startCall() })
+    const socket = FakeSocket.instances.at(-1)
+    await act(async () => { socket.open() })
+    await act(async () => { socket.emit(JSON.stringify({ type: 'ready' })) })
+    await act(async () => {
+      socket.emit(JSON.stringify({ type: 'speech_started' }))
+      socket.emit(JSON.stringify({
+        type: 'response.output_text.done',
+        text: "I'm Hina.",
+      }))
+    })
+    expect(result.current.lastReply).toBe("I'm Hina.")
+    expect(result.current.callState).toBe('speaking')
+    spy.mockRestore()
+  })
+
   it('hands a non-voice seat back to cascade instead of showing an error HUD', async () => {
     const onFallback = vi.fn(() => true)
     const { result } = renderHook(() => useGrokVoiceS2S({

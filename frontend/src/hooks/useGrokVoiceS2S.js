@@ -77,6 +77,7 @@ export function useGrokVoiceS2S({
   const retryRef = useRef(null)
   const holdMicRef = useRef(false)
   const lastSpokenRef = useRef({ text: '', at: 0 })
+  const heardAudioRef = useRef(false)
   const releaseTimerRef = useRef(null)
   const optsRef = useRef({ conversationId, agentUsername, model, messages, userId })
   const onFallbackRef = useRef(onFallback)
@@ -228,6 +229,7 @@ export function useGrokVoiceS2S({
     socket.onmessage = (event) => {
       if (cancelled || !activeRef.current) return
       if (typeof event.data !== 'string') {
+        heardAudioRef.current = true
         if (speakEnabledRef.current) playS2SPcm(new Uint8Array(event.data))
         else emitLiveTrace('s2s.audio_drop', { reason: 'speak_off', via: 'binary' })
         return
@@ -295,6 +297,7 @@ export function useGrokVoiceS2S({
         }
         setLastHeard(surface.text)
         emitLiveTrace('s2s.user', { text: surface.text })
+        heardAudioRef.current = false
         if (!mutedRef.current && !holdMicRef.current) setCallState('thinking')
         return
       }
@@ -320,9 +323,15 @@ export function useGrokVoiceS2S({
           emitLiveTrace('s2s.assistant', { text })
         }
         holdMicForSpeak(text)
+        if (text && speakEnabledRef.current && !heardAudioRef.current) {
+          emitLiveTrace('s2s.tts_fallback', { text })
+          unmuteSpeakOutput()
+          void speakText(text)
+        }
         return
       }
       if (type === 'response.output_audio.delta' || type === 'response.audio.delta') {
+        heardAudioRef.current = true
         holdMicForSpeak()
         if (!speakEnabledRef.current) {
           emitLiveTrace('s2s.audio_drop', { reason: 'speak_off' })
@@ -430,6 +439,7 @@ export function useGrokVoiceS2S({
     mutedRef.current = false
     holdMicRef.current = false
     lastSpokenRef.current = { text: '', at: 0 }
+    heardAudioRef.current = false
     streamAttemptsRef.current = 0
     beginLiveCall()
     emitLiveTrace('call.start', { transport: 's2s' })

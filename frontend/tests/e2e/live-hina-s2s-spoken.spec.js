@@ -96,25 +96,23 @@ test('Hina Live is native Voice and she answers a spoken turn with audio', async
   expect(mutedAfterStart, 'speaker must not stay latched muted after Live start').toBe(false)
 
   await speakLikeHuman(page, 'Hey Hina, say your name in one short sentence.')
-  const deadline = Date.now() + 45000
+  const deadline = Date.now() + 50000
   let heard = ''
-  let spoke = false
   let remaining = 0
   let speakerMuted = true
+  let audible = false
   while (Date.now() < deadline) {
-    const now = await hudState(page)
     heard = await hudCaption(page)
     remaining = await page.evaluate(() => window.__shizuhaSpeakOutput?.()?.remainingMs || 0)
     speakerMuted = await page.evaluate(() => window.__shizuhaSpeakOutput?.()?.muted === true)
-    if (now.state === 'speaking' || remaining > 80 || /hina/i.test(heard)) {
-      spoke = true
+    if (remaining > 80 && !speakerMuted) {
+      audible = true
       break
     }
     await page.waitForTimeout(300)
   }
   await shot(page, 'hina-s2s-after-speak')
-  expect(spoke, `Hina never spoke back. hud=${heard}`).toBeTruthy()
-  expect(speakerMuted, 'speaker was still latched muted while she should talk').toBeFalsy()
+  expect(audible, `Hina never produced audible audio. hud=${heard} remaining=${remaining} muted=${speakerMuted}`).toBeTruthy()
 
   const trace = await page.request.get('/api/home/live-trace?include_messages=0&limit=80')
   expect(trace.ok()).toBeTruthy()
