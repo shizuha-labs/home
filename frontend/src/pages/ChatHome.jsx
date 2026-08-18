@@ -24,7 +24,7 @@ import {
 } from '../hooks/useHomeAgentPreference'
 import { useVoiceInput, useVoiceConversation, speakText, speakDelta, nextSpokenSentences, readyToFlushSpokenSentences, leftoverAfterStream, isTalkAckText, isGhostTranscript, readTtsSpeed, cycleTtsSpeed, setUserSpeakEnabled } from '../hooks/useVoice'
 import { useGrokVoiceS2S } from '../hooks/useGrokVoiceS2S'
-import { pickActiveLiveVoice, readRememberedLiveS2S, resolveLiveVoiceTarget } from '../utils/grokVoice'
+import { mergePendingHeard, pickActiveLiveVoice, readRememberedLiveS2S, resolveLiveVoiceTarget } from '../utils/grokVoice'
 import TtsSpeedButton from '../components/assistant/TtsSpeedButton'
 import { useHomeSummary } from '../hooks/useHomeSummary'
 import { useHomeActivity } from '../hooks/useHomeActivity'
@@ -110,6 +110,7 @@ function ChatHomeInner() {
     isLoadingMessages,
     loadMore,
     sendMessage,
+    reloadMessages,
     streamingByConv,
   } = useConnectChat()
 
@@ -461,10 +462,15 @@ function ChatHomeInner() {
     () => awaitingVoicePath || s2sVoice.isCallActive() || cascadeVoice.isCallActive(),
     [awaitingVoicePath, cascadeVoice, s2sVoice],
   )
-  // Streaming STT types into the compose box as the caller speaks.
+  // Active = mid-call only. 'error' is a terminal surface with guidance/retry, not "on call".
+  const hudCallState = awaitingVoicePath && (callState === 'idle' || !callState) ? 'connecting' : callState
+  const callActive = awaitingVoicePath || (callState !== 'idle' && callState !== 'error')
+  // Cascade still types STT into compose (it may send from there). S2S
+  // history is the SoT — do not leave a draft that looks like an unsent turn.
   useEffect(() => {
+    if (s2sEnabled && callActive) return
     if (callState === 'listening' && lastHeard && !muted) setInputValue(lastHeard)
-  }, [callState, lastHeard, muted])
+  }, [callState, lastHeard, muted, s2sEnabled, callActive])
   const lastAgentReply = useMemo(() => {
     const list = Array.isArray(messages) ? messages : []
     const last = [...list].reverse().find((m) => (
@@ -472,16 +478,22 @@ function ChatHomeInner() {
     ))
     return last?.content || ''
   }, [messages, user?.id])
-  const displayMessages = useMemo(
-    () => (Array.isArray(messages)
+  const displayMessages = useMemo(() => {
+    const cleaned = Array.isArray(messages)
       ? messages.filter((m) => !isTalkAckText(m?.content) && !isGhostTranscript(m?.content))
-      : messages),
-    [messages],
-  )
-  // Active = mid-call only. 'error' is a terminal surface with guidance/retry, not "on call".
-  const hudCallState = awaitingVoicePath && (callState === 'idle' || !callState) ? 'connecting' : callState
-  const callActive = awaitingVoicePath || (callState !== 'idle' && callState !== 'error')
+      : []
+    if (isTalkAckText(lastHeard) || isGhostTranscript(lastHeard)) return cleaned
+    return mergePendingHeard(cleaned, { lastHeard, callActive, userId: user?.id })
+  }, [callActive, lastHeard, messages, user?.id])
   const callFailed = !awaitingVoicePath && callState === 'error'
+  const wasCallActiveRef = useRef(false)
+  useEffect(() => {
+    const wasActive = wasCallActiveRef.current
+    wasCallActiveRef.current = callActive
+    if (wasActive && !callActive && typeof reloadMessages === 'function') {
+      void reloadMessages()
+    }
+  }, [callActive, reloadMessages])
 
   useEffect(() => {
     setLiveTraceContext({

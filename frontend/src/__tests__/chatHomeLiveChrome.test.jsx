@@ -120,6 +120,7 @@ const chat = {
   streamingByConv: {},
   isConnected: true,
   sendMessage: vi.fn(),
+  reloadMessages: vi.fn(async () => {}),
 }
 
 vi.mock('@shizuha/chat', () => {
@@ -152,6 +153,7 @@ vi.mock('@shizuha/chat', () => {
       isLoadingMessages: false,
       loadMore: vi.fn(),
       sendMessage: (...args) => chat.sendMessage(...args),
+      reloadMessages: (...args) => chat.reloadMessages(...args),
       get streamingByConv() { return chat.streamingByConv },
     }),
     MessageList: ({ messages }) => React.createElement(

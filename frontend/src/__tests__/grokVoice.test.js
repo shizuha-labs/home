@@ -12,6 +12,7 @@ import {
   rememberLiveS2S,
   resolveLiveVoiceTarget,
   persistVoiceTurn,
+  mergePendingHeard,
   shouldHoldMicWhileSpeaking,
   stripGrokVoicePrefix,
 } from '../utils/grokVoice'
@@ -213,5 +214,31 @@ describe('persistVoiceTurn', () => {
   it('skips when conversation or text is missing', async () => {
     expect(await persistVoiceTurn({ conversationId: '', userText: 'hi' })).toEqual({ ok: false, status: 0 })
     expect(await persistVoiceTurn({ conversationId: 'c1' })).toEqual({ ok: false, status: 0 })
+  })
+})
+
+describe('mergePendingHeard', () => {
+  const hers = { id: 'a1', sender_id: 698, content: 'Yes, I can hear you.' }
+  const mine = { id: 'u1', sender_id: 1, content: 'Can you hear me?' }
+
+  it('appends live STT while the caller is on a call', () => {
+    const next = mergePendingHeard([hers], { lastHeard: 'What system are we running on?', callActive: true, userId: 1 })
+    expect(next.map((m) => m.content)).toEqual([
+      'Yes, I can hear you.',
+      'What system are we running on?',
+    ])
+    expect(next[1].sender_id).toBe(1)
+    expect(next[1].id).toBe('voice-heard-pending')
+  })
+
+  it('does not duplicate once Connect has the same user turn', () => {
+    const next = mergePendingHeard([mine, hers], { lastHeard: 'Can you hear me?', callActive: true, userId: 1 })
+    expect(next).toHaveLength(2)
+    expect(next.some((m) => m.id === 'voice-heard-pending')).toBe(false)
+  })
+
+  it('stays out of history when the call is idle', () => {
+    const next = mergePendingHeard([hers], { lastHeard: 'Can you hear me?', callActive: false, userId: 1 })
+    expect(next).toEqual([hers])
   })
 })

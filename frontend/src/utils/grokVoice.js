@@ -132,6 +132,29 @@ export function shouldHoldMicWhileSpeaking({ speaking = false, remainingMs = 0 }
   return Boolean(speaking) || Number(remainingMs) > 0
 }
 
+/** Paint the caller's live STT in history until Connect WS confirms the persist. */
+export function mergePendingHeard(messages, { lastHeard = '', callActive = false, userId } = {}) {
+  const list = Array.isArray(messages) ? [...messages] : []
+  const heard = String(lastHeard || '').replace(/\s+/g, ' ').trim()
+  if (!callActive || !heard || userId == null || userId === '') return list
+  const already = list.some((m) => {
+    if (Number(m?.sender_id) !== Number(userId)) return false
+    const a = String(m?.content || '').replace(/\s+/g, ' ').trim().toLowerCase()
+    const b = heard.toLowerCase()
+    if (!a) return false
+    return a === b || (Math.min(a.length, b.length) >= 8 && (a.includes(b) || b.includes(a)))
+  })
+  if (already) return list
+  list.push({
+    id: 'voice-heard-pending',
+    client_message_id: 'voice-heard-pending',
+    sender_id: userId,
+    sender_is_agent: false,
+    content: heard,
+  })
+  return list
+}
+
 export function historyToVoiceItems(messages, userId, limit = 12) {
   const list = Array.isArray(messages) ? messages : []
   const raw = []
