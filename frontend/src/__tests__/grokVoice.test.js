@@ -178,6 +178,19 @@ describe('historyToVoiceItems', () => {
       { role: 'assistant', text: 'Hi. Queue\'s clean. How can I help?' },
     ])
   })
+
+  it('collapses duplicate persist of the same spoken line', () => {
+    const items = historyToVoiceItems([
+      { sender_id: 1, content: 'Can you hear me?' },
+      { sender_id: 1, content: 'Can you hear me?' },
+      { sender_id: 698, content: 'Yes, I can hear you. What\'s on your mind?' },
+      { sender_id: 698, content: 'Yes, I can hear you. What\'s on your mind?' },
+    ], 1)
+    expect(items).toEqual([
+      { role: 'user', text: 'Can you hear me?' },
+      { role: 'assistant', text: 'Yes, I can hear you. What\'s on your mind?' },
+    ])
+  })
 })
 
 describe('voice echo hold', () => {

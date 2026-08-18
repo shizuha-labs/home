@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getAccessToken } from '../utils/auth'
 import { beginLiveCall, emitLiveTrace, endLiveCall, voiceCorrelation } from '../utils/liveTrace'
-import { historyToVoiceItems, persistVoiceTurn, realtimeVoiceUrl, shouldHoldMicWhileSpeaking } from '../utils/grokVoice'
+import { historyToVoiceItems, realtimeVoiceUrl, shouldHoldMicWhileSpeaking } from '../utils/grokVoice'
 import {
   classifyVoiceError,
   playPcmChunk,
@@ -107,8 +107,6 @@ export function useGrokVoiceS2S({
   const pingTimerRef = useRef(null)
   const releaseTimerRef = useRef(null)
   const prerollRef = useRef({ chunks: [], samples: 0, flushed: false })
-  const pendingPersistRef = useRef([])
-  const persistSeenRef = useRef(new Set())
   const optsRef = useRef({ conversationId, agentUsername, model, messages, userId })
   const onFallbackRef = useRef(onFallback)
   speakEnabledRef.current = speakEnabled
@@ -169,25 +167,6 @@ export function useGrokVoiceS2S({
   const sendJson = useCallback((payload) => {
     const socket = socketRef.current
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(payload))
-  }, [])
-
-  const persistSide = useCallback((role, text) => {
-    const spoken = String(text || '').trim()
-    if (!spoken) return
-    const key = `${role}:${spoken.slice(0, 180)}`
-    if (persistSeenRef.current.has(key)) return
-    persistSeenRef.current.add(key)
-    const cid = optsRef.current.conversationId || ''
-    const row = role === 'assistant'
-      ? { conversationId: cid, assistantText: spoken }
-      : { conversationId: cid, userText: spoken }
-    if (!cid) {
-      pendingPersistRef.current.push(row)
-      return
-    }
-    void persistVoiceTurn(row).then((res) => {
-      emitLiveTrace('s2s.persist', { role, ok: res.ok ? 1 : 0, status: res.status || 0 })
-    })
   }, [])
 
   const applyMicGate = useCallback(() => {
@@ -350,7 +329,6 @@ export function useGrokVoiceS2S({
       }
       if (type === 'debug.user') {
         emitLiveTrace('s2s.user', { text: msg.text || '', via: 'proxy' })
-        persistSide('user', msg.text || '')
         return
       }
       if (type === 'debug.assistant') {
@@ -358,8 +336,16 @@ export function useGrokVoiceS2S({
         if (text) {
           setLastReply(text)
           emitLiveTrace('s2s.assistant', { text, via: 'stt' })
-          persistSide('assistant', text)
         }
+        return
+      }
+      if (type === 'debug.persist') {
+        emitLiveTrace('s2s.persist', {
+          role: msg.role || '',
+          ok: msg.ok == null ? 1 : Number(msg.ok) ? 1 : 0,
+          status: msg.status || 201,
+          via: 'scli',
+        })
         return
       }
       if (type === 'error' || type.startsWith('response.')) {
@@ -401,7 +387,6 @@ export function useGrokVoiceS2S({
         }
         setLastHeard(surface.text)
         emitLiveTrace('s2s.user', { text: surface.text })
-        persistSide('user', surface.text)
         heardAudioRef.current = false
         prerollRef.current = { chunks: [], samples: 0, flushed: false }
         droppedReplyRef.current = ''
@@ -429,7 +414,6 @@ export function useGrokVoiceS2S({
           setLastReply(text)
           lastSpokenRef.current = { text, at: Date.now() }
           emitLiveTrace('s2s.assistant', { text })
-          persistSide('assistant', text)
         }
         holdMicForSpeak(text)
         if (text && speakEnabledRef.current && !heardAudioRef.current) {
@@ -553,14 +537,6 @@ export function useGrokVoiceS2S({
   useEffect(() => {
     if (!conversationId) return
     sendJson({ type: 'conversation', conversation_id: conversationId })
-    const queued = pendingPersistRef.current
-    if (!queued.length) return
-    pendingPersistRef.current = []
-    queued.forEach((row) => {
-      void persistVoiceTurn({ ...row, conversationId }).then((res) => {
-        emitLiveTrace('s2s.persist', { flushed: 1, ok: res.ok ? 1 : 0, status: res.status || 0 })
-      })
-    })
   }, [conversationId, sendJson])
 
   const startCall = useCallback((overrides = {}) => {
@@ -568,8 +544,6 @@ export function useGrokVoiceS2S({
     if (overrides.conversationId) {
       optsRef.current = { ...optsRef.current, conversationId: overrides.conversationId }
     }
-    persistSeenRef.current = new Set()
-    pendingPersistRef.current = []
     activeRef.current = true
     mutedRef.current = false
     holdMicRef.current = false

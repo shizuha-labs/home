@@ -135,7 +135,7 @@ export function shouldHoldMicWhileSpeaking({ speaking = false, remainingMs = 0 }
 export function historyToVoiceItems(messages, userId, limit = 12) {
   const list = Array.isArray(messages) ? messages : []
   const raw = []
-  for (const msg of list.slice(-limit)) {
+  for (const msg of list.slice(-(limit * 2))) {
     const text = String(msg?.content || '').replace(/\s+/g, ' ').trim()
     if (!text) continue
     raw.push({
@@ -145,13 +145,15 @@ export function historyToVoiceItems(messages, userId, limit = 12) {
   }
   const out = []
   for (const item of raw) {
+    const prevSame = [...out].reverse().find((row) => row.role === item.role)
+    if (prevSame && isVoiceEchoText(item.text, prevSame.text)) continue
     if (item.role === 'user') {
       const prev = [...out].reverse().find((row) => row.role === 'assistant')
       if (prev && isVoiceEchoText(item.text, prev.text)) continue
     }
     out.push(item)
   }
-  return out
+  return out.slice(-limit)
 }
 
 export async function persistVoiceTurn({ conversationId, userText = '', assistantText = '' }) {
