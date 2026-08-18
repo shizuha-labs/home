@@ -101,6 +101,13 @@ describe('classifyVoiceError', () => {
     expect(classifyVoiceError(new Error('websocket closed'))).toBe('stream_unavailable')
     expect(classifyVoiceError(null)).toBe('stream_unavailable')
   })
+
+  it('classifies Grok Voice credit and 403 handshake failures', () => {
+    expect(classifyVoiceError({ code: 'out_of_credits', message: 'nope' })).toBe('out_of_credits')
+    expect(classifyVoiceError({ message: 'You have run out of credits or need a Grok subscription.' })).toBe('out_of_credits')
+    expect(classifyVoiceError({ message: 'Unexpected server response: 403' })).toBe('out_of_credits')
+    expect(classifyVoiceError({ code: 'voice_auth', message: 'mint rejected' })).toBe('voice_auth')
+  })
 })
 
 describe('isDuplicateUtterance', () => {

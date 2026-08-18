@@ -265,7 +265,7 @@ describe('useGrokVoiceS2S', () => {
     expect(result.current.isCallActive()).toBe(false)
   })
 
-  it('keeps reconnecting a live S2S call instead of giving up after a few drops', async () => {
+  it('keeps reconnecting a live S2S call after ready instead of giving up after a few drops', async () => {
     vi.useFakeTimers()
     const onFallback = vi.fn(() => true)
     const { result } = renderHook(() => useGrokVoiceS2S({
@@ -275,15 +275,74 @@ describe('useGrokVoiceS2S', () => {
       onFallback,
     }))
     await act(async () => { result.current.startCall() })
+    const first = FakeSocket.instances.at(-1)
+    await act(async () => {
+      first.open()
+      first.emit(JSON.stringify({ type: 'ready', via: 'scli' }))
+    })
     const before = FakeSocket.instances.length
     for (let i = 0; i < 5; i += 1) {
       const socket = FakeSocket.instances.at(-1)
-      await act(async () => { socket.open(); socket.onclose?.() })
+      await act(async () => { socket.onclose?.() })
       await act(async () => { vi.advanceTimersByTime(8000) })
     }
     expect(onFallback).not.toHaveBeenCalled()
     expect(result.current.isCallActive()).toBe(true)
+    expect(result.current.callState).not.toBe('error')
     expect(FakeSocket.instances.length).toBeGreaterThan(before)
+    vi.useRealTimers()
+  })
+
+  it('stops Connecting when Grok Voice is out of credits', async () => {
+    vi.useFakeTimers()
+    const { result } = renderHook(() => useGrokVoiceS2S({
+      conversationId: 'conv-1',
+      agentUsername: 'hina',
+      model: 'cortex/grok-voice-think-fast-2.0',
+    }))
+    await act(async () => { result.current.startCall() })
+    const socket = FakeSocket.instances.at(-1)
+    await act(async () => {
+      socket.open()
+      socket.emit(JSON.stringify({
+        type: 'error',
+        code: 'out_of_credits',
+        fatal: true,
+        message: 'Grok Voice is out of credits on the xAI subscription. Add credits at grok.com or attach a funded xAI API key in Cortex.',
+      }))
+    })
+    expect(result.current.callState).toBe('error')
+    expect(result.current.callError).toMatchObject({
+      kind: 'out_of_credits',
+      canRetry: false,
+    })
+    expect(result.current.callError.message).toMatch(/out of credits/i)
+    expect(result.current.isCallActive()).toBe(false)
+    const sockets = FakeSocket.instances.length
+    await act(async () => { vi.advanceTimersByTime(16000) })
+    expect(FakeSocket.instances.length).toBe(sockets)
+    vi.useRealTimers()
+  })
+
+  it('gives up before ready instead of looping Connecting', async () => {
+    vi.useFakeTimers()
+    const { result } = renderHook(() => useGrokVoiceS2S({
+      conversationId: 'conv-1',
+      agentUsername: 'hina',
+      model: 'cortex/grok-voice-think-fast-2.0',
+    }))
+    await act(async () => { result.current.startCall() })
+    for (let i = 0; i < 4; i += 1) {
+      const socket = FakeSocket.instances.at(-1)
+      await act(async () => { socket.open(); socket.onclose?.() })
+      await act(async () => { vi.advanceTimersByTime(8000) })
+    }
+    expect(result.current.callState).toBe('error')
+    expect(result.current.callError).toMatchObject({
+      kind: 'stream_unavailable',
+      canRetry: true,
+    })
+    expect(result.current.isCallActive()).toBe(false)
     vi.useRealTimers()
   })
 })

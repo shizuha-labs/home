@@ -880,15 +880,30 @@ const MIC_ERROR_MESSAGES = {
   permission_denied: 'Microphone permission denied. Allow mic access in your browser settings, then try again.',
 }
 
-const STREAM_UNAVAILABLE_MESSAGE = 'Voice is temporarily unavailable. Try again in a moment.'
+export const STREAM_UNAVAILABLE_MESSAGE = 'Voice is temporarily unavailable. Try again in a moment.'
+export const VOICE_CREDITS_MESSAGE =
+  'Grok Voice is out of credits on the xAI subscription. Add credits at grok.com or attach a funded xAI API key in Cortex.'
 
 /**
- * Classify a streaming-STT / getUserMedia failure for UX + retry policy.
- * @returns {'no_mic'|'permission_denied'|'stream_unavailable'}
+ * Classify a streaming-STT / getUserMedia / Live S2S failure for UX + retry policy.
+ * @returns {'no_mic'|'permission_denied'|'out_of_credits'|'voice_auth'|'stream_unavailable'}
  */
 export function classifyVoiceError(error) {
   const name = String(error?.name || '')
+  const code = String(error?.code || '').toLowerCase()
   const message = String(error?.message || '').toLowerCase()
+
+  if (
+    code === 'out_of_credits'
+    || message.includes('out of credits')
+    || message.includes('grok subscription')
+    || message.includes('unexpected server response: 403')
+  ) {
+    return 'out_of_credits'
+  }
+  if (code === 'voice_auth' || code === 'unauthorized') {
+    return 'voice_auth'
+  }
 
   // getUserMedia DOMExceptions (and legacy webkit aliases)
   if (

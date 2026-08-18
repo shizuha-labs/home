@@ -13,7 +13,10 @@ import {
   warmSpeakOutput,
   remainingSpeakMs,
   SPEAK_RELEASE_MS,
+  STREAM_UNAVAILABLE_MESSAGE,
+  VOICE_CREDITS_MESSAGE,
   VOICE_STREAM_BASE_BACKOFF_MS,
+  VOICE_STREAM_MAX_RETRIES,
 } from './useVoice'
 
 const MIC_ERROR_MESSAGES = {
@@ -96,6 +99,7 @@ export function useGrokVoiceS2S({
   const captureRef = useRef(null)
   const retryTimerRef = useRef(null)
   const streamAttemptsRef = useRef(0)
+  const sessionReadyRef = useRef(false)
   const connectRef = useRef(null)
   const retryRef = useRef(null)
   const holdMicRef = useRef(false)
@@ -291,6 +295,7 @@ export function useGrokVoiceS2S({
       const type = String(msg.type || '')
       if (type === 'ready' || type === 'session.updated') {
         streamAttemptsRef.current = 0
+        sessionReadyRef.current = true
         if (!mutedRef.current) setCallState('listening')
         emitLiveTrace('s2s.ready', {
           model: msg.model || opts.model || '',
@@ -312,6 +317,10 @@ export function useGrokVoiceS2S({
           failCall(kind, MIC_ERROR_MESSAGES[kind], false)
         } else if (msg.code === 'not_voice_agent') {
           failCall('not_voice_agent', 'This agent is not on Grok Voice.', false)
+        } else if (kind === 'out_of_credits') {
+          failCall('out_of_credits', msg.message || VOICE_CREDITS_MESSAGE, false)
+        } else if (kind === 'voice_auth' || msg.fatal) {
+          failCall(kind === 'voice_auth' ? 'voice_auth' : 'stream_unavailable', msg.message || STREAM_UNAVAILABLE_MESSAGE, false)
         } else {
           retryRef.current?.()
         }
@@ -520,18 +529,22 @@ export function useGrokVoiceS2S({
 
   const scheduleRetry = useCallback(() => {
     if (!activeRef.current) return
+    if (retryTimerRef.current != null) return
     const failed = streamAttemptsRef.current + 1
     streamAttemptsRef.current = failed
+    if (!sessionReadyRef.current && failed > VOICE_STREAM_MAX_RETRIES) {
+      failCall('stream_unavailable', STREAM_UNAVAILABLE_MESSAGE, true)
+      return
+    }
     teardown()
     setCallState('connecting')
     const delay = Math.min(8000, VOICE_STREAM_BASE_BACKOFF_MS * (2 ** Math.min(failed - 1, 4)))
     emitLiveTrace('s2s.reconnect', { attempt: failed, delay_ms: delay })
-    if (retryTimerRef.current != null) window.clearTimeout(retryTimerRef.current)
     retryTimerRef.current = window.setTimeout(() => {
       retryTimerRef.current = null
       if (activeRef.current) connectRef.current?.()
     }, delay)
-  }, [teardown])
+  }, [failCall, teardown])
   retryRef.current = scheduleRetry
 
   useEffect(() => {
@@ -551,6 +564,7 @@ export function useGrokVoiceS2S({
     heardAudioRef.current = false
     prerollRef.current = { chunks: [], samples: 0, flushed: false }
     streamAttemptsRef.current = 0
+    sessionReadyRef.current = false
     beginLiveCall()
     emitLiveTrace('call.start', { transport: 's2s' })
     setMuted(false)
@@ -606,6 +620,7 @@ export function useGrokVoiceS2S({
     teardown()
     speakText.stop()
     streamAttemptsRef.current = 0
+    sessionReadyRef.current = false
     setMuted(false)
     setCallError(null)
     activeRef.current = true
