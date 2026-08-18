@@ -111,6 +111,7 @@ function ChatHomeInner() {
     loadMore,
     sendMessage,
     reloadMessages,
+    retryMessage,
     streamingByConv,
   } = useConnectChat()
 
@@ -876,6 +877,7 @@ function ChatHomeInner() {
             hasMore={hasMore}
             isLoadingMore={isLoadingMessages}
             onLoadMore={loadMore}
+            onRetry={retryMessage}
             initialUnreadCount={threadInitialUnreadCount({
               miniConvId,
               activeConversationId,
