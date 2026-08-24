@@ -29,3 +29,12 @@ yarn-debug.log*
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+# Local environments, caches, and editor scratch (never commit)
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.claude/

@@ -85,5 +85,11 @@ class Settings:
     # HIVE-603 §6.2 per-instance connection cap.
     HOME_SSE_MAX_CONNECTIONS: int = int(os.environ.get("HOME_SSE_MAX_CONNECTIONS", "100"))
 
+    # Live / voice browser traces. Join key is the verified caller + conversation.
+    LIVE_TRACE_PREFIX: str = os.environ.get("HOME_LIVE_TRACE_PREFIX", "home:live-trace:v1:")
+    LIVE_TRACE_MAXLEN: int = int(os.environ.get("HOME_LIVE_TRACE_MAXLEN", "4000"))
+    LIVE_TRACE_TTL_SECONDS: int = int(os.environ.get("HOME_LIVE_TRACE_TTL", str(7 * 24 * 3600)))
+    LIVE_TRACE_RATE_PER_MINUTE: int = int(os.environ.get("HOME_LIVE_TRACE_RATE", "240"))
+
 
 settings = Settings()

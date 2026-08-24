@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { Activity, AlertTriangle, CheckCircle2, TrendingUp, Timer, RefreshCw } from 'lucide-react'
 import { useOrgProgress } from '../../hooks/useOrgProgress'
+import { isSlowestStageRow } from './orgProgressStages'
 
 /**
  * Org-progress dashboard: is the org making progress, and is anything badly
@@ -24,7 +25,7 @@ const RANGES = [
 
 // Status-slug → semantic group (drives the donut + colouring).
 const DONE = new Set(['completed', 'done', 'resolved', 'closed', 'merged', 'applied'])
-const DROPPED = new Set(['cancelled', 'canceled', 'rejected', 'duplicate', 'wont_fix', 'failed', 'expired', 'deferred'])
+const DROPPED = new Set(['cancelled', 'canceled', 'rejected', 'duplicate', 'wont_fix', 'failed', 'expired', 'deferred', 'change_rejected'])
 const WAITING = new Set(['blocked', 'scheduled'])
 const ACTIVE = new Set(['in_progress', 'in_review', 'implementing', 'review', 'verification', 'awaiting_merge', 'accepted', 'rfc_design', 'rfc_implementation', 'under_review', 'documenting'])
 
@@ -196,14 +197,8 @@ export default function OrgProgressCharts({ orgs, orgId, onOrgChange, range, onR
     // "Slowest stages" = flow bottlenecks only. Parking holds (scheduled calendar
     // work, blocked waiting on upstream, backlog) intentionally sit for days/weeks
     // and must not dominate the chart as if the org is stuck in-progress.
-    const rows = (data?.throughput || [])
-      .filter((r) => {
-        const s = String(r.status || '').toLowerCase()
-        if (DONE.has(s) || DROPPED.has(s) || WAITING.has(s)) return false
-        if (r.is_parking) return false
-        if (s === 'backlog' || s === 'waiting_external') return false
-        return (r.avg_dwell_seconds || 0) > 0
-      })
+    const rows = (data?.open_dwell || data?.throughput || [])
+      .filter(isSlowestStageRow)
       .sort((a, b) => (b.avg_dwell_seconds || 0) - (a.avg_dwell_seconds || 0))
       .slice(0, 5)
     const max = Math.max(1, ...rows.map((r) => r.avg_dwell_seconds || 0))
@@ -304,7 +299,7 @@ export default function OrgProgressCharts({ orgs, orgId, onOrgChange, range, onR
           {bottlenecks.rows.length > 0 && (
             <Card>
               <div className="flex items-center gap-2 text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
-                <Timer className="w-3.5 h-3.5 text-amber-500" /> Slowest stages (avg dwell)
+                <Timer className="w-3.5 h-3.5 text-amber-500" /> Slowest stages (now sitting)
               </div>
               <div className="space-y-1.5">
                 {bottlenecks.rows.map((r, i) => (
@@ -316,7 +311,10 @@ export default function OrgProgressCharts({ orgs, orgId, onOrgChange, range, onR
                       <div className="h-full rounded-full bg-amber-400/80"
                         style={{ width: `${Math.max(4, ((r.avg_dwell_seconds || 0) / bottlenecks.max) * 100)}%` }} />
                     </div>
-                    <span className="w-12 text-right tabular-nums text-gray-500 dark:text-gray-400">{fmtDwell(r.avg_dwell_seconds)}</span>
+                    <span className="w-20 shrink-0 text-right tabular-nums text-gray-500 dark:text-gray-400">
+                      {fmtDwell(r.avg_dwell_seconds)}
+                      {r.samples ? <span className="ml-1 text-[10px] text-gray-400">n={r.samples}</span> : null}
+                    </span>
                   </div>
                 ))}
               </div>

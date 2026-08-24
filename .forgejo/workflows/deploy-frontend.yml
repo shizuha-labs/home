@@ -54,6 +54,13 @@ jobs:
           FTAG="home-frontend-${SHORT}"
           REG="registry.registry.svc.cluster.local:5000"
           echo "Multi-arch build shizuha-home-frontend:${FTAG} (amd64 + arm64)"
+          PREV_FRONTEND_IMAGE="$(kubectl -n shizuha get deploy shizuha-home-frontend -o jsonpath='{.spec.template.spec.containers[0].image}')"
+          # The live deployment references the registry via the node-local localhost:30500
+          # host, which is NOT reachable from inside the kaniko build pod (its own loopback).
+          # Normalize to the in-cluster registry service so kaniko can pull the previous
+          # image to carry forward the hashed CSS/JS assets.
+          PREV_FRONTEND_IMAGE="${PREV_FRONTEND_IMAGE//localhost:30500/${REG}}"
+          echo "Carry forward hashed assets from ${PREV_FRONTEND_IMAGE}"
 
           render_build_job() {  # $1=arch $2=attempt $3=cache-enabled
             local ARCH="$1"
@@ -122,6 +129,7 @@ jobs:
                       - --registry-mirror=mirror-dockerhub.registry.svc.cluster.local:5000
                       - --build-arg=NPM_CONFIG_REGISTRY=http://npm-cache.registry.svc.cluster.local:4873/
                       - --build-arg=FRONTEND_PATH=shizuha-home
+                      - --build-arg=PREV_FRONTEND_IMAGE=${PREV_FRONTEND_IMAGE}
                       - --cache=${CACHE_ENABLED}
                       - --cache-repo=${REG}/kaniko-cache/home-deploy-frontend-${ARCH}
                       - --cache-copy-layers=${CACHE_ENABLED}
@@ -164,13 +172,13 @@ jobs:
 
             kubectl logs -n build "job/ci-build-home-frontend-${SHORT}-${ARCH}-try1" \
               --all-containers --tail=200 >"${FIRST_LOG}" 2>&1 || true
-            if ! grep -Fq 'failed to get filesystem from image: unexpected EOF' "${FIRST_LOG}"; then
+            if ! grep -Eq 'failed to get filesystem from image: unexpected EOF|npm error code ETIMEDOUT|npm error network|ETIMEDOUT' "${FIRST_LOG}"; then
               echo "::error::kaniko frontend ${ARCH} build failed with a non-retryable error"
               cat "${FIRST_LOG}"
               return 1
             fi
 
-            echo "::warning::kaniko frontend ${ARCH} hit a cached-filesystem unexpected EOF; retrying once with cache disabled"
+            echo "::warning::kaniko frontend ${ARCH} hit a transient cache/network error; retrying once with cache disabled"
             cat "${FIRST_LOG}"
             render_build_job "${ARCH}" 2 false | kubectl apply -f -
             if wait_job "${ARCH}" 2; then

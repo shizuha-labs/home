@@ -36,9 +36,12 @@ function formatMoney(value, currency = 'INR') {
   }
 }
 
-export default function CommandCenterDashboard({ orgId, onPeekOrg }) {
+export default function CommandCenterDashboard({ orgId, onPeekOrg, summary: summaryProp, widget: widgetProp, refresh: refreshProp }) {
   const navigate = useNavigate()
-  const { summary, widget, refresh } = useHomeSummary({ orgId })
+  const fetched = useHomeSummary({ orgId, enabled: !summaryProp && !widgetProp })
+  const summary = summaryProp || fetched.summary
+  const widget = widgetProp || fetched.widget
+  const refresh = refreshProp || fetched.refresh
 
   const orgs = Array.isArray(summary?.orgs) ? summary.orgs : null
   const agents = widget('agent_activity')

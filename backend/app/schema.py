@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field, model_validator
 
 SUMMARY_VERSION = 1
 ACTIVITY_VERSION = 1
+LIVE_TRACE_VERSION = 1
 
 
 class WidgetStatus(str, Enum):
@@ -179,3 +180,22 @@ class ActivityRecentResponse(BaseModel):
     events: list[HomeActivityEventV1] = Field(default_factory=list)
     cursor_by_org: dict[str, str] = Field(default_factory=dict)
     degraded_sources: list[str] = Field(default_factory=list)
+
+
+class LiveTraceIngestV1(BaseModel):
+    events: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class LiveTraceIngestResponse(BaseModel):
+    version: int = Field(default=LIVE_TRACE_VERSION)
+    accepted: int = 0
+    dropped: int = 0
+
+
+class LiveTraceTimelineV1(BaseModel):
+    version: int = Field(default=LIVE_TRACE_VERSION)
+    generated_at: str
+    user_id: int
+    conversation_id: Optional[str] = None
+    call_id: Optional[str] = None
+    events: list[dict[str, Any]] = Field(default_factory=list)
