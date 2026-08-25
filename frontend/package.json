@@ -8,7 +8,13 @@
     "build": "vite build && node scripts/generate-route-html.mjs",
     "preview": "vite preview",
     "lint": "eslint src --report-unused-disable-directives --max-warnings 0",
-    "prebuild": "node scripts/check-local-packages.mjs"
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "test:e2e:live": "SHIZUHA_LIVE_E2E=1 BASE_URL=https://shizuha.com playwright test tests/e2e/live-homepage-talk.spec.js tests/e2e/live-no-replay-old-reply.spec.js tests/e2e/live-mute-fragment.spec.js tests/e2e/live-silence-after-reply.spec.js tests/e2e/live-voice-replies-off.spec.js tests/e2e/live-trace.spec.js --project=chromium --workers=1",
+    "test:e2e:live:qa": "SHIZUHA_LIVE_E2E=1 BASE_URL=https://shizuha.com playwright test tests/e2e/live-no-replay-old-reply.spec.js tests/e2e/live-mute-fragment.spec.js tests/e2e/live-silence-after-reply.spec.js tests/e2e/live-thread-send.spec.js tests/e2e/live-thread-audio-send.spec.js tests/e2e/live-thread-unread.spec.js --project=chromium --workers=1",
+    "test:e2e:live:spoken": "SHIZUHA_LIVE_E2E=1 SHIZUHA_LIVE_SPOKEN_E2E=1 BASE_URL=https://shizuha.com playwright test tests/e2e/live-spoken-conversation.spec.js --project=chromium",
+    "test:e2e:live:hina": "SHIZUHA_LIVE_OPERATOR_E2E=1 node tests/e2e/live-hina-human-conversation.mjs",
+    "prebuild": "node scripts/check-local-packages.mjs && node scripts/nginxResearchProxy.guardrail.test.mjs"
   },
   "dependencies": {
     "@shizuha/chat": "file:../../packages/shizuha-chat",
@@ -17,7 +23,7 @@
     "lucide-react": "^0.303.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-router-dom": "^6.30.4",
+    "react-router-dom": "^7.18.2",
     "tailwind-merge": "^2.2.0"
   },
   "devDependencies": {
@@ -33,9 +39,13 @@
     "eslint-plugin-react-hooks": "^4.6.0",
     "eslint-plugin-react-refresh": "^0.4.5",
     "jsdom": "^29.1.1",
-    "postcss": "^8.4.32",
+    "postcss": "^8.5.26",
     "tailwindcss": "^3.4.0",
     "vite": "^6.4.3",
     "vitest": "^4.1.10"
+  },
+  "overrides": {
+    "brace-expansion": "1.1.18",
+    "undici": "7.29.0"
   }
 }

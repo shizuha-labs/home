@@ -59,11 +59,21 @@ jobs:
       - name: Run Home BFF organization-isolation gate
         run: |
           set -euo pipefail
-          python -m pip install --index-url http://pip-cache.registry.svc.cluster.local/simple --trusted-host pip-cache.registry.svc.cluster.local --quiet --no-cache-dir \
+          python .forgejo/scripts/test-hive708-release-reassert.py
+          # PLAT-5821: install from the locked uv project (backend/pyproject.toml
+          # + backend/uv.lock) — the single source of truth. `uv sync --locked`
+          # enforces the committed lock (cryptography 50.0.0) instead of
+          # re-resolving open `>=` ranges to the range floor.
+          python -m pip install --quiet --no-cache-dir \
             --index-url "${PIP_INDEX_URL:-http://pip-cache.registry.svc.cluster.local/simple/}" \
             --trusted-host "${PIP_TRUSTED_HOST:-pip-cache.registry.svc.cluster.local}" \
-            -r backend/requirements.txt
+            uv==0.11.26
           cd backend
+          # Runner-global uv index overrides would rewrite the lock's canonical
+          # PyPI provenance to the internal cache and make --locked fail.
+          env -u UV_INDEX_URL -u UV_DEFAULT_INDEX -u UV_INSECURE_HOST uv lock --check
+          env -u UV_INDEX_URL -u UV_DEFAULT_INDEX -u UV_INSECURE_HOST uv sync --locked --extra dev
+          . .venv/bin/activate
           # Keep this trust-boundary gate limited to organization-isolation
           # invariants. Unrelated SSE capacity/lifecycle coverage runs in the
           # service test lane and must not make this authz proof nondeterministic.
@@ -118,7 +128,7 @@ jobs:
             labels: { app: ci-build, service: home-backend }
           spec:
             backoffLimit: 0
-            ttlSecondsAfterFinished: 900
+            ttlSecondsAfterFinished: 300
             template:
               spec:
                 restartPolicy: Never
@@ -153,6 +163,7 @@ jobs:
                       - --dockerfile=/workspace/src/backend/Dockerfile
                       - --destination=${REG}/shizuha-home-backend:${BTAG}-${ARCH}
                       - --destination=${REG}/shizuha-home-backend:${BOOTSTRAP_TAG}-${ARCH}
+                      - --cleanup
                       - --insecure
                       - --skip-tls-verify
                       - --insecure-pull
@@ -187,8 +198,16 @@ jobs:
             done
             wait "$WP"
           }
-          wait_job amd64
-          wait_job arm64
+          wait_job amd64 &
+          WAIT_AMD64_PID=$!
+          wait_job arm64 &
+          WAIT_ARM64_PID=$!
+          WAIT_FAILED=0
+          wait "${WAIT_AMD64_PID}" || WAIT_FAILED=1
+          wait "${WAIT_ARM64_PID}" || WAIT_FAILED=1
+          if [ "${WAIT_FAILED}" -ne 0 ]; then
+            exit 1
+          fi
 
           cat <<YAML | kubectl apply -f -
           apiVersion: batch/v1
@@ -199,7 +218,7 @@ jobs:
             labels: { app: ci-manifest, service: home-backend }
           spec:
             backoffLimit: 0
-            ttlSecondsAfterFinished: 900
+            ttlSecondsAfterFinished: 300
             template:
               spec:
                 restartPolicy: Never
@@ -232,7 +251,7 @@ jobs:
             labels: { app: ci-manifest, service: home-backend }
           spec:
             backoffLimit: 0
-            ttlSecondsAfterFinished: 900
+            ttlSecondsAfterFinished: 300
             template:
               spec:
                 restartPolicy: Never
@@ -262,12 +281,19 @@ jobs:
           set -e
           if [ "${GUARD_RC}" = 10 ]; then exit 0; fi
           if [ "${GUARD_RC}" != 0 ]; then exit "${GUARD_RC}"; fi
-          kubectl set image -n shizuha deploy/shizuha-home-backend backend="localhost:30500/shizuha-home-backend:${BTAG}"
-          kubectl rollout status -n shizuha deploy/shizuha-home-backend --timeout=300s
-
-          LIVE="$(kubectl get deploy -n shizuha shizuha-home-backend -o jsonpath='{.spec.template.spec.containers[0].image}')"
-          echo "Live backend image: ${LIVE}"
-          echo "${LIVE}" | grep -q "${BTAG}" || { echo "::error::backend image mismatch"; exit 1; }
+          # HIVE-708: the deploy chart reconciler snapshots exact live images.
+          # If it overlaps this release, it can apply that snapshot once. Keep
+          # re-asserting the monotonic winner until the chart-only apply is past.
+          for attempt in 1 2 3; do
+            kubectl set image -n shizuha deploy/shizuha-home-backend backend="localhost:30500/shizuha-home-backend:${BTAG}"
+            kubectl rollout status -n shizuha deploy/shizuha-home-backend --timeout=300s
+            LIVE="$(kubectl get deploy -n shizuha shizuha-home-backend -o jsonpath='{.spec.template.spec.containers[0].image}')"
+            echo "Live backend image (attempt ${attempt}): ${LIVE}"
+            if echo "${LIVE}" | grep -q "${BTAG}"; then break; fi
+            if [ "${attempt}" = 3 ]; then echo "::error::backend image mismatch after ${attempt} attempts"; exit 1; fi
+            echo "Backend image clobbered by concurrent chart reconcile — re-asserting"
+            sleep 10
+          done
           kubectl annotate -n shizuha deploy/shizuha-home-backend shizuha.io/last-successful-sha="${{ github.sha }}" --overwrite
           kubectl get pods -n shizuha -l app.kubernetes.io/name=shizuha-home-backend
 
