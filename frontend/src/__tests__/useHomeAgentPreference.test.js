@@ -3,8 +3,11 @@ import {
   agentConversations,
   conversationMatchesQuery,
   findAgentConversation,
+  homeAgentDisplayName,
+  isForbiddenHomeAgentUsername,
   mergeAgentSearchHits,
   participantMatchesAgent,
+  personalHomeAgentUsername,
   readHomeAgentPref,
   resolveHomeAgentUsername,
   suggestedHomeAgentUsername,
@@ -25,16 +28,30 @@ describe('home agent preference', () => {
     expect(suggestedHomeAgentUsername({ email: 'hritik@shizuha.com' })).toBe('ena')
   })
 
+  it('binds customers to their own personal Shizuha, never fleet Yuna', () => {
+    const mihir = { id: 279, email: 'mihirgates@hotmail.com' }
+    expect(personalHomeAgentUsername(mihir)).toBe('shizuha-279')
+    expect(suggestedHomeAgentUsername(mihir)).toBe('shizuha-279')
+    expect(resolveHomeAgentUsername('', mihir)).toBe('shizuha-279')
+    expect(resolveHomeAgentUsername('yuna', mihir)).toBe('shizuha-279')
+    expect(resolveHomeAgentUsername('hina', mihir)).toBe('shizuha-279')
+    expect(resolveHomeAgentUsername('shizuha-115', mihir)).toBe('shizuha-279')
+    expect(homeAgentDisplayName('shizuha-279')).toBe('Shizuha')
+    expect(isForbiddenHomeAgentUsername('yuna', mihir)).toBe(true)
+    expect(isForbiddenHomeAgentUsername('shizuha-115', mihir)).toBe(true)
+    expect(isForbiddenHomeAgentUsername('shizuha-279', mihir)).toBe(false)
+  })
+
   it('does not keep a retired Aya pick as the live default', () => {
     expect(resolveHomeAgentUsername('hina', { email: 'hothritik1@gmail.com' })).toBe('hina')
     expect(resolveHomeAgentUsername('aya', { email: 'hritik@shizuha.com' })).toBe('ena')
     expect(resolveHomeAgentUsername('yuna', { email: 'hothritik1@gmail.com' })).toBe('yuna')
   })
 
-  it('does not send a regular or QA user to the operator Ena seat', () => {
-    expect(resolveHomeAgentUsername('', { email: 'liveqa@shizuha.com' })).toBe('yuna')
-    expect(resolveHomeAgentUsername('', { email: 'someone@example.com' })).toBe('yuna')
-    expect(resolveHomeAgentUsername('hina', { email: 'liveqa@shizuha.com' })).toBe('hina')
+  it('does not send a regular or QA user to the operator Ena or Yuna seat', () => {
+    expect(resolveHomeAgentUsername('', { id: 739, email: 'liveqa@shizuha.com' })).toBe('shizuha-739')
+    expect(resolveHomeAgentUsername('yuna', { email: 'someone@example.com' })).toBe('')
+    expect(resolveHomeAgentUsername('hina', { id: 739, email: 'liveqa@shizuha.com' })).toBe('shizuha-739')
   })
 
   it('round-trips localStorage', () => {

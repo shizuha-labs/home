@@ -129,6 +129,15 @@ describe('resolveLiveVoiceTarget', () => {
     expect(target).toMatchObject({ username: 'yuna', model: '', s2s: false })
   })
 
+  it('uses native Voice for a personal Shizuha before the roster hydrates', () => {
+    const target = resolveLiveVoiceTarget({
+      agents: [],
+      pickerUsername: 'shizuha-279',
+      currentUserId: 279,
+    })
+    expect(target).toMatchObject({ username: 'shizuha-279', s2s: true })
+  })
+
   it('recalls a previous Grok Voice seat before the roster hydrates', () => {
     rememberLiveS2S('hina', true)
     expect(readRememberedLiveS2S('hina')).toBe(true)

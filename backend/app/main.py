@@ -297,7 +297,8 @@ async def home_talk_agents(
     """Search fleet agents the caller can talk to from home."""
     scope_org = resolve_scope_org(caller, org_id)
     async with httpx.AsyncClient() as client:
-        results = await fetch_talk_agents(client, caller.bearer, q, scope_org)
+        results = await fetch_talk_agents(
+            client, caller.bearer, q, scope_org, caller=caller)
     return {
         "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "results": results,

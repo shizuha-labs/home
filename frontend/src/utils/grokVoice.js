@@ -1,4 +1,5 @@
 /** Grok Voice Think Fast (and later grok-voice-*) — native speech-to-speech. */
+import { isPersonalHomeAgentUsername } from '../hooks/useHomeAgentPreference'
 
 export function stripGrokVoicePrefix(model) {
   let bare = String(model || '').trim().toLowerCase()
@@ -85,6 +86,7 @@ export function resolveLiveVoiceTarget({
   } else if (!model && resolvedUsername) {
     const remembered = readRememberedLiveS2S(resolvedUsername)
     if (remembered != null) s2s = remembered
+    else if (isPersonalHomeAgentUsername(resolvedUsername)) s2s = true
   }
   return {
     username: resolvedUsername,
