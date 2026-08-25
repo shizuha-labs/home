@@ -29,15 +29,21 @@ export function writeHomeAgentPref(username) {
 /** Grok-build seats we stopped for realtime; never auto-select them. */
 export const RETIRED_HOME_AGENTS = new Set(['aya'])
 
-/** CEO default is the Grok/SCLI talk seat (Ena). Everyone else starts unset. */
+/** CEO default is the Grok/SCLI talk seat (Ena). Everyone else defaults to
+ * their own isolated personal agent (shizuha-<id>), never a fleet/org seat
+ * (yuna/hina/ena) — a customer must never land on another tenant's or the
+ * org fleet's agent that happens to share a display name (HIVE-2131). */
 export function suggestedHomeAgentUsername(user) {
   const email = String(user?.email || '').toLowerCase()
   if (email === 'hothritik1@gmail.com' || email === 'hritik@shizuha.com') return 'ena'
+  const id = user?.id
+  if (id != null && String(id).trim() !== '') return `shizuha-${id}`
   return ''
 }
 
-/** Non-CEO Live must not land on the operator's Ena thread. */
-export const DEFAULT_HOME_AGENT = 'yuna'
+/** No fleet default: a user with no personal-agent id lands unset (empty
+ * picker), never on a fleet seat. */
+export const DEFAULT_HOME_AGENT = ''
 
 /** Prefer stored pick, but never land Live on a retired/stopped seat. */
 export function resolveHomeAgentUsername(preferred, user) {

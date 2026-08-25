@@ -16,8 +16,13 @@ describe('home agent preference', () => {
     localStorage.clear()
   })
 
-  it('does not default regular users to the Admin Ops CoS', () => {
+  it('does not default regular users to the Admin Ops CoS or a fleet seat', () => {
     expect(suggestedHomeAgentUsername({ email: 'someone@example.com' })).toBe('')
+  })
+
+  it('defaults a non-CEO user to their own isolated personal agent (HIVE-2131)', () => {
+    expect(suggestedHomeAgentUsername({ email: 'someone@example.com', id: 279 })).toBe('shizuha-279')
+    expect(suggestedHomeAgentUsername({ email: 'mihir@example.com', id: 279 })).toBe('shizuha-279')
   })
 
   it('suggests ena for the CEO mailbox', () => {
@@ -31,10 +36,11 @@ describe('home agent preference', () => {
     expect(resolveHomeAgentUsername('yuna', { email: 'hothritik1@gmail.com' })).toBe('yuna')
   })
 
-  it('does not send a regular or QA user to the operator Ena seat', () => {
-    expect(resolveHomeAgentUsername('', { email: 'liveqa@shizuha.com' })).toBe('yuna')
-    expect(resolveHomeAgentUsername('', { email: 'someone@example.com' })).toBe('yuna')
-    expect(resolveHomeAgentUsername('hina', { email: 'liveqa@shizuha.com' })).toBe('hina')
+  it('does not send a regular or QA user to the operator Ena or fleet Yuna seat', () => {
+    expect(resolveHomeAgentUsername('', { email: 'liveqa@shizuha.com', id: 555 })).toBe('shizuha-555')
+    expect(resolveHomeAgentUsername('', { email: 'someone@example.com', id: 279 })).toBe('shizuha-279')
+    expect(resolveHomeAgentUsername('', { email: 'someone@example.com' })).toBe('')
+    expect(resolveHomeAgentUsername('hina', { email: 'liveqa@shizuha.com', id: 555 })).toBe('hina')
   })
 
   it('round-trips localStorage', () => {
