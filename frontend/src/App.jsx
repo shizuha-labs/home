@@ -18,6 +18,13 @@ import AutonomousOrgPage from './pages/AutonomousOrgPage'
 import DrivePricingPage from './pages/DrivePricingPage'
 import LiveTracePage from './pages/LiveTracePage'
 
+const FORGE_STUDIO_URL = 'https://cortex.shizuha.com/studio'
+
+function ForgeStudioRedirect() {
+  window.location.replace(FORGE_STUDIO_URL)
+  return <LoadingSpinner />
+}
+
 function LoadingSpinner() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-white dark:bg-zinc-950">
@@ -72,6 +79,7 @@ export default function App() {
       <Route path="/forge" element={<ForgePage />} />
       <Route path="/forge/dashboard" element={<ForgeDashboardPage />} />
       <Route path="/forge/pricing" element={<ForgePricingPage />} />
+      <Route path="/studio" element={<ForgeStudioRedirect />} />
       <Route path="/api" element={<ApiPage />} />
       <Route path="/hive" element={<HivePage />} />
       <Route path="/dojo" element={<DojoPage />} />
