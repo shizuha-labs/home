@@ -19,6 +19,12 @@ const DEEP_LINKS = {
   books: '/books',
 }
 
+const TASK_BUCKETS = ['open', 'in_progress', 'in_review', 'blocked', 'awaiting_merge']
+
+function hasCompleteTaskSnapshot(widget) {
+  return TASK_BUCKETS.every((bucket) => Number.isFinite(widget?.data?.[bucket]))
+}
+
 function orgName(o) {
   return o?.name || (o?.id ? `Organization ${o.id}` : 'Organization')
 }
@@ -51,8 +57,12 @@ export default function CommandCenterDashboard({ orgId, onPeekOrg, summary: summ
 
   const agentData = agents.data || {}
   const t = tasks.data || {}
+  // The envelope status is authoritative, while complete finite counts are a
+  // second guard against a malformed success being coerced to an honest zero.
+  const hasTaskSnapshot = hasCompleteTaskSnapshot(tasks)
   const inFlight = (t.open || 0) + (t.in_progress || 0) + (t.in_review || 0) + (t.awaiting_merge || 0)
   const blocked = t.blocked || 0
+  const hasTaskActivity = inFlight > 0 || blocked > 0
   const finOrg = money.data?.org_id != null
     ? (orgs || []).find((o) => String(o.id) === String(money.data.org_id))
     : null
@@ -121,7 +131,11 @@ export default function CommandCenterDashboard({ orgId, onPeekOrg, summary: summ
               <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 group-hover:text-brand-500 dark:text-gray-500">Agent activity · retry</p>
             </button>
           )}
-          {(tasks.status === 'ok' || tasks.status === 'stale') && (
+          {tasks.status === 'loading' ? (
+            <div className="flex min-w-0 items-center rounded-xl px-3 py-2 sm:rounded-none sm:px-4 sm:py-0" aria-label="Loading work queue">
+              <span className="h-7 w-20 animate-pulse rounded-lg bg-gray-200/70 dark:bg-gray-700/50" />
+            </div>
+          ) : (tasks.status === 'ok' || tasks.status === 'stale') && hasTaskSnapshot && hasTaskActivity ? (
             <button onClick={() => navigate(DEEP_LINKS.pulse)} className="group min-w-0 rounded-xl px-3 py-2 text-left sm:rounded-none sm:px-4 sm:py-0">
               <p className="truncate text-sm font-semibold tabular-nums text-gray-800 dark:text-gray-100">
                 {inFlight} <span className="font-normal text-gray-500 dark:text-gray-400">in flight</span>
@@ -132,6 +146,21 @@ export default function CommandCenterDashboard({ orgId, onPeekOrg, summary: summ
               <p className="truncate text-[10px] font-semibold uppercase tracking-widest text-gray-400 group-hover:text-brand-500 dark:text-gray-500">
                 Work queue{tasks.status === 'stale' ? ' · cached' : ''}
               </p>
+            </button>
+          ) : tasks.status === 'empty' || (tasks.status === 'ok' && hasTaskSnapshot) ? (
+            <button onClick={() => navigate(DEEP_LINKS.pulse)} className="group min-w-0 rounded-xl px-3 py-2 text-left sm:rounded-none sm:px-4 sm:py-0">
+              <p className="text-sm font-semibold text-gray-600 dark:text-gray-300">No task activity</p>
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 group-hover:text-brand-500 dark:text-gray-500">Work queue</p>
+            </button>
+          ) : tasks.status === 'unauthorized' ? (
+            <div className="min-w-0 rounded-xl px-3 py-2 text-left sm:rounded-none sm:px-4 sm:py-0">
+              <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Scoped</p>
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 dark:text-gray-500">Work queue</p>
+            </div>
+          ) : (
+            <button onClick={refresh} className="group min-w-0 rounded-xl px-3 py-2 text-left sm:rounded-none sm:px-4 sm:py-0" title="Retry work queue snapshot">
+              <p className="text-sm font-medium text-amber-600 dark:text-amber-400">Unavailable</p>
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 group-hover:text-brand-500 dark:text-gray-500">Work queue · retry</p>
             </button>
           )}
           {(money.status === 'ok' || money.status === 'stale') && typeof money.data?.cash === 'number' && (
