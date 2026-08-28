@@ -115,6 +115,8 @@ function ChatHomeInner() {
     sendMessage,
     reloadMessages,
     streamingByConv,
+    sendTypingStart,
+    sendTypingStop,
   } = useConnectChat()
 
   const [inputValue, setInputValue] = useState('')
@@ -944,6 +946,8 @@ function ChatHomeInner() {
               sendOnOpenThread(text)
               setInputValue('')
             }}
+            onTypingStart={() => activeConversationId && sendTypingStart(activeConversationId)}
+            onTypingStop={() => activeConversationId && sendTypingStop(activeConversationId)}
             value={inputValue}
             onChange={setInputValue}
             placeholder={isConnected ? `Message ${activeName}...` : 'Connecting… send still works'}
