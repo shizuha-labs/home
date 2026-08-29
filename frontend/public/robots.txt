@@ -11,3 +11,4 @@ Disallow: /dojo/api/sessions
 
 Sitemap: https://shizuha.com/sitemap.xml
 Sitemap: https://shizuha.com/dojo/sitemap.xml
+Sitemap: https://shizuha.com/connect/sitemap.xml
