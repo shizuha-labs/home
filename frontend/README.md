@@ -39,3 +39,37 @@ npm run build
 ```
 
 `npm run build` has a `prebuild` check that fails early with the supported checkout shapes if the shared package sources are missing, instead of letting Vite fail later with an unresolved `@shizuha/ui` or `@shizuha/chat` import.
+
+## Tests
+
+Unit tests are the floor. They do **not** prove homepage Live, HUD continuity, or Connect leftovers. Run them first:
+
+```bash
+npm test
+```
+
+### Live operator QA (required before shipping Live / voice / homepage chat)
+
+The bugs that shipped half-baked (leftover `Replied.`, Keyterms ghosts, HUD stuck on Speaking, unscrollable mini-chat, Live dying on Dashboard / Open full chat) are only caught by driving **https://shizuha.com** as a logged-in user.
+
+```bash
+npm run test:e2e:live:qa
+npm run test:e2e:live
+```
+
+`test:e2e:live:qa` is the class pack that should have caught the operator Live bugs (Start Live replay, HUD mute sending `I'm`, silence after her reply inventing `What can I do?`). `test:e2e:live` also runs homepage talk, Voice replies off, and live-trace.
+
+Both set `SHIZUHA_LIVE_E2E=1` and `BASE_URL=https://shizuha.com`. Credentials come from `LIVE_QA_USER` / `LIVE_QA_PASS` or `~/.shizuha/live-qa-creds` (two lines: username, password) and talk to **Ena QA / Yuna**, not the operator Ena thread. Do not commit or print the password. Operator-path chrome is opt-in via `SHIZUHA_LIVE_OPERATOR_E2E=1`.
+
+The live suite logs in through `/id/login?continue=/`, starts Live, types a unique turn, waits for a **new** agent reply, and asserts the same surfaces the operator sees:
+
+- the typed turn is visible in the homepage strip
+- no `Replied.` / `Keyterms:` leftovers
+- HUD leaves Speaking
+- mini-chat and the homepage column scroll
+- Open full chat and Dashboard keep the same HUD (SPA, no remount)
+- thread Live / mic / speak chrome is present
+- Connect conversation POST and DM reject `Replied.` with 400
+- `/c/bb516974-4152-427a-a2ac-04535b5f393f` hides leftovers and can start Live
+
+Screenshots land in `test-results/live-operator/`. A green unit run with this suite skipped is not a ship signal.

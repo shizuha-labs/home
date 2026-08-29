@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation, Outlet } from 'react-router-dom'
 import { useAuth } from './contexts/AuthContext'
 import GlobalNavBar from './components/shared/GlobalNavBar'
 import LandingPage from './pages/LandingPage'
@@ -9,6 +9,7 @@ import ForgePage from './pages/ForgePage'
 import ForgeDashboardPage from './pages/ForgeDashboardPage'
 import ForgePricingPage from './pages/ForgePricingPage'
 import ForgeSignupPage from './pages/ForgeSignupPage'
+import ForgeDocsPage from './pages/ForgeDocsPage'
 import ApiPage from './pages/ApiPage'
 import HivePage from './pages/HivePage'
 import ResearchPage from './pages/ResearchPage'
@@ -16,6 +17,14 @@ import ResearchOrderPage from './pages/ResearchOrderPage'
 import DojoPage from './pages/DojoPage'
 import AutonomousOrgPage from './pages/AutonomousOrgPage'
 import DrivePricingPage from './pages/DrivePricingPage'
+import LiveTracePage from './pages/LiveTracePage'
+
+const FORGE_STUDIO_URL = 'https://cortex.shizuha.com/studio'
+
+function ForgeStudioRedirect() {
+  window.location.replace(FORGE_STUDIO_URL)
+  return <LoadingSpinner />
+}
 
 function LoadingSpinner() {
   return (
@@ -29,49 +38,50 @@ function LoadingSpinner() {
 
 function Home() {
   const { isLoading, isAuthenticated } = useAuth()
+  const { pathname } = useLocation()
 
   if (isLoading) return <LoadingSpinner />
 
-  // Authenticated: show command-center experience with global nav
-  if (isAuthenticated) {
-    return (
-      <div className="h-screen flex flex-col bg-white dark:bg-gray-950">
-        <GlobalNavBar />
-        <div className="flex-1 overflow-hidden pt-14">
-          <ChatHome />
-        </div>
-      </div>
-    )
-  }
-
-  // Unauthenticated: show landing page
-  return <LandingPage />
-}
-
-function AuthGuard({ children }) {
-  const { isAuthenticated, isLoading } = useAuth()
-  if (isLoading) return <LoadingSpinner />
+  const conversationRoute = pathname === '/c' || pathname.startsWith('/c/')
   if (!isAuthenticated) {
-    const returnUrl = window.location.pathname
-    window.location.href = `/id/login?continue=${encodeURIComponent(returnUrl)}`
-    return <LoadingSpinner />
+    // /c/:id must stay login-gated; `/` stays the public landing.
+    if (conversationRoute) {
+      window.location.href = `/id/login?continue=${encodeURIComponent(pathname)}`
+      return <LoadingSpinner />
+    }
+    return <LandingPage />
   }
-  return children
+
+  // One shell for `/` and `/c/:id` so Live + ChatHome do not remount
+  // when the operator opens a thread mid-call.
+  return (
+    <div className="h-screen flex flex-col bg-white dark:bg-gray-950">
+      <GlobalNavBar />
+      <div className="flex-1 overflow-hidden pt-14">
+        <ChatHome />
+      </div>
+      <Outlet />
+    </div>
+  )
 }
 
 export default function App() {
   return (
     <Routes>
-      <Route path="/" element={<Home />} />
+      <Route element={<Home />}>
+        <Route index element={null} />
+        <Route path="c" element={null} />
+        <Route path="c/:conversationId" element={null} />
+      </Route>
       <Route path="/hive" element={<LandingPage />} />
-      <Route path="/c" element={<AuthGuard><Home /></AuthGuard>} />
-      <Route path="/c/:conversationId" element={<AuthGuard><Home /></AuthGuard>} />
       <Route path="/docs" element={<DocsPage />} />
       <Route path="/benchmarks" element={<BenchmarksPage />} />
       <Route path="/forge/signup" element={<ForgeSignupPage />} />
       <Route path="/forge" element={<ForgePage />} />
       <Route path="/forge/dashboard" element={<ForgeDashboardPage />} />
       <Route path="/forge/pricing" element={<ForgePricingPage />} />
+      <Route path="/forge/docs" element={<ForgeDocsPage />} />
+      <Route path="/studio" element={<ForgeStudioRedirect />} />
       <Route path="/api" element={<ApiPage />} />
       <Route path="/hive" element={<HivePage />} />
       <Route path="/dojo" element={<DojoPage />} />
@@ -79,6 +89,7 @@ export default function App() {
       <Route path="/research" element={<ResearchPage />} />
       <Route path="/research/order" element={<ResearchOrderPage />} />
       <Route path="/drive/pricing" element={<DrivePricingPage />} />
+      <Route path="/live-trace" element={<LiveTracePage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )

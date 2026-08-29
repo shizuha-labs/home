@@ -149,6 +149,107 @@ def test_agents_live_maps_fields_and_leads_with_working():
     assert w.data[1]["status"] == "stopped"
 
 
+def _talk_roster():
+    from app.schema import Widget
+    return Widget.ok_(data=[
+        {
+            "name": "Hina",
+            "username": "hina",
+            "email": "hina@shizuha.com",
+            "role": "Executive Assistant",
+            "teams": ["ceo-office"],
+            "status": "running",
+            "identity_user_id": 42,
+            "user_id": 42,
+        },
+        {
+            "name": "Yuna",
+            "username": "yuna",
+            "email": "yuna@shizuha.com",
+            "role": "Executive Assistant",
+            "teams": ["ceo-office"],
+            "status": "stopped",
+            "identity_user_id": 734,
+            "user_id": 734,
+        },
+        {
+            "name": "Shizuha",
+            "username": "shizuha-279",
+            "email": "shizuha-279@agents.shizuha.io",
+            "role": "Personal Shizuha",
+            "teams": [],
+            "status": "hibernated",
+            "identity_user_id": 752,
+            "user_id": 752,
+        },
+        {
+            "name": "Shizuha",
+            "username": "shizuha-101",
+            "email": "shizuha-101@agents.shizuha.io",
+            "role": "Personal Shizuha",
+            "teams": [],
+            "status": "hibernated",
+            "identity_user_id": 8101,
+            "user_id": 8101,
+        },
+    ])
+
+
+def test_talk_agents_finds_hina_by_username_for_ceo(monkeypatch):
+    widget_cache.clear()
+
+    async def _fake_agents(_client, _bearer, _org_id=None):
+        return _talk_roster()
+
+    monkeypatch.setattr("app.clients.fetch_agents_live", _fake_agents)
+    resp = client.get(
+        "/api/home/talk-agents?q=hina",
+        headers=_auth(_token(email="hritik@shizuha.com")),
+    )
+    assert resp.status_code == 200
+    rows = resp.json()["results"]
+    assert rows[0]["username"] == "hina"
+    assert rows[0]["userId"] == 42
+
+
+def test_talk_agents_hides_org_yuna_from_customers(monkeypatch):
+    widget_cache.clear()
+
+    async def _fake_agents(_client, _bearer, _org_id=None):
+        return _talk_roster()
+
+    monkeypatch.setattr("app.clients.fetch_agents_live", _fake_agents)
+    mihir = _auth(_token(user_id=279, email="mihirgates@hotmail.com"))
+    yuna = client.get("/api/home/talk-agents?q=yuna", headers=mihir)
+    assert yuna.status_code == 200
+    assert yuna.json()["results"] == []
+    own = client.get("/api/home/talk-agents?q=shizuha", headers=mihir)
+    assert own.status_code == 200
+    rows = own.json()["results"]
+    assert [row["username"] for row in rows] == ["shizuha-279"]
+    assert rows[0]["displayName"] == "Shizuha"
+    assert rows[0]["userId"] == 752
+    other = client.get(
+        "/api/home/talk-agents?q=shizuha-101",
+        headers=mihir,
+    )
+    assert other.json()["results"] == []
+
+
+def test_agents_live_maps_identity_user_id():
+    def handler(request):
+        return httpx.Response(200, json={"results": [
+            {"agent_username": "hina", "display_name": "Hina",
+             "identity_user_id": 42, "status": "pending"},
+        ]})
+    async def go():
+        async with _mock_client(handler) as c:
+            return await clients.fetch_agents_live(c, "t")
+    w = _run(go())
+    assert w.data[0]["identity_user_id"] == 42
+    assert w.data[0]["email"] == "hina@shizuha.com"
+
+
 def test_agents_live_unauthorized_on_403():
     def handler(request):
         return httpx.Response(403, json={})

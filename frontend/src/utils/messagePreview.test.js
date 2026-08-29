@@ -1,23 +1,33 @@
-import { test } from 'node:test'
-import assert from 'node:assert/strict'
+import { describe, expect, it } from 'vitest'
 import { sanitizeMessagePreview } from './messagePreview.js'
 
-test('strips markdown headings from ANDON previews', () => {
-  const { text, chip } = sanitizeMessagePreview(
-    '## 🔴 ANDON — k8s agent Deployment not ready',
-  )
-  assert.equal(text.startsWith('##'), false)
-  assert.equal(chip, 'Andon')
-  assert.match(text, /ANDON|Deployment/i)
-})
+describe('sanitizeMessagePreview', () => {
+  it('strips markdown headings from ANDON previews', () => {
+    const { text, chip } = sanitizeMessagePreview(
+      '## 🔴 ANDON — k8s agent Deployment not ready',
+    )
+    expect(text.startsWith('##')).toBe(false)
+    expect(chip).toBe('Andon')
+    expect(text).toMatch(/ANDON|Deployment/i)
+  })
 
-test('strips emphasis markers', () => {
-  const { text } = sanitizeMessagePreview('**bold** and _italic_')
-  assert.equal(text.includes('**'), false)
-  assert.equal(text.includes('_'), false)
-  assert.match(text, /bold/)
-})
+  it('strips emphasis markers', () => {
+    const { text } = sanitizeMessagePreview('**bold** and _italic_')
+    expect(text.includes('**')).toBe(false)
+    expect(text.includes('_')).toBe(false)
+    expect(text).toMatch(/bold/)
+  })
 
-test('null-safe empty', () => {
-  assert.deepEqual(sanitizeMessagePreview(null), { text: '', chip: null })
+  it('null-safe empty', () => {
+    expect(sanitizeMessagePreview(null)).toEqual({ text: '', chip: null })
+  })
+
+  it('hides ack-only Replied. and Keyterms leftovers from the sidebar', () => {
+    expect(sanitizeMessagePreview('Replied.')).toEqual({ text: '', chip: null })
+    expect(sanitizeMessagePreview('Keyterms: Shizuha, Hritik, Hive, Cortex, Pulse')).toEqual({
+      text: '',
+      chip: null,
+    })
+    expect(sanitizeMessagePreview("Hey. I'm here.").text).toMatch(/hey/i)
+  })
 })

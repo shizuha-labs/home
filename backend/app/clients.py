@@ -389,10 +389,12 @@ async def fetch_agents_live(client: httpx.AsyncClient, bearer: str,
         if not isinstance(a, dict):
             continue
         status = _widget_count_status(a)
+        username = a.get("agent_username") or ""
+        identity_user_id = a.get("identity_user_id")
         agents.append({
-            "name": a.get("display_name") or a.get("agent_username") or "",
-            "username": a.get("agent_username") or "",
-            "email": a.get("email") or "",
+            "name": a.get("display_name") or username or "",
+            "username": username,
+            "email": a.get("email") or (f"{username}@shizuha.com" if username else ""),
             "role": a.get("role") or a.get("display_title") or "",
             "teams": a.get("team_names") or [],
             "model": a.get("effective_model") or a.get("model") or "",
@@ -400,12 +402,84 @@ async def fetch_agents_live(client: httpx.AsyncClient, bearer: str,
             "status": status,
             "enabled": a.get("enabled"),
             "last_active_at": a.get("last_active_at"),
+            "identity_user_id": identity_user_id,
+            "user_id": identity_user_id,
         })
     if not agents:
         return Widget.empty_()
     # Working agents first, then by name, so the strip leads with the action.
     agents.sort(key=lambda x: (x["status"] != "running", x["name"].lower()))
     return Widget.ok_(data=agents)
+
+
+CEO_HOME_EMAILS = frozenset({"hothritik1@gmail.com", "hritik@shizuha.com"})
+ORG_TALK_AGENT_USERNAMES = frozenset({"yuna", "hina", "ena", "aya"})
+
+
+def personal_home_agent_username(user_id) -> str:
+    try:
+        uid = int(user_id)
+    except (TypeError, ValueError):
+        return ""
+    if uid <= 0:
+        return ""
+    return f"shizuha-{uid}"
+
+
+def caller_may_talk_to_agent(caller, username: str) -> bool:
+    """Customers may only talk to their own personal Shizuha from home."""
+    raw = str(username or "").strip().lower()
+    if not raw:
+        return False
+    email = str(getattr(caller, "email", "") or "").strip().lower() if caller is not None else ""
+    if email in CEO_HOME_EMAILS:
+        return True
+    if raw in ORG_TALK_AGENT_USERNAMES:
+        return False
+    personal = personal_home_agent_username(getattr(caller, "user_id", None) if caller is not None else None)
+    return bool(personal) and raw == personal
+
+
+async def fetch_talk_agents(client: httpx.AsyncClient, bearer: str,
+                            query: str = "",
+                            org_id: Optional[int] = None,
+                            caller=None) -> list[dict]:
+    """Search Hive fleet agents the caller can already see — for home chat.
+
+    Returns username + identity_user_id so the composer can open a Connect DM
+    with an agent who has never been messaged (Hina was invisible here).
+    Non-CEO callers are locked to their personal ``shizuha-<id>`` seat so the
+    homepage cannot surface CEO Office Yuna/Hina/Ena (HIVE-2131).
+    """
+    widget = await fetch_agents_live(client, bearer, org_id)
+    rows = widget.data if widget.status in ("ok", "stale", "degraded") and isinstance(widget.data, list) else []
+    ql = (query or "").strip().lower()
+    out = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        username = str(row.get("username") or "").strip()
+        if not username:
+            continue
+        if not caller_may_talk_to_agent(caller, username):
+            continue
+        blob = " ".join([
+            str(row.get("name") or ""),
+            username,
+            str(row.get("email") or ""),
+            str(row.get("role") or ""),
+            " ".join(row.get("teams") or []),
+        ]).lower()
+        if ql and ql not in blob:
+            continue
+        display = "Shizuha" if username.lower().startswith("shizuha-") else (row.get("name") or username)
+        out.append({
+            "userId": row.get("identity_user_id") or row.get("user_id"),
+            "username": username,
+            "displayName": display,
+            "email": row.get("email") or f"{username}@shizuha.com",
+        })
+    return out[:16]
 
 
 async def fetch_alerts(client: httpx.AsyncClient, bearer: str,

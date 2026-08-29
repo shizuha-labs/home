@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react'
+import LiveWaveformIcon from './LiveWaveformIcon'
+import { isTalkAckText, isGhostTranscript } from '../../hooks/useVoice'
+import TtsSpeedButton from './TtsSpeedButton'
 
 /**
  * MiniShizuhaChat — HIVE home inline chat (operator 2026-07-11).
@@ -17,6 +20,7 @@ export default function MiniShizuhaChat({
   typingUsers,
   currentUserId,
   isLoading,
+  agentLabel = 'Agent',
   onOpenFull,
   onClose,
   speakEnabled,
@@ -26,6 +30,8 @@ export default function MiniShizuhaChat({
   onToggleCall,
   onRetryCall,
   onDismissCallError,
+  ttsSpeed,
+  onCycleSpeed,
 }) {
   const scrollRef = useRef(null)
   // 'error' is a terminal guidance surface, not an active call (CON-296).
@@ -38,10 +44,10 @@ export default function MiniShizuhaChat({
           : callState === 'speaking' ? 'Speaking…'
             : ''
 
-  // Rolling window: latest 3 messages, newest at the bottom.
+  // Rolling window: drop talk-seat "Replied." leftovers, keep recent turns.
   const visible = useMemo(() => {
     const list = Array.isArray(messages) ? messages : []
-    return list.slice(-3)
+    return list.filter((m) => !isTalkAckText(m?.content) && !isGhostTranscript(m?.content)).slice(-20)
   }, [messages])
 
   const shizuhaTyping = Array.isArray(typingUsers) && typingUsers.length > 0
@@ -76,7 +82,7 @@ export default function MiniShizuhaChat({
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-400 opacity-75" />
               <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-brand-500" />
             </span>
-            Shizuha — live
+            {agentLabel} — live
           </span>
         )}
         <div className="flex items-center gap-1">
@@ -85,27 +91,39 @@ export default function MiniShizuhaChat({
               onClick={onToggleCall}
               title={
                 callActive
-                  ? 'End voice call'
+                  ? 'End Live'
                   : callFailed
-                    ? (callError?.canRetry ? 'Retry voice call' : 'Dismiss voice error')
-                    : 'Start a hands-free voice call'
+                    ? (callError?.canRetry ? 'Retry Live' : 'Dismiss voice error')
+                    : 'Start Live voice'
+              }
+              aria-label={
+                callActive
+                  ? 'End Live'
+                  : callFailed
+                    ? (callError?.canRetry ? 'Retry Live' : 'Dismiss voice error')
+                    : 'Start Live voice'
               }
               className={`rounded-lg p-1.5 transition-colors ${callActive
-                ? 'text-white bg-emerald-500 animate-pulse'
+                ? 'text-white bg-neutral-900 dark:bg-white dark:text-neutral-900'
                 : callFailed
                   ? 'text-white bg-amber-500'
-                  : 'text-gray-400 hover:text-emerald-600 dark:hover:text-emerald-400'}`}
+                  : 'text-gray-400 hover:text-brand-600 dark:hover:text-brand-400'}`}
             >
-              <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M6.62 10.79a15.05 15.05 0 006.59 6.59l2.2-2.2a1 1 0 011.02-.24 11.36 11.36 0 003.56.57 1 1 0 011 1V20a1 1 0 01-1 1A17 17 0 013 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.24.2 2.45.57 3.56a1 1 0 01-.24 1.02l-2.21 2.21z" />
-              </svg>
+              <LiveWaveformIcon className="h-3.5 w-3.5" active={callActive} />
             </button>
+          )}
+          {typeof onCycleSpeed === 'function' && (
+            <TtsSpeedButton speed={ttsSpeed} onCycle={onCycleSpeed} compact />
           )}
           {typeof onToggleSpeak === 'function' && (
             <button
+              type="button"
+              data-testid="mini-speak-button"
               onClick={onToggleSpeak}
-              title={speakEnabled ? 'Voice replies on' : 'Voice replies off'}
-              className={`rounded-lg p-1.5 transition-colors ${speakEnabled
+              title={speakEnabled ? 'Hearing her — click to mute' : 'Her voice is muted — click to hear'}
+              aria-pressed={speakEnabled}
+              aria-label={speakEnabled ? 'Mute her voice' : 'Hear her voice'}
+              className={`rounded-lg p-1.5 transition-colors ${speakEnabled}
                 ? 'text-brand-600 bg-brand-50 dark:text-brand-400 dark:bg-brand-950/40'
                 : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}
             >
@@ -165,7 +183,11 @@ export default function MiniShizuhaChat({
           soft top fade sells the "rolling" read. */}
       <div className="relative">
         <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-5 bg-gradient-to-b from-white/85 to-transparent dark:from-gray-900/70" />
-        <div ref={scrollRef} className="max-h-40 space-y-1.5 overflow-y-auto px-4 pb-3 pt-1">
+        <div
+          ref={scrollRef}
+          data-testid="mini-chat-scroll"
+          className="max-h-64 min-h-0 space-y-1.5 overflow-y-auto overscroll-y-contain px-4 pb-3 pt-1"
+        >
           {isLoading && visible.length === 0 && (
             <p className="py-2 text-center text-xs text-gray-400">Loading conversation…</p>
           )}

@@ -36,14 +36,25 @@ from .auth import Caller, resolve_scope_org, verify_caller
 from .cache import cache_key, widget_cache
 from .clients import (
     fetch_agent_activity, fetch_agent_peek, fetch_agents_live, fetch_alerts,
+    fetch_talk_agents,
     fetch_financial_snapshot, fetch_live_feed, fetch_org_map, fetch_org_progress,
     fetch_org_refs, fetch_recent_conversations, fetch_task_peek, fetch_tasks_by_status,
 )
 from .audit_leads import AuditLeadRequest, AuditLeadResponse, persist_audit_lead
 from .config import settings
+from .live_trace import (
+    RateLimited,
+    check_rate,
+    fetch_connect_messages,
+    merge_timeline,
+    persist_events,
+    read_events,
+    sanitize_event,
+)
 from .redis_client import block_read, block_read_multi, read_recent, read_recent_multi
 from .schema import (
     ActivityRecentResponse, HomeActivityEventV1, HomeSummaryV1, HomeActivityV1,
+    LiveTraceIngestResponse, LiveTraceIngestV1, LiveTraceTimelineV1,
     SUMMARY_VERSION, Widget,
 )
 
@@ -90,6 +101,53 @@ def _clear_audit_lead_rate_limits_for_tests() -> None:
 @app.get("/api/home/health")
 async def health():
     return {"status": "ok", "version": SUMMARY_VERSION}
+
+
+@app.post("/api/home/live-trace", response_model=LiveTraceIngestResponse)
+async def ingest_live_trace(
+    payload: LiveTraceIngestV1,
+    caller: Caller = Depends(verify_caller),
+) -> LiveTraceIngestResponse:
+    try:
+        check_rate(caller.user_id)
+    except RateLimited:
+        raise HTTPException(status_code=429, detail="Too many live-trace events")
+    accepted = []
+    dropped = 0
+    for raw in (payload.events or [])[:40]:
+        event = sanitize_event(raw, caller.user_id)
+        if event:
+            accepted.append(event)
+        else:
+            dropped += 1
+    stored = await persist_events(caller.user_id, accepted)
+    return LiveTraceIngestResponse(accepted=stored, dropped=dropped + (len(accepted) - stored))
+
+
+@app.get("/api/home/live-trace", response_model=LiveTraceTimelineV1)
+async def get_live_trace(
+    caller: Caller = Depends(verify_caller),
+    conversation_id: Optional[str] = Query(default=None),
+    call_id: Optional[str] = Query(default=None),
+    include_messages: bool = Query(default=True),
+    limit: int = Query(default=200, ge=1, le=400),
+) -> LiveTraceTimelineV1:
+    events = await read_events(
+        caller.user_id,
+        conversation_id=conversation_id or "",
+        call_id=call_id or "",
+        limit=limit,
+    )
+    messages = []
+    if include_messages and conversation_id:
+        messages = await fetch_connect_messages(caller.bearer, conversation_id, limit=min(limit, 80))
+    return LiveTraceTimelineV1(
+        generated_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        user_id=caller.user_id,
+        conversation_id=conversation_id,
+        call_id=call_id,
+        events=merge_timeline(events, messages),
+    )
 
 
 @app.post("/api/research/audit-leads", response_model=AuditLeadResponse, status_code=201)
@@ -260,6 +318,23 @@ async def home_activity(
 
 
 # ── HIVE-602 cockpit drill-downs — on-demand, uncached, caller-scoped ────────
+
+@app.get("/api/home/talk-agents")
+async def home_talk_agents(
+    caller: Caller = Depends(verify_caller),
+    q: str = Query(default="", max_length=80),
+    org_id: Optional[int] = Query(default=None),
+):
+    """Search fleet agents the caller can talk to from home."""
+    scope_org = resolve_scope_org(caller, org_id)
+    async with httpx.AsyncClient() as client:
+        results = await fetch_talk_agents(
+            client, caller.bearer, q, scope_org, caller=caller)
+    return {
+        "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "results": results,
+    }
+
 
 @app.get("/api/home/agent")
 async def home_agent_peek(

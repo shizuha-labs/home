@@ -16,8 +16,8 @@ export default defineConfig({
   // Retry on CI only
   retries: process.env.CI ? 2 : 0,
 
-  // Opt out of parallel tests on CI
-  workers: process.env.CI ? 1 : undefined,
+  // Opt out of parallel tests on CI. Spoken Live is one real call — never two.
+  workers: process.env.CI || process.env.SHIZUHA_LIVE_SPOKEN_E2E === '1' ? 1 : undefined,
 
   // Reporter to use
   reporter: [
@@ -27,8 +27,10 @@ export default defineConfig({
 
   // Shared settings for all the projects below
   use: {
-    // Base URL - use shizuha-nginx for internal pod access
-    baseURL: process.env.BASE_URL || 'http://shizuha-nginx',
+    // Live operator QA talks to production. In-cluster specs still default
+    // to the in-cluster nginx name.
+    baseURL: process.env.BASE_URL
+      || (process.env.SHIZUHA_LIVE_E2E === '1' ? 'https://shizuha.com' : 'http://shizuha-nginx'),
 
     // Collect trace when retrying the failed test
     trace: 'on-first-retry',
@@ -63,11 +65,9 @@ export default defineConfig({
     // },
   ],
 
-  // Global timeout for each test
-  timeout: 60000,
-
-  // Global timeout for entire test run (10 minutes max)
-  globalTimeout: 10 * 60 * 1000,
+  // Spoken Live conversations need a longer wall clock than typed smoke.
+  timeout: process.env.SHIZUHA_LIVE_SPOKEN_E2E === '1' ? 20 * 60 * 1000 : 60000,
+  globalTimeout: process.env.SHIZUHA_LIVE_SPOKEN_E2E === '1' ? 45 * 60 * 1000 : 10 * 60 * 1000,
 
   // Expect timeout
   expect: {

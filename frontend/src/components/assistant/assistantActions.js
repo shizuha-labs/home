@@ -18,6 +18,21 @@ export const ACTION_TIERS = {
 
 export const ASSISTANT_ACTIONS = [
   {
+    id: 'open-live-trace',
+    label: 'Open live trace',
+    description: 'Open the voice + chat timeline for this session.',
+    tier: 1,
+    owner: 'Home',
+    href: '/live-trace',
+    deepLink: '/live-trace',
+    requiredInputs: [],
+    authSurface: 'home-live-trace',
+    confirmationCopy: 'I will open the live trace timeline.',
+    auditEvent: 'assistant_action_open_live_trace',
+    prompt: 'Open the live voice trace timeline.',
+    keywords: ['trace', 'timeline', 'telemetry', 'voice', 'debug', 'live'],
+  },
+  {
     id: 'create-task',
     label: 'Create a task',
     description: 'Draft a Pulse task from your request and confirm with a link.',
