@@ -639,40 +639,47 @@ def wiki_upsert_ledger(
 def pulse_find_existing(api_base: str, token: str, source_id: str) -> dict[str, Any] | None:
     """Return the existing Pulse item for this finding's stable ``source_id``, if any.
 
-    PLAT-2688: the previous implementation searched by ``source_id`` and then
-    re-confirmed the match from each returned row's ``source_id``/``description``.
-    But the list endpoint serializes with ``ItemListSerializer``, which exposes
-    NEITHER field — so the per-row check was always False, ``None`` was returned
-    for every finding, and each repeated CI run refiled a duplicate even when an
-    identical-``source_id`` task (including already-accepted ones) existed.
+    PLAT-2688: constrain the query server-side with ``source_id=`` (index-backed
+    exact match on ``(source, source_id)``). ItemListSerializer does not expose
+    ``source_id``/``description``, so the match must not depend on per-row fields.
 
-    We instead constrain the query server-side so every returned row is a genuine
-    match and no per-row field inspection is needed:
-      - ``source_id=`` — exact, index-backed filter on ``(source, source_id)``
-        (migration 0005) on Pulse builds that carry the PLAT-2688 filter;
-      - ``search=`` — the ``source_id`` is a unique, namespaced (``security-ci:``)
-        token that appears in the finding's description/comments, so on any build
-        this still limits results to items that actually contain it.
-    Both are AND-combined, so a returned row is authoritative regardless of which
-    filters the backend honors. No ``status`` filter is sent, so matches span ALL
-    statuses (open/accepted/awaiting-merge/rejected/terminal) — repeated runs
-    dedupe against accepted findings and terminal false-positive dispositions
-    rather than refiling.
+    Do NOT AND ``search=`` with ``source_id=``. Ledger titles are
+    ``[security-ci] Findings ledger — <repo>`` and the description does not
+    contain the token ``security-ci:<repo>:ledger``. AND-combining those filters
+    returned zero rows on every weekly scan and minted a new ledger (live
+    2026-08-29: six open cortex ledgers sharing one source_id). Look up by
+    source_id first; fall back to search only when that filter returns nothing
+    (old Pulse builds without the PLAT-2688 query param).
     """
     q = urllib.parse.urlencode({
         "source": SECURITY_CI_SOURCE,
         "source_id": source_id,
-        "search": source_id,
         # Also match auto-archived done-category copies — otherwise a repeated
         # run would refile a duplicate of an archived finding.
         "include_archived": "true",
     })
     data = pulse_request("GET", f"{api_base}/items/?{q}", token)
     rows = data.get("results") if isinstance(data, dict) else data
+    matched = []
     for row in rows or []:
         # When the payload exposes source_id, require an exact match; when it does
-        # not (the list serializer), the server-side source_id/search constraint
-        # already guarantees the row contains this unique token — trust it.
+        # not (the list serializer), the server-side source_id constraint already
+        # guarantees the row is this identity — trust it.
+        rid = row.get("source_id")
+        if rid in (None, source_id) and (row.get("item_key") or row.get("id")):
+            matched.append(row)
+    if matched:
+        matched.sort(key=lambda row: str(row.get("created_at") or row.get("id") or ""))
+        return matched[0]
+    # Fallback for Pulse builds that ignore the source_id query param.
+    q2 = urllib.parse.urlencode({
+        "source": SECURITY_CI_SOURCE,
+        "search": source_id,
+        "include_archived": "true",
+    })
+    data = pulse_request("GET", f"{api_base}/items/?{q2}", token)
+    rows = data.get("results") if isinstance(data, dict) else data
+    for row in rows or []:
         rid = row.get("source_id")
         if rid in (None, source_id) and (row.get("item_key") or row.get("id")):
             return row
