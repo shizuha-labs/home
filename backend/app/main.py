@@ -20,6 +20,7 @@ import asyncio
 import base64
 import datetime
 import json
+import logging
 import time
 from typing import AsyncGenerator, Optional
 
@@ -28,6 +29,8 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
+
+logger = logging.getLogger("home_bff.app")
 
 from .auth import Caller, resolve_scope_org, verify_caller
 from .cache import cache_key, widget_cache
@@ -53,6 +56,13 @@ from .schema import (
     ActivityRecentResponse, HomeActivityEventV1, HomeSummaryV1, HomeActivityV1,
     LiveTraceIngestResponse, LiveTraceIngestV1, LiveTraceTimelineV1,
     SUMMARY_VERSION, Widget,
+)
+
+# PLAT-5298: total budget (seconds) for the /api/home/activity poll, read from
+# config at import. Module-level so tests (and ops) can tune it without poking
+# the immutable pydantic settings instance.
+ACTIVITY_FETCH_BUDGET_SECONDS = float(
+    getattr(settings, "ACTIVITY_FETCH_BUDGET_SECONDS", 4.0)
 )
 
 app = FastAPI(title="Shizuha Home BFF", version=str(SUMMARY_VERSION))
@@ -254,7 +264,7 @@ async def home_activity(
     scope_org = resolve_scope_org(caller, org_id)
     feed_orgs = [scope_org] if scope_org is not None else sorted(caller.memberships.keys())
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=settings.SOURCE_TIMEOUT_SECONDS) as client:
         if since:
             # Delta polls bypass the cache both ways: a delta must not be
             # served stale, and a tiny delta result must not poison the
@@ -267,17 +277,38 @@ async def home_activity(
                 lambda: fetch_live_feed(client, caller.bearer, org_ids=feed_orgs),
                 cache_fresh=False,
             )
-        feed_widget, agents_widget = await asyncio.gather(
-            feed_coro,
-            widget_cache.get_or_fetch(
-                # 15s shared fresh-cache: agent state doesn't change per-second,
-                # and always-fetch at an 8s poll per viewer pushed ~335KB fleet
-                # reads onto hive continuously — enough to flap its (formerly
-                # 1s-timeout) readiness probe into a 502 outage (2026-07-10).
-                cache_key("agents_live", caller.user_id, scope_org, caller.memberships),
-                lambda: fetch_agents_live(client, caller.bearer, scope_org),
-            ),
+        agents_coro = widget_cache.get_or_fetch(
+            # 15s shared fresh-cache: agent state doesn't change per-second,
+            # and always-fetch at an 8s poll per viewer pushed ~335KB fleet
+            # reads onto hive continuously — enough to flap its (formerly
+            # 1s-timeout) readiness probe into a 502 outage (2026-07-10).
+            cache_key("agents_live", caller.user_id, scope_org, caller.memberships),
+            lambda: fetch_agents_live(client, caller.bearer, scope_org),
         )
+
+        # PLAT-5298: bound the whole poll. The feed fans out per-org (worst
+        # case up to 8 x 2.5s) and nginx proxies /api/home/ with a 5s read
+        # timeout — an un-bounded slow-but-not-raising downstream would yield a
+        # 504 Gateway Timeout before the stale-cache fallback ever applied. Race
+        # the live fetches against a hard deadline and serve the last good cache
+        # on expiry so the theater degrades instead of showing a gateway error.
+        total_budget = ACTIVITY_FETCH_BUDGET_SECONDS
+        try:
+            feed_widget, agents_widget = await asyncio.wait_for(
+                asyncio.gather(feed_coro, agents_coro),
+                timeout=total_budget,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "home_activity exceeded %.1fs budget (orgs=%s) — serving stale cache",
+                total_budget, feed_orgs,
+            )
+            feed_widget = widget_cache.entry_or_fallback(
+                cache_key("live_feed", caller.user_id, scope_org, caller.memberships),
+            )
+            agents_widget = widget_cache.entry_or_fallback(
+                cache_key("agents_live", caller.user_id, scope_org, caller.memberships),
+            )
 
     return HomeActivityV1(
         generated_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -297,7 +328,8 @@ async def home_talk_agents(
     """Search fleet agents the caller can talk to from home."""
     scope_org = resolve_scope_org(caller, org_id)
     async with httpx.AsyncClient() as client:
-        results = await fetch_talk_agents(client, caller.bearer, q, scope_org)
+        results = await fetch_talk_agents(
+            client, caller.bearer, q, scope_org, caller=caller)
     return {
         "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "results": results,

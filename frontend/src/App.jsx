@@ -9,6 +9,7 @@ import ForgePage from './pages/ForgePage'
 import ForgeDashboardPage from './pages/ForgeDashboardPage'
 import ForgePricingPage from './pages/ForgePricingPage'
 import ForgeSignupPage from './pages/ForgeSignupPage'
+import ForgeDocsPage from './pages/ForgeDocsPage'
 import ApiPage from './pages/ApiPage'
 import HivePage from './pages/HivePage'
 import ResearchPage from './pages/ResearchPage'
@@ -17,6 +18,13 @@ import DojoPage from './pages/DojoPage'
 import AutonomousOrgPage from './pages/AutonomousOrgPage'
 import DrivePricingPage from './pages/DrivePricingPage'
 import LiveTracePage from './pages/LiveTracePage'
+
+const FORGE_STUDIO_URL = 'https://cortex.shizuha.com/studio'
+
+function ForgeStudioRedirect() {
+  window.location.replace(FORGE_STUDIO_URL)
+  return <LoadingSpinner />
+}
 
 function LoadingSpinner() {
   return (
@@ -72,6 +80,8 @@ export default function App() {
       <Route path="/forge" element={<ForgePage />} />
       <Route path="/forge/dashboard" element={<ForgeDashboardPage />} />
       <Route path="/forge/pricing" element={<ForgePricingPage />} />
+      <Route path="/forge/docs" element={<ForgeDocsPage />} />
+      <Route path="/studio" element={<ForgeStudioRedirect />} />
       <Route path="/api" element={<ApiPage />} />
       <Route path="/hive" element={<HivePage />} />
       <Route path="/dojo" element={<DojoPage />} />

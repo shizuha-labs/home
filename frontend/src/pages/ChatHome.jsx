@@ -16,15 +16,18 @@ import LiveWaveformIcon from '../components/assistant/LiveWaveformIcon'
 import {
   agentConversations,
   findAgentConversation,
+  homeAgentDisplayName,
+  isCeoHomeUser,
+  isForbiddenHomeAgentUsername,
   mergeAgentSearchHits,
+  personalHomeAgentUsername,
   readHomeAgentPref,
   resolveHomeAgentUsername,
-  RETIRED_HOME_AGENTS,
   writeHomeAgentPref,
 } from '../hooks/useHomeAgentPreference'
 import { useVoiceInput, useVoiceConversation, speakText, speakDelta, nextSpokenSentences, readyToFlushSpokenSentences, leftoverAfterStream, isTalkAckText, isGhostTranscript, readTtsSpeed, cycleTtsSpeed, setUserSpeakEnabled } from '../hooks/useVoice'
 import { useGrokVoiceS2S } from '../hooks/useGrokVoiceS2S'
-import { mergePendingHeard, pickActiveLiveVoice, readRememberedLiveS2S, resolveLiveVoiceTarget } from '../utils/grokVoice'
+import { isGrokVoiceOmniModel, mergePendingHeard, pickActiveLiveVoice, readRememberedLiveS2S, rememberLiveS2S, resolveLiveVoiceTarget } from '../utils/grokVoice'
 import TtsSpeedButton from '../components/assistant/TtsSpeedButton'
 import { useHomeSummary } from '../hooks/useHomeSummary'
 import { useHomeActivity } from '../hooks/useHomeActivity'
@@ -111,8 +114,9 @@ function ChatHomeInner() {
     loadMore,
     sendMessage,
     reloadMessages,
-    retryMessage,
     streamingByConv,
+    sendTypingStart,
+    sendTypingStop,
   } = useConnectChat()
 
   const [inputValue, setInputValue] = useState('')
@@ -211,19 +215,57 @@ function ChatHomeInner() {
     if (!activeConversationId) textareaRef.current?.focus()
   }, [activeConversationId])
 
-  const pickerOptions = useMemo(
-    () => agentConversations(conversations, user?.id),
-    [conversations, user?.id],
-  )
+  const [personalSeat, setPersonalSeat] = useState(null)
+  const ceoHome = isCeoHomeUser(user)
+  const pickerOptions = useMemo(() => {
+    const prior = agentConversations(conversations, user?.id)
+    if (ceoHome) return prior
+    const username = personalHomeAgentUsername(user)
+    if (!username) return []
+    const existing = prior.find(
+      (row) => String(row.username || '').toLowerCase() === username,
+    )
+    if (existing) {
+      return [{ ...existing, displayName: homeAgentDisplayName(username, existing.displayName) }]
+    }
+    return [{
+      username,
+      displayName: homeAgentDisplayName(username, personalSeat?.display_name),
+      userId: personalSeat?.identity_user_id || personalSeat?.identityUserId || null,
+      conversationId: null,
+    }]
+  }, [ceoHome, conversations, personalSeat, user])
   const effectiveHomeAgent = resolveHomeAgentUsername(homeAgent, user)
   useEffect(() => {
+    if (!user) return
+    const next = resolveHomeAgentUsername(homeAgent, user)
     const raw = String(homeAgent || '').trim().toLowerCase()
-    if (raw && RETIRED_HOME_AGENTS.has(raw)) {
-      const next = resolveHomeAgentUsername('', user)
+    if (next && next !== raw) {
       writeHomeAgentPref(next)
       setHomeAgent(next)
     }
   }, [homeAgent, user])
+  useEffect(() => {
+    if (!user?.id || ceoHome) return undefined
+    let cancelled = false
+    const token = getAuthToken()
+    fetch('/hive/api/v1/fleet/personal-agent', {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(async (res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (cancelled || !data?.agent_username) return
+        setPersonalSeat(data)
+        const username = String(data.agent_username || '').trim().toLowerCase()
+        if (username) {
+          writeHomeAgentPref(username)
+          setHomeAgent(username)
+        }
+        if (username && isGrokVoiceOmniModel(data.model)) rememberLiveS2S(username, true)
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [ceoHome, user])
   const selectedPicker = pickerOptions.find(
     (row) => String(row.username).toLowerCase() === String(effectiveHomeAgent).toLowerCase(),
   )
@@ -246,18 +288,19 @@ function ChatHomeInner() {
   }, [liveTarget.username])
 
   const chooseHomeAgent = useCallback((row) => {
-    const username = writeHomeAgentPref(row?.username)
+    const username = writeHomeAgentPref(resolveHomeAgentUsername(row?.username, user))
     setHomeAgent(username)
     if (row?.conversationId) {
       setMiniConvId(row.conversationId)
       setActiveConversation(row.conversationId)
     }
-  }, [setActiveConversation])
+  }, [setActiveConversation, user])
 
   const searchHomeAgents = useCallback(async (q) => {
     const token = getAuthToken()
     const headers = { Authorization: `Bearer ${token}` }
-    const ql = q.toLowerCase()
+    const ql = String(q || '').toLowerCase()
+    const keepHit = (row) => !isForbiddenHomeAgentUsername(row?.username, user)
     const localAgents = (allAgents || [])
       .filter((a) => {
         const blob = `${a.name || ''} ${a.username || ''} ${a.email || ''} ${(a.role || '')}`.toLowerCase()
@@ -266,17 +309,23 @@ function ChatHomeInner() {
       .map((a) => ({
         userId: a.user_id || a.identity_user_id || null,
         username: a.username,
-        displayName: a.name || a.username,
+        displayName: homeAgentDisplayName(a.username, a.name || a.username),
         email: a.email || (a.username ? `${a.username}@shizuha.com` : ''),
       }))
+      .filter(keepHit)
+    const hiveFetch = fetch(`/api/home/talk-agents?q=${encodeURIComponent(q)}`, { headers })
+      .then(async (res) => {
+        if (!res.ok) return []
+        const data = await res.json()
+        return data.results ?? data.agents ?? []
+      })
+      .catch(() => [])
+    if (!ceoHome) {
+      const hiveHits = await hiveFetch
+      return mergeAgentSearchHits(localAgents, hiveHits).filter(keepHit).slice(0, 16)
+    }
     const fetches = [
-      fetch(`/api/home/talk-agents?q=${encodeURIComponent(q)}`, { headers })
-        .then(async (res) => {
-          if (!res.ok) return []
-          const data = await res.json()
-          return data.results ?? data.agents ?? []
-        })
-        .catch(() => []),
+      hiveFetch,
       fetch('/id/api/auth/users/all/', { headers })
         .then(async (idRes) => {
           if (!idRes.ok) return []
@@ -309,8 +358,8 @@ function ChatHomeInner() {
         .catch(() => []),
     ]
     const [hiveHits, idHits, connectHits] = await Promise.all(fetches)
-    return mergeAgentSearchHits(localAgents, hiveHits, idHits, connectHits).slice(0, 16)
-  }, [allAgents, user?.id])
+    return mergeAgentSearchHits(localAgents, hiveHits, idHits, connectHits).filter(keepHit).slice(0, 16)
+  }, [allAgents, ceoHome, user])
 
   const sendOnOpenThread = useCallback((text) => {
     const dest = urlConversationId || activeConversationId
@@ -346,6 +395,14 @@ function ChatHomeInner() {
       if (!dest) {
         const matches = await searchHomeAgents(targetUsername)
         const hit = matches.find((m) => String(m.username).toLowerCase() === targetUsername.toLowerCase())
+          || (personalSeat && String(personalSeat.agent_username || '').toLowerCase() === targetUsername.toLowerCase()
+            ? {
+              userId: personalSeat.identity_user_id,
+              username: personalSeat.agent_username,
+              displayName: personalSeat.display_name || 'Shizuha',
+              email: `${personalSeat.agent_username}@agents.shizuha.io`,
+            }
+            : null)
         if (hit?.userId) {
           dest = await createDirectConversation(hit.userId, { name: hit.displayName, email: hit.email })
         } else if (hit) {
@@ -366,7 +423,7 @@ function ChatHomeInner() {
     } finally {
       setIsSending(false)
     }
-  }, [activeConversationId, conversations, createDirectConversation, homeAgent, isSending, searchHomeAgents, sendMessage, setActiveConversation, user])
+  }, [activeConversationId, conversations, createDirectConversation, homeAgent, isSending, personalSeat, searchHomeAgents, sendMessage, setActiveConversation, user])
 
   const closeMiniChat = useCallback(() => {
     setMiniConvId(null)
@@ -707,8 +764,9 @@ function ChatHomeInner() {
 
   const startAgentFromSearch = useCallback(async (row) => {
     if (!row) return
-    writeHomeAgentPref(row.username)
-    setHomeAgent(row.username)
+    const username = resolveHomeAgentUsername(row.username, user)
+    writeHomeAgentPref(username)
+    setHomeAgent(username)
     if (row.conversationId) {
       setMiniConvId(row.conversationId)
       setActiveConversation(row.conversationId)
@@ -723,7 +781,7 @@ function ChatHomeInner() {
       setMiniConvId(dest.id)
       setActiveConversation(dest.id)
     }
-  }, [createDirectConversation, setActiveConversation])
+  }, [createDirectConversation, setActiveConversation, user])
 
   const firstName = user?.first_name || user?.username || ''
   const threadOpen = Boolean(activeConversationId && urlConversationId)
@@ -877,7 +935,6 @@ function ChatHomeInner() {
             hasMore={hasMore}
             isLoadingMore={isLoadingMessages}
             onLoadMore={loadMore}
-            onRetry={retryMessage}
             initialUnreadCount={threadInitialUnreadCount({
               miniConvId,
               activeConversationId,
@@ -889,6 +946,8 @@ function ChatHomeInner() {
               sendOnOpenThread(text)
               setInputValue('')
             }}
+            onTypingStart={() => activeConversationId && sendTypingStart(activeConversationId)}
+            onTypingStop={() => activeConversationId && sendTypingStop(activeConversationId)}
             value={inputValue}
             onChange={setInputValue}
             placeholder={isConnected ? `Message ${activeName}...` : 'Connecting… send still works'}
@@ -941,10 +1000,14 @@ function ChatHomeInner() {
           </p>
           <HomeAgentPicker
             selectedUsername={effectiveHomeAgent}
-            selectedLabel={selectedPicker?.displayName || effectiveHomeAgent}
+            selectedLabel={homeAgentDisplayName(
+              effectiveHomeAgent,
+              selectedPicker?.displayName || personalSeat?.display_name || effectiveHomeAgent,
+            )}
             options={pickerOptions}
             onSelect={chooseHomeAgent}
             onSearch={searchHomeAgents}
+            locked={!ceoHome}
           />
           {liveAgents.length > 0 && (
             <p className="flex items-center justify-center gap-2 text-sm text-gray-500 dark:text-gray-400 mb-6">

@@ -29,21 +29,56 @@ export function writeHomeAgentPref(username) {
 /** Grok-build seats we stopped for realtime; never auto-select them. */
 export const RETIRED_HOME_AGENTS = new Set(['aya'])
 
-/** CEO default is the Grok/SCLI talk seat (Ena). Everyone else starts unset. */
-export function suggestedHomeAgentUsername(user) {
-  const email = String(user?.email || '').toLowerCase()
-  if (email === 'hothritik1@gmail.com' || email === 'hritik@shizuha.com') return 'ena'
-  return ''
+/** CEO Office talk seats. Customers must never land on these. */
+export const ORG_HOME_AGENTS = new Set(['yuna', 'hina', 'ena', 'aya'])
+
+const CEO_HOME_EMAILS = new Set(['hothritik1@gmail.com', 'hritik@shizuha.com'])
+
+export function isCeoHomeUser(user) {
+  return CEO_HOME_EMAILS.has(String(user?.email || '').toLowerCase())
 }
 
-/** Non-CEO Live must not land on the operator's Ena thread. */
-export const DEFAULT_HOME_AGENT = 'yuna'
+export function isPersonalHomeAgentUsername(username) {
+  return /^shizuha-\d+$/.test(String(username || '').trim().toLowerCase())
+}
 
-/** Prefer stored pick, but never land Live on a retired/stopped seat. */
+export function personalHomeAgentUsername(user) {
+  const id = Number(user?.id)
+  if (!Number.isInteger(id) || id <= 0) return ''
+  return `shizuha-${id}`
+}
+
+export function homeAgentDisplayName(username, fallback) {
+  if (isPersonalHomeAgentUsername(username)) return 'Shizuha'
+  return fallback || username || ''
+}
+
+/** CEO default is the Grok/SCLI talk seat (Ena). Everyone else gets their Shizuha. */
+export function suggestedHomeAgentUsername(user) {
+  if (isCeoHomeUser(user)) return 'ena'
+  return personalHomeAgentUsername(user)
+}
+
+/** Never fall through to an org seat. Empty until the caller's id is known. */
+export const DEFAULT_HOME_AGENT = ''
+
+export function isForbiddenHomeAgentUsername(username, user) {
+  const raw = String(username || '').trim().toLowerCase()
+  if (!raw) return true
+  if (RETIRED_HOME_AGENTS.has(raw)) return true
+  if (isCeoHomeUser(user)) return false
+  if (ORG_HOME_AGENTS.has(raw)) return true
+  if (isPersonalHomeAgentUsername(raw) && raw !== personalHomeAgentUsername(user)) return true
+  return false
+}
+
+/** Prefer stored pick only when it is this caller's agent. Customers stay on Shizuha. */
 export function resolveHomeAgentUsername(preferred, user) {
+  const suggested = suggestedHomeAgentUsername(user)
+  if (!isCeoHomeUser(user)) return suggested
   const raw = String(preferred || '').trim().toLowerCase()
   if (raw && !RETIRED_HOME_AGENTS.has(raw)) return raw
-  return suggestedHomeAgentUsername(user) || DEFAULT_HOME_AGENT
+  return suggested || DEFAULT_HOME_AGENT
 }
 
 export function participantMatchesAgent(participant, username) {

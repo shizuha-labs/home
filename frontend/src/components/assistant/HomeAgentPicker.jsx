@@ -10,6 +10,7 @@ export default function HomeAgentPicker({
   options,
   onSelect,
   onSearch,
+  locked = false,
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -62,6 +63,23 @@ export default function HomeAgentPicker({
   }, [options, hits])
 
   const label = selectedLabel || selectedUsername || 'Choose an agent'
+
+  if (locked) {
+    return (
+      <div className="relative mx-auto mb-4 w-full max-w-md">
+        <div
+          data-testid="home-agent-picker"
+          className="mx-auto flex items-center gap-2 rounded-full border border-gray-200/80 bg-white/80 px-3 py-1 text-xs font-medium text-gray-600 shadow-sm dark:border-gray-700 dark:bg-gray-900/70 dark:text-gray-300"
+          title="Your personal Shizuha"
+        >
+          <span className="relative flex h-1.5 w-1.5">
+            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-brand-500" />
+          </span>
+          Talking to {label}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div ref={rootRef} className="relative mx-auto mb-4 w-full max-w-md">

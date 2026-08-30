@@ -31,7 +31,7 @@ const voice = {
 
 vi.mock('../contexts/AuthContext', () => ({
   useAuth: () => ({
-    user: { id: 1, first_name: 'Hritik', username: 'hritik' },
+    user: { id: 1, first_name: 'Hritik', username: 'hritik', email: 'hritik@shizuha.com' },
     isAuthenticated: true,
   }),
 }))

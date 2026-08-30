@@ -14,7 +14,7 @@ import path from 'node:path'
 import { expect } from '@playwright/test'
 
 export const KNOWN_THREAD = 'bb516974-4152-427a-a2ac-04535b5f393f'
-export const LIVE_QA_AGENT = 'enaqa'
+export const LIVE_QA_AGENT = 'yuna'
 export const GHOST_RE = /^(Replied\.?|Keyterms?\s*:)/im
 
 function isOperatorUsername(user) {
@@ -73,7 +73,7 @@ export async function selectHomeAgent(page, username = liveAgentUsername()) {
   await expect(page.getByTestId('home-live-button')).toBeVisible({ timeout: 20000 })
   const picker = page.getByTestId('home-agent-picker')
   if (await picker.count()) {
-    const label = username === 'enaqa' ? /enaqa|Ena QA/i : new RegExp(username, 'i')
+    const label = username === 'yuna' ? /yuna|Yuna/i : new RegExp(username, 'i')
     const current = ((await picker.textContent()) || '')
     if (!label.test(current)) {
       await picker.click()
@@ -89,7 +89,7 @@ export async function selectHomeAgent(page, username = liveAgentUsername()) {
   // Open the existing DM when the rail shows it. Homepage Live can stay on
   // `/` once the picker already names the target agent.
   const rail = page.getByRole('button', {
-    name: username === 'enaqa' ? /^Ena QA$/i : new RegExp(`^${username}$`, 'i'),
+    name: username === 'yuna' ? /^Yuna$/i : new RegExp(`^${username}$`, 'i'),
   }).first()
   if (await rail.count()) {
     await rail.click()

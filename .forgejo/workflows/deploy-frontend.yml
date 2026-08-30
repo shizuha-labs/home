@@ -18,6 +18,7 @@ on:
     paths:
       - .forgejo/workflows/deploy-frontend.yml
       - .forgejo/scripts/test-deploy-frontend-kaniko-retry.py
+      - frontend/**
 concurrency:
   group: deploy-shizuha-home-frontend-${{ github.ref }}
   cancel-in-progress: true
@@ -28,6 +29,114 @@ jobs:
       - uses: actions/checkout@v4
       - name: Validate exact-ref and bounded Kaniko recovery contract
         run: python3 .forgejo/scripts/test-deploy-frontend-kaniko-retry.py
+
+  # PLAT-6170: wire the frontend vitest regression suite into a CI gate so
+  # component tests (e.g. the degraded-vs-empty command-center task-status
+  # cases) actually run at PR head instead of existing as an unenforced file.
+  # The ubuntu-latest runner image ships python but not node, and its SA
+  # cannot read the forgejo-token secret nor clone a sibling repo with the
+  # workflow token — so, exactly like the kaniko build below, the suite runs
+  # in a k8s Job whose initContainer mounts forgejo-token via secretKeyRef
+  # and assembles the monorepo + home at the pushed SHA.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install kubectl + cluster access
+        run: |
+          set -euo pipefail
+          KUBECTL_ARCH=$(uname -m); case "$KUBECTL_ARCH" in x86_64) KUBECTL_ARCH=amd64;; aarch64) KUBECTL_ARCH=arm64;; esac
+          curl -fsSL -o kubectl "http://forgejo-http.origin.svc.cluster.local/api/packages/actions/generic/kubectl/v1.34.1/kubectl-${KUBECTL_ARCH}"
+          install -m 0755 kubectl /usr/local/bin/kubectl
+          mkdir -p "$HOME/.kube"
+          printf '%s' "${{ secrets.KUBE_CONFIG_B64 }}" | base64 -d > "$HOME/.kube/config"
+          chmod 600 "$HOME/.kube/config"
+      - name: Run frontend vitest suite in build Job
+        run: |
+          set -euo pipefail
+          SHORT="$(echo "${{ github.sha }}" | cut -c1-7)"
+          JOB="ci-test-home-frontend-${SHORT}"
+          kubectl delete job "${JOB}" -n build --ignore-not-found
+          cat <<YAML | kubectl apply -f -
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: ${JOB}
+            namespace: build
+            labels: { app: ci-test, service: home-frontend, shizuha.io/ci-gate: PLAT-6170 }
+          spec:
+            backoffLimit: 0
+            ttlSecondsAfterFinished: 300
+            template:
+              spec:
+                restartPolicy: Never
+                nodeSelector: { kubernetes.io/arch: amd64 }
+                tolerations:
+                  - { key: node.shizuha/workstation, operator: Exists, effect: NoSchedule }
+                  - { key: shizuha.com/inference-paused, operator: Exists, effect: NoSchedule }
+                affinity:
+                  nodeAffinity:
+                    requiredDuringSchedulingIgnoredDuringExecution:
+                      nodeSelectorTerms:
+                      - matchExpressions:
+                        - { key: node-role.kubernetes.io/control-plane, operator: DoesNotExist }
+                initContainers:
+                  - name: git-clone
+                    image: alpine/git:2.43.0
+                    command: ["/bin/sh","-c"]
+                    args:
+                      - |
+                        set -e
+                        # Monorepo root for packages/ (shallow; submodule pointers only)
+                        git clone --depth=1 http://x-token-auth:\${GIT_PASSWORD}@forgejo-http.origin.svc.cluster.local/shizuha-labs/shizuha-stack.git /workspace/src
+                        # Replace the shizuha-home submodule pointer with THIS repo at the pushed SHA
+                        rm -rf /workspace/src/shizuha-home
+                        git clone --depth=50 http://x-token-auth:\${GIT_PASSWORD}@forgejo-http.origin.svc.cluster.local/shizuha-labs/home.git /workspace/src/shizuha-home
+                        cd /workspace/src/shizuha-home
+                        if ! git checkout --detach ${{ github.sha }}; then
+                          git fetch --depth=1 origin ${{ github.sha }}
+                          git checkout --detach ${{ github.sha }}
+                        fi
+                        test "\$(git rev-parse HEAD)" = "${{ github.sha }}"
+                    env:
+                      - name: GIT_PASSWORD
+                        valueFrom: { secretKeyRef: { name: forgejo-token, key: password } }
+                    volumeMounts: [{ mountPath: /workspace, name: workspace }]
+                containers:
+                  - name: test
+                    image: node:20-slim
+                    workingDir: /workspace/src/shizuha-home/frontend
+                    command: ["/bin/bash","-c"]
+                    args:
+                      - |
+                        set -euo pipefail
+                        # Dockerfile.prod installs from package.json only: the
+                        # tracked lockfile's file:../../packages deps trip npm's
+                        # "Cannot read properties of undefined (reading
+                        # 'extraneous')" bug outside the monorepo root.
+                        rm -f package-lock.json
+                        npm install --ignore-scripts --fund=false --audit=false
+                        SHIZUHA_PACKAGES_DIR=/workspace/src/packages npm test
+                    env:
+                      - name: NPM_CONFIG_REGISTRY
+                        value: http://npm-cache.registry.svc.cluster.local:4873/
+                    volumeMounts: [{ mountPath: /workspace, name: workspace }]
+                volumes: [{ emptyDir: {}, name: workspace }]
+          YAML
+          for POLL in $(seq 1 240); do
+            if kubectl get "job/${JOB}" -n build -o jsonpath='{.status.succeeded}' | grep -q '[1-9]'; then
+              echo "frontend vitest suite passed"
+              exit 0
+            fi
+            if kubectl get "job/${JOB}" -n build -o jsonpath='{.status.failed}' | grep -q '[1-9]'; then
+              echo "::error::frontend vitest suite failed"
+              kubectl logs -n build "job/${JOB}" --all-containers --tail=200 || true
+              exit 1
+            fi
+            sleep 5
+          done
+          echo "::error::frontend vitest suite timed out after 1200s"
+          kubectl logs -n build "job/${JOB}" --all-containers --tail=200 || true
+          exit 1
 
   build-and-deploy:
     if: github.event_name != 'pull_request'
@@ -248,13 +357,31 @@ jobs:
           # DURING our rollout, it reverts us to the previous tag. helm applies
           # once and never re-touches the FE, so re-asserting converges; only a
           # persistent fighter still fails the run.
+          dump_frontend_state() {
+            # PLAT-6251: capture which assertion failed — deployment conditions,
+            # observed generation, replica counts, and recent events.
+            echo "--- deployment state ---"
+            kubectl -n shizuha get deploy shizuha-home-frontend -o jsonpath='{.metadata.name}{"\n"}observedGeneration={.status.observedGeneration} generation={.metadata.generation}{"\n"}replicas={.status.replicas} ready={.status.readyReplicas} available={.status.availableReplicas} updated={.status.updatedReplicas}{"\n"}{range .status.conditions[*]}condition={.type} status={.status} reason={.reason} message={.message}{"\n"}{end}' || true
+            echo "--- frontend pods ---"
+            kubectl -n shizuha get pods -l app.kubernetes.io/name=shizuha-home-frontend -o wide || true
+            echo "--- recent deployment events ---"
+            kubectl -n shizuha get events --field-selector involvedObject.name=shizuha-home-frontend --sort-by=.lastTimestamp | tail -20 || true
+          }
           for attempt in 1 2 3; do
             kubectl set image -n shizuha deploy/shizuha-home-frontend frontend="localhost:30500/shizuha-home-frontend:${FTAG}"
-            kubectl rollout status -n shizuha deploy/shizuha-home-frontend --timeout=300s
+            if ! kubectl rollout status -n shizuha deploy/shizuha-home-frontend --timeout=300s; then
+              echo "::error::kubectl rollout status failed (attempt ${attempt}) — expected ${FTAG}"
+              dump_frontend_state
+              exit 1
+            fi
             LIVE="$(kubectl get deploy -n shizuha shizuha-home-frontend -o jsonpath='{.spec.template.spec.containers[0].image}')"
-            echo "Live frontend image (attempt ${attempt}): ${LIVE}"
+            echo "Live frontend image (attempt ${attempt}): ${LIVE} (expected ${FTAG})"
             if echo "${LIVE}" | grep -q "${FTAG}"; then break; fi
-            if [ "${attempt}" = 3 ]; then echo "::error::frontend image mismatch after ${attempt} attempts"; exit 1; fi
+            if [ "${attempt}" = 3 ]; then
+              echo "::error::frontend image mismatch after ${attempt} attempts — expected ${FTAG}, live ${LIVE}"
+              dump_frontend_state
+              exit 1
+            fi
             echo "Frontend image clobbered mid-rollout (likely concurrent backend helm apply) — re-asserting"
             sleep 10
           done

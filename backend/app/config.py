@@ -50,6 +50,13 @@ class Settings:
     # degrades ONE widget, never the page (async-frontends doctrine).
     SOURCE_TIMEOUT_SECONDS: float = float(os.environ.get("HOME_BFF_SOURCE_TIMEOUT", "2.5"))
 
+    # PLAT-5298: total budget for the /api/home/activity poll. The live feed
+    # fans out per-org (worst case 8 x SOURCE_TIMEOUT) which alone can exceed the
+    # nginx /api/home/ read timeout (5s) and surface a hard 504 unless the whole
+    # handler is bounded. On expiry the route serves the last-good cache.
+    # Keep strictly under the nginx /api/home/ proxy_read_timeout (5s).
+    ACTIVITY_FETCH_BUDGET_SECONDS: float = float(os.environ.get("HOME_BFF_ACTIVITY_BUDGET", "4"))
+
     # The org-progress dashboard runs a heavier pulse analytics query (per-item
     # transition scan for throughput/dwell), so it gets its own longer budget —
     # still fail-soft (degraded widget on timeout), just not clipped at 2.5s.
