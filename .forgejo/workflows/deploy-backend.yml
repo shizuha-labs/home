@@ -136,12 +136,23 @@ jobs:
                 tolerations:
                   - { key: node.shizuha/workstation, operator: Exists, effect: NoSchedule }
                   - { key: shizuha.com/inference-paused, operator: Exists, effect: NoSchedule }
+                  # PLAT-7268: s1 is the only healthy amd64 node (i9-ws excluded below
+                  # due to its flannel/containerd pod-network issue). s1 carries an
+                  # operator=unschedulable maintenance taint; tolerate it so the amd64
+                  # kaniko build can run there (same pattern as PLAT-6227).
+                  - { key: operator, operator: Equal, value: unschedulable, effect: NoSchedule }
                 affinity:
                   nodeAffinity:
                     requiredDuringSchedulingIgnoredDuringExecution:
                       nodeSelectorTerms:
                       - matchExpressions:
                         - { key: node-role.kubernetes.io/control-plane, operator: DoesNotExist }
+                        # PLAT-7268: i9-ws (100.64.0.23) has a known flannel/containerd
+                        # pod-network issue — pods there cannot reach the apiserver and
+                        # the apiserver cannot proxy to its kubelet (502), so the amd64
+                        # kaniko build fails when it lands on i9-ws. Exclude it from the
+                        # build lanes (same durable pattern as registry canary PR #837).
+                        - { key: kubernetes.io/hostname, operator: NotIn, values: [i9-ws] }
                 initContainers:
                   - name: git-clone
                     image: alpine/git:2.43.0
