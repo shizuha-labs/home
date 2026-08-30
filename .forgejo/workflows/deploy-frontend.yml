@@ -73,12 +73,19 @@ jobs:
                 tolerations:
                   - { key: node.shizuha/workstation, operator: Exists, effect: NoSchedule }
                   - { key: shizuha.com/inference-paused, operator: Exists, effect: NoSchedule }
+                  # amd64 kaniko on i9-ws times out pushing to registry ClusterIP;
+                  # s1 overlay works and carries operator=unschedulable. CI tolerates
+                  # the operator-hold taint instead of removing it.
+                  - { key: operator, operator: Equal, value: unschedulable, effect: NoSchedule }
                 affinity:
                   nodeAffinity:
                     requiredDuringSchedulingIgnoredDuringExecution:
                       nodeSelectorTerms:
                       - matchExpressions:
                         - { key: node-role.kubernetes.io/control-plane, operator: DoesNotExist }
+                        # i9-ws overlay to ns registry is i/o timeout. Keep excluded until
+                        # ClusterIP/FORWARD on i9-ws is actually fixed.
+                        - { key: kubernetes.io/hostname, operator: NotIn, values: [i9-ws] }
                 initContainers:
                   - name: git-clone
                     image: alpine/git:2.43.0
@@ -196,12 +203,19 @@ jobs:
                 tolerations:
                   - { key: node.shizuha/workstation, operator: Exists, effect: NoSchedule }
                   - { key: shizuha.com/inference-paused, operator: Exists, effect: NoSchedule }
+                  # amd64 kaniko on i9-ws times out pushing to registry ClusterIP;
+                  # s1 overlay works and carries operator=unschedulable. CI tolerates
+                  # the operator-hold taint instead of removing it.
+                  - { key: operator, operator: Equal, value: unschedulable, effect: NoSchedule }
                 affinity:
                   nodeAffinity:
                     requiredDuringSchedulingIgnoredDuringExecution:
                       nodeSelectorTerms:
                       - matchExpressions:
                         - { key: node-role.kubernetes.io/control-plane, operator: DoesNotExist }
+                        # i9-ws overlay to ns registry is i/o timeout. Keep excluded until
+                        # ClusterIP/FORWARD on i9-ws is actually fixed.
+                        - { key: kubernetes.io/hostname, operator: NotIn, values: [i9-ws] }
                 initContainers:
                   - name: git-clone
                     image: alpine/git:2.43.0
