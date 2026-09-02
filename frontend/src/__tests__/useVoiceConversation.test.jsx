@@ -29,6 +29,8 @@ import {
   normalizeHeardName,
   useVoiceConversation,
   speakText,
+  streamBackoffDelayMs,
+  VOICE_STREAM_BACKOFF_CAP_MS,
   VOICE_STREAM_BASE_BACKOFF_MS,
   VOICE_STREAM_MAX_RETRIES,
 } from '../hooks/useVoice'
@@ -473,6 +475,16 @@ describe('useVoiceConversation — streaming STT captions', () => {
 })
 
 describe('useVoiceConversation — CON-296 failure paths', () => {
+  beforeEach(() => {
+    // CTX-878: the retry schedule jitters ±20% via Math.random; pin it to the
+    // max-jitter edge so timer-advance assertions are deterministic.
+    vi.spyOn(Math, 'random').mockReturnValue(1)
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   it('A: NotFoundError hard-fails with guidance and never auto-retries', () => {
     const { result } = renderHook(() => useVoiceConversation())
 
@@ -528,14 +540,18 @@ describe('useVoiceConversation — CON-296 failure paths', () => {
     })
     expect(startStreamingStt).toHaveBeenCalledTimes(1)
 
-    // Attempt 1 fails → schedule retry #1 after 500ms
+    // CTX-878: delays are jittered ±20%; advance by the max-jitter schedule
+    // (rand=1) so the test is deterministic against the whole jitter band.
+    const maxDelay = (failed) => streamBackoffDelayMs(failed, () => 1)
+
+    // Attempt 1 fails → schedule retry #1 after 2s (jittered ≤2.4s)
     fireLastError({ name: 'stream_unavailable', message: 'refused' })
     expect(result.current.callState).toBe('connecting')
     expect(result.current.callError).toBeNull()
     expect(startStreamingStt).toHaveBeenCalledTimes(1)
 
     act(() => {
-      vi.advanceTimersByTime(VOICE_STREAM_BASE_BACKOFF_MS - 1)
+      vi.advanceTimersByTime(maxDelay(1) - 1)
     })
     expect(startStreamingStt).toHaveBeenCalledTimes(1)
     act(() => {
@@ -543,17 +559,17 @@ describe('useVoiceConversation — CON-296 failure paths', () => {
     })
     expect(startStreamingStt).toHaveBeenCalledTimes(2)
 
-    // Attempt 2 fails → retry #2 after 1000ms
+    // Attempt 2 fails → retry #2 after 4s (jittered ≤4.8s)
     fireLastError({ name: 'stream_unavailable', message: 'refused' })
     act(() => {
-      vi.advanceTimersByTime(VOICE_STREAM_BASE_BACKOFF_MS * 2)
+      vi.advanceTimersByTime(maxDelay(2))
     })
     expect(startStreamingStt).toHaveBeenCalledTimes(3)
 
-    // Attempt 3 fails → retry #3 after 2000ms
+    // Attempt 3 fails → retry #3 after 8s (capped; jittered ≤9.6s)
     fireLastError({ name: 'stream_unavailable', message: 'refused' })
     act(() => {
-      vi.advanceTimersByTime(VOICE_STREAM_BASE_BACKOFF_MS * 4)
+      vi.advanceTimersByTime(maxDelay(3))
     })
     expect(startStreamingStt).toHaveBeenCalledTimes(4)
 
@@ -573,6 +589,56 @@ describe('useVoiceConversation — CON-296 failure paths', () => {
       vi.advanceTimersByTime(30_000)
     })
     expect(startStreamingStt).toHaveBeenCalledTimes(terminalCalls)
+  })
+
+  it('B: backoff never fires faster than the 2s floor and stays under the cap', () => {
+    // CTX-878: the pre-CON-296 storm retried at ~500ms. The schedule must
+    // start at ≥2s, grow exponentially, and cap at 8s before jitter.
+    expect(streamBackoffDelayMs(1, () => 0.5)).toBe(VOICE_STREAM_BASE_BACKOFF_MS)
+    expect(VOICE_STREAM_BASE_BACKOFF_MS).toBeGreaterThanOrEqual(2000)
+    expect(streamBackoffDelayMs(1, () => 0)).toBe(Math.round(VOICE_STREAM_BASE_BACKOFF_MS * 0.8))
+    expect(streamBackoffDelayMs(1, () => 1)).toBe(Math.round(VOICE_STREAM_BASE_BACKOFF_MS * 1.2))
+    // Cap: attempt 5+ would be 32s raw — clamped to 8s before jitter.
+    expect(streamBackoffDelayMs(5, () => 0.5)).toBe(VOICE_STREAM_BACKOFF_CAP_MS)
+    expect(streamBackoffDelayMs(9, () => 0.5)).toBe(VOICE_STREAM_BACKOFF_CAP_MS)
+  })
+
+  it('C: stream loss → backoff → recovery resumes cleanly without duplicate transcripts', () => {
+    const onUtterance = vi.fn()
+    const { result } = renderHook(() => useVoiceConversation({ onUtterance }))
+
+    act(() => {
+      result.current.startCall()
+    })
+    expect(startStreamingStt).toHaveBeenCalledTimes(1)
+    expect(result.current.callState).toBe('connecting')
+
+    // Stream dies once → bounded backoff, still in-call (no terminal error).
+    fireLastError({ name: 'stream_unavailable', message: 'refused' })
+    expect(result.current.callState).toBe('connecting')
+    expect(result.current.callError).toBeNull()
+
+    act(() => {
+      vi.advanceTimersByTime(streamBackoffDelayMs(1, () => 1))
+    })
+    // Recovery: the retry re-entered the stream and the call resumed.
+    expect(startStreamingStt).toHaveBeenCalledTimes(2)
+
+    // The recovered attempt succeeds: transcript.created → listening.
+    const recovered = startStreamingStt.mock.calls.at(-1)[0]
+    act(() => {
+      recovered.onState?.('listening')
+    })
+    expect(result.current.callState).toBe('listening')
+    expect(result.current.callError).toBeNull()
+
+    // One clean turn on the recovered stream → exactly one final utterance.
+    act(() => {
+      recovered.onPartial?.('what time is it', { type: 'transcript.partial', text: 'what time is it' })
+      recovered.onFinal?.('what time is it', { type: 'transcript.done', text: 'what time is it' })
+    })
+    expect(onUtterance).toHaveBeenCalledTimes(1)
+    expect(onUtterance).toHaveBeenCalledWith('what time is it')
   })
 
   it('B: manual retryCall restarts the stream after a terminal stream failure', () => {
@@ -664,7 +730,7 @@ describe('useVoiceConversation — CON-296 failure paths', () => {
     // A subsequent stream failure still has the full retry budget.
     fireLastError({ name: 'stream_unavailable' })
     act(() => {
-      vi.advanceTimersByTime(VOICE_STREAM_BASE_BACKOFF_MS)
+      vi.advanceTimersByTime(streamBackoffDelayMs(1, () => 1))
     })
     expect(startStreamingStt).toHaveBeenCalledTimes(3)
     expect(result.current.callState).not.toBe('error')
