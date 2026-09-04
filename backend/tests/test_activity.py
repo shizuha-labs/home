@@ -149,6 +149,107 @@ def test_agents_live_maps_fields_and_leads_with_working():
     assert w.data[1]["status"] == "stopped"
 
 
+def _talk_roster():
+    from app.schema import Widget
+    return Widget.ok_(data=[
+        {
+            "name": "Hina",
+            "username": "hina",
+            "email": "hina@shizuha.com",
+            "role": "Executive Assistant",
+            "teams": ["ceo-office"],
+            "status": "running",
+            "identity_user_id": 42,
+            "user_id": 42,
+        },
+        {
+            "name": "Yuna",
+            "username": "yuna",
+            "email": "yuna@shizuha.com",
+            "role": "Executive Assistant",
+            "teams": ["ceo-office"],
+            "status": "stopped",
+            "identity_user_id": 734,
+            "user_id": 734,
+        },
+        {
+            "name": "Shizuha",
+            "username": "shizuha-279",
+            "email": "shizuha-279@agents.shizuha.io",
+            "role": "Personal Shizuha",
+            "teams": [],
+            "status": "hibernated",
+            "identity_user_id": 752,
+            "user_id": 752,
+        },
+        {
+            "name": "Shizuha",
+            "username": "shizuha-101",
+            "email": "shizuha-101@agents.shizuha.io",
+            "role": "Personal Shizuha",
+            "teams": [],
+            "status": "hibernated",
+            "identity_user_id": 8101,
+            "user_id": 8101,
+        },
+    ])
+
+
+def test_talk_agents_finds_hina_by_username_for_ceo(monkeypatch):
+    widget_cache.clear()
+
+    async def _fake_agents(_client, _bearer, _org_id=None):
+        return _talk_roster()
+
+    monkeypatch.setattr("app.clients.fetch_agents_live", _fake_agents)
+    resp = client.get(
+        "/api/home/talk-agents?q=hina",
+        headers=_auth(_token(email="hritik@shizuha.com")),
+    )
+    assert resp.status_code == 200
+    rows = resp.json()["results"]
+    assert rows[0]["username"] == "hina"
+    assert rows[0]["userId"] == 42
+
+
+def test_talk_agents_hides_org_yuna_from_customers(monkeypatch):
+    widget_cache.clear()
+
+    async def _fake_agents(_client, _bearer, _org_id=None):
+        return _talk_roster()
+
+    monkeypatch.setattr("app.clients.fetch_agents_live", _fake_agents)
+    mihir = _auth(_token(user_id=279, email="mihirgates@hotmail.com"))
+    yuna = client.get("/api/home/talk-agents?q=yuna", headers=mihir)
+    assert yuna.status_code == 200
+    assert yuna.json()["results"] == []
+    own = client.get("/api/home/talk-agents?q=shizuha", headers=mihir)
+    assert own.status_code == 200
+    rows = own.json()["results"]
+    assert [row["username"] for row in rows] == ["shizuha-279"]
+    assert rows[0]["displayName"] == "Shizuha"
+    assert rows[0]["userId"] == 752
+    other = client.get(
+        "/api/home/talk-agents?q=shizuha-101",
+        headers=mihir,
+    )
+    assert other.json()["results"] == []
+
+
+def test_agents_live_maps_identity_user_id():
+    def handler(request):
+        return httpx.Response(200, json={"results": [
+            {"agent_username": "hina", "display_name": "Hina",
+             "identity_user_id": 42, "status": "pending"},
+        ]})
+    async def go():
+        async with _mock_client(handler) as c:
+            return await clients.fetch_agents_live(c, "t")
+    w = _run(go())
+    assert w.data[0]["identity_user_id"] == 42
+    assert w.data[0]["email"] == "hina@shizuha.com"
+
+
 def test_agents_live_unauthorized_on_403():
     def handler(request):
         return httpx.Response(403, json={})
@@ -1217,3 +1318,55 @@ def test_activity_recent_aggregate_with_empty_since_by_org():
     assert r.status_code == 200
     body = r.json()
     assert len(body["events"]) >= 2  # events from both orgs
+
+
+# ---- PLAT-5298: bounded activity poll serves stale cache, never a 504 -------
+
+def test_activity_budget_timeout_falls_back_to_stale(monkeypatch):
+    """A slow-but-succeeding downstream fan-out must not blow past the nginx
+    /api/home/ read timeout into a 504: the handler bounds the whole gather and
+    serves the last-good cached widget on expiry."""
+    import time as _time
+    from app.cache import cache_key, widget_cache, _Entry
+    from app.schema import Widget
+
+    widget_cache.clear()
+    token = _token(memberships={"1": "admin"})
+    payload = token.split(".")[1]
+    payload += "=" * (-len(payload) % 4)
+    claims = json.loads(base64.urlsafe_b64decode(payload))
+    uid = claims.get("user_id") or 7
+    memberships = {1: "admin"}
+    # The request carries no org_id -> aggregate mode (scope_org None).
+    feed_key = cache_key("live_feed", uid, None, memberships)
+    agents_key = cache_key("agents_live", uid, None, memberships)
+
+    # Prime last-good values in the cache.
+    widget_cache._store[feed_key] = _Entry(
+        widget=Widget.ok_(data=[{"item_key": "STALE-PLAT-1", "at": "2026-07-10T00:00:00Z"}]),
+        stored_at=_time.monotonic(),
+    )
+    widget_cache._store[agents_key] = _Entry(
+        widget=Widget.ok_(data=[{"name": "Steady", "status": "running"}]),
+        stored_at=_time.monotonic(),
+    )
+
+    async def _slow(_client, _bearer, org_ids=None, since=None, limit=60):
+        await asyncio.sleep(30)  # way over the budget + nginx window
+        return Widget.ok_(data=[])
+
+    async def _slow_agents(_client, _bearer, _org_id=None):
+        await asyncio.sleep(30)
+        return Widget.ok_(data=[])
+
+    monkeypatch.setattr("app.main.fetch_live_feed", _slow)
+    monkeypatch.setattr("app.main.fetch_agents_live", _slow_agents)
+    monkeypatch.setattr("app.main.ACTIVITY_FETCH_BUDGET_SECONDS", 0.05)
+
+    resp = client.get("/api/home/activity", headers=_auth(token))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["widgets"]["feed"]["status"] == "stale"
+    assert body["widgets"]["feed"]["data"][0]["item_key"] == "STALE-PLAT-1"
+    assert body["widgets"]["agents"]["status"] == "stale"
+    assert body["widgets"]["agents"]["data"][0]["name"] == "Steady"

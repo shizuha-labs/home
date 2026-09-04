@@ -24,10 +24,14 @@ def main() -> None:
     require('render_build_job "${ARCH}" 1 true | kubectl apply -f -')
     require('render_build_job "${ARCH}" 2 false | kubectl apply -f -')
     require("failed to get filesystem from image: unexpected EOF")
+    require("npm error code ETIMEDOUT")
     require("retrying once with cache disabled")
     require("cache-disabled retry failed")
     require("--cache=${CACHE_ENABLED}")
     require("--cache-copy-layers=${CACHE_ENABLED}")
+    require("--build-arg=PREV_FRONTEND_IMAGE=${PREV_FRONTEND_IMAGE}")
+    require("Carry forward hashed assets from")
+    require("${PREV_FRONTEND_IMAGE//localhost:30500/${REG}}")
 
     if SOURCE.count('render_build_job "${ARCH}" 2 false') != 1:
         raise AssertionError("cache bypass must be exactly one bounded retry")

@@ -1,0 +1,14 @@
+User-agent: *
+Allow: /
+Allow: /dojo/
+Disallow: /id/login
+Disallow: /id/logout
+Disallow: /dojo/sessions
+Disallow: /dojo/practice
+Disallow: /dojo/resume
+Disallow: /dojo/api/coding/submissions
+Disallow: /dojo/api/sessions
+
+Sitemap: https://shizuha.com/sitemap.xml
+Sitemap: https://shizuha.com/dojo/sitemap.xml
+Sitemap: https://shizuha.com/connect/sitemap.xml
