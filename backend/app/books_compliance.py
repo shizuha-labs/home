@@ -398,7 +398,7 @@ def _create_or_coalesce_challenge(conn: psycopg.Connection, lead_id: uuid.UUID, 
            VALUES (%s,%s,%s,%s,'confirm',%s,%s)""",
         (challenge_id, lead_id, destination_hmac, channel, _digest(bearer), _now() + CHALLENGE_TTL),
     )
-    if _env_bool("BOOKS_COMPLIANCE_FAKE_PROVIDER_ENABLED", True):
+    if _env_bool("BOOKS_COMPLIANCE_FAKE_PROVIDER_ENABLED", False):
         conn.execute(
             """INSERT INTO books_compliance_fake_outbox
                (id,challenge_id,organization_id,channel,destination,template_id,bearer)
@@ -506,7 +506,7 @@ def request_recovery(payload: RecoveryRequest, request: Request) -> dict[str, st
                    VALUES (%s,%s,'email','recovery',%s,%s)""",
                 (cid, destination_hmac, _digest(bearer), _now() + CHALLENGE_TTL),
             )
-            if _env_bool("BOOKS_COMPLIANCE_FAKE_PROVIDER_ENABLED", True):
+            if _env_bool("BOOKS_COMPLIANCE_FAKE_PROVIDER_ENABLED", False):
                 conn.execute(
                     """INSERT INTO books_compliance_fake_outbox
                        (id,challenge_id,organization_id,channel,destination,template_id,bearer)

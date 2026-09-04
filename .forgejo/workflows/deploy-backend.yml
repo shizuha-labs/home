@@ -59,6 +59,7 @@ jobs:
           BOOKS_COMPLIANCE_DESTINATION_HMAC_KEY: ci-destination-key
           BOOKS_COMPLIANCE_SUBMISSION_HMAC_KEY: ci-submission-key
           BOOKS_COMPLIANCE_ABUSE_HMAC_KEY: ci-abuse-key
+          BOOKS_COMPLIANCE_FAKE_PROVIDER_ENABLED: "true"
           BOOKS_COMPLIANCE_ALLOWED_ORIGINS: http://testserver
         run: |
           set -euo pipefail
