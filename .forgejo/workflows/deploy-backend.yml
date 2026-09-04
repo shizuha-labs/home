@@ -96,7 +96,7 @@ jobs:
             tests/test_activity.py::test_activity_recent_single_org_foreign_org_is_403 \
             tests/test_activity.py::test_activity_recent_aggregate_excludes_non_member_orgs \
             tests/test_activity.py::test_activity_stream_foreign_org_is_403 \
-            tests/test_parse_entry_drops_wrong_org \
+            tests/test_activity.py::test_parse_entry_drops_wrong_org \
             tests/test_activity.py::test_activity_recent_aggregate_excludes_deauth_org_events \
             tests/test_books_compliance.py
 
