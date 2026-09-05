@@ -17,6 +17,9 @@ import ResearchOrderPage from './pages/ResearchOrderPage'
 import DojoPage from './pages/DojoPage'
 import AutonomousOrgPage from './pages/AutonomousOrgPage'
 import DrivePricingPage from './pages/DrivePricingPage'
+import BooksCompliancePage from './pages/BooksCompliancePage'
+import BooksCompliancePricingPage from './pages/BooksCompliancePricingPage'
+import BooksComplianceConfirmationPage from './pages/BooksComplianceConfirmationPage'
 import LiveTracePage from './pages/LiveTracePage'
 
 const FORGE_STUDIO_URL = 'https://cortex.shizuha.com/studio'
@@ -89,6 +92,9 @@ export default function App() {
       <Route path="/research" element={<ResearchPage />} />
       <Route path="/research/order" element={<ResearchOrderPage />} />
       <Route path="/drive/pricing" element={<DrivePricingPage />} />
+      <Route path="/books/compliance" element={<BooksCompliancePage />} />
+      <Route path="/books/compliance/pricing" element={<BooksCompliancePricingPage />} />
+      <Route path="/books/compliance/confirmation" element={<BooksComplianceConfirmationPage />} />
       <Route path="/live-trace" element={<LiveTracePage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

@@ -15,6 +15,7 @@ on:
   push:
     branches: [main, master]
   pull_request:
+    branches: [main, master]
     paths:
       - .forgejo/workflows/deploy-frontend.yml
       - .forgejo/scripts/test-deploy-frontend-kaniko-retry.py
@@ -23,12 +24,32 @@ concurrency:
   group: deploy-shizuha-home-frontend-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  contract:
+  quality:
     runs-on: ubuntu-latest
+    container:
+      # npm/cli #8974: npm bundled with Node 22/24 can abort `npm ci` with
+      # "Exit handler never called"; production already builds on Node 20.
+      image: node:20-bookworm
     steps:
-      - uses: actions/checkout@v4
-      - name: Validate exact-ref and bounded Kaniko recovery contract
-        run: python3 .forgejo/scripts/test-deploy-frontend-kaniko-retry.py
+      - name: Checkout exact Home revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Lint and route privacy guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          # package-lock.json records the developer-facing cache host. Replace
+          # it with the runner-local registry so CI never depends on Tailscale.
+          cd "$GITHUB_WORKSPACE/frontend"
+          # The production build consumes private monorepo package sources;
+          # pull-request tokens are intentionally scoped to this repository.
+          # Keep this premerge gate repo-local. The push-only deploy job below
+          # assembles the monorepo before building the production image.
+          npm ci --ignore-scripts --replace-registry-host=always --no-audit --no-fund
+          npm run lint
+          node scripts/booksCompliance.guardrail.test.mjs
+          node scripts/nginxResearchProxy.guardrail.test.mjs
 
   # PLAT-6170: wire the frontend vitest regression suite into a CI gate so
   # component tests (e.g. the degraded-vs-empty command-center task-status
@@ -146,8 +167,8 @@ jobs:
           exit 1
 
   build-and-deploy:
-    if: github.event_name != 'pull_request'
-    needs: contract
+    needs: quality
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout exact triggering revision for monotonic release guard

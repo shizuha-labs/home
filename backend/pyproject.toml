@@ -21,6 +21,9 @@ dependencies = [
   "PyJWT>=2.13.0,<3",
   # HIVE-603 Redis Streams for activity feed.
   "redis[hiredis]>=5.1,<6",
+  # VEN-194 Gate-2 durable Books Compliance funnel. The public write gate
+  # defaults off; when enabled, Postgres is the only authoritative store.
+  "psycopg[binary]>=3.2,<4",
   # PLAT-5821: raised floor — cryptography <50 carries GHSA-g6cj-pr64-35w5
   # (Bleichenbacher PKCS#7 oracle, fixed 50.0.0). The lock pins the fixed 50.x.
   "cryptography>=50",

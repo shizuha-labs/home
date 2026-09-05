@@ -18,6 +18,11 @@ def test_active_workflow_jobs_expire_and_builds_clean_up():
         assert workflow.count("- --cleanup") == workflow.count(
             "image: gcr.io/kaniko-project/executor:v1.23.2"
         )
-        assert "wait_job amd64 &" in workflow
-        assert "wait_job arm64 &" in workflow
-        assert not re.search(r"(?m)^\s*wait_job (?:amd64|arm64)$", workflow)
+        # Both workflow implementations must run the architecture builds in
+        # parallel. The frontend's bounded-retry wrapper is named build_arch;
+        # the backend directly backgrounds wait_job.
+        assert re.search(r"(?m)^\s*(?:wait_job|build_arch) amd64 &$", workflow)
+        assert re.search(r"(?m)^\s*(?:wait_job|build_arch) arm64 &$", workflow)
+        assert not re.search(
+            r"(?m)^\s*(?:wait_job|build_arch) (?:amd64|arm64)$", workflow
+        )
