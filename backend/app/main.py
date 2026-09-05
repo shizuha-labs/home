@@ -169,7 +169,7 @@ async def books_compliance_health():
         "status": "ok",
         "intake_enabled": intake_enabled(),
         "store": "postgres" if database_url() else "not_configured",
-        "provider": "fake" if os.environ.get("BOOKS_COMPLIANCE_FAKE_PROVIDER_ENABLED", "true").lower() in {"1", "true", "yes"} else "none",
+        "provider": "fake" if os.environ.get("BOOKS_COMPLIANCE_FAKE_PROVIDER_ENABLED", "false").lower() in {"1", "true", "yes"} else "none",
     }
 
 
