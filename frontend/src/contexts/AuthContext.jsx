@@ -54,7 +54,12 @@ export function AuthProvider({ children }) {
       if (token && merged) {
         setUser(merged)
         setIsAuthenticated(true)
-        if (!stored?.username || !stored?.first_name || stored?.id == null) {
+        if (
+          !stored?.username
+          || !stored?.first_name
+          || stored?.id == null
+          || Number(stored.id) !== Number(merged.id)
+        ) {
           fetch('/id/api/auth/user/', { headers: { Authorization: `Bearer ${token}` } })
             .then((res) => (res.ok ? res.json() : null))
             .then((fresh) => {

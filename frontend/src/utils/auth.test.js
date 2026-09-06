@@ -32,4 +32,10 @@ describe('session user from ID JWT', () => {
     expect(merged.first_name).toBe('Hritik')
     expect(merged.username).toBe('hritik')
   })
+
+  it('lets the JWT user_id win over a stale shizuha_user.id', () => {
+    const tokenUser = userFromAccessToken(fakeJwt({ user_id: 3, email: 'hothritik1@gmail.com' }))
+    const merged = mergeSessionUser({ id: 1, display_name: 'Hritik Soni', email: 'hothritik1@gmail.com' }, tokenUser)
+    expect(resolveCurrentUserId(merged)).toBe(3)
+  })
 })

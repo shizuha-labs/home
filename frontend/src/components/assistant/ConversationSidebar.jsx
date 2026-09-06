@@ -12,6 +12,7 @@ export default function ConversationSidebar({
   conversations = [],
   activeConversationId,
   currentUserId,
+  currentUser,
   onlineUsers,
   pendingRequestCount = 0,
   onSelectConversation,
@@ -26,11 +27,11 @@ export default function ConversationSidebar({
 
   const filtered = useMemo(() => {
     const rows = conversations.filter((c) =>
-      conversationBelongsInInbox(c, currentUserId, activeConversationId),
+      conversationBelongsInInbox(c, currentUserId, activeConversationId, currentUser),
     )
     if (!query.trim()) return rows
-    return rows.filter((c) => conversationMatchesQuery(c, query, currentUserId))
-  }, [conversations, query, currentUserId, activeConversationId])
+    return rows.filter((c) => conversationMatchesQuery(c, query, currentUserId, currentUser))
+  }, [conversations, query, currentUserId, currentUser, activeConversationId])
 
   useEffect(() => {
     const q = query.trim()
@@ -117,8 +118,8 @@ export default function ConversationSidebar({
       </div>
       <div className="flex-1 overflow-y-auto px-2">
         {filtered.map((conv) => {
-          const other = conversationPeer(conv, currentUserId)
-          const name = conversationPeerName(conv, currentUserId)
+          const other = conversationPeer(conv, currentUserId, currentUser)
+          const name = conversationPeerName(conv, currentUserId, currentUser)
           const hasUnread = conv.unread_count > 0
           const isActive = conv.id === activeConversationId
           const preview = sanitizeMessagePreview(conv.last_message_preview || '')

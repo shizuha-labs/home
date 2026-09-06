@@ -220,7 +220,7 @@ function ChatHomeInner() {
   const [roster, setRoster] = useState([])
   const ceoHome = isCeoHomeUser(user)
   const pickerOptions = useMemo(() => {
-    const prior = agentConversations(conversations, currentUserId)
+    const prior = agentConversations(conversations, currentUserId, user)
     if (ceoHome) return mergeAgentSearchHits(prior, roster)
     const username = personalHomeAgentUsername(user)
     if (!username) return []
@@ -807,7 +807,7 @@ function ChatHomeInner() {
   const activeConv = threadOpen
     ? conversations.find(c => c.id === activeConversationId)
     : null
-  const activeName = threadOpen ? conversationPeerName(activeConv, currentUserId) : ''
+  const activeName = threadOpen ? conversationPeerName(activeConv, currentUserId, user) : ''
   const voiceAgentLabel = threadOpen
     ? (activeName || 'Agent')
     : (selectedPicker?.displayName || effectiveHomeAgent || 'Agent')
@@ -853,6 +853,7 @@ function ChatHomeInner() {
           conversations={conversations}
           activeConversationId={activeConversationId}
           currentUserId={currentUserId}
+          currentUser={user}
           onlineUsers={onlineUsers}
           pendingRequestCount={pendingRequestCount}
           onSelectConversation={(id) => {
@@ -979,6 +980,7 @@ function ChatHomeInner() {
         conversations={conversations}
         activeConversationId={activeConversationId}
         currentUserId={currentUserId}
+        currentUser={user}
         onlineUsers={onlineUsers}
         pendingRequestCount={pendingRequestCount}
         onSelectConversation={(id) => {

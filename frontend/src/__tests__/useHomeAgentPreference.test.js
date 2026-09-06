@@ -71,6 +71,22 @@ describe('home agent preference', () => {
     expect(readHomeAgentPref()).toBe('cora')
   })
 
+  it('treats participant_type agent and user_email as an agent seat', () => {
+    const conversations = [
+      {
+        id: 'shizuha-dm',
+        conversation_type: 'direct',
+        participants: [
+          { user_id: 3, user_name: 'Hritik Soni', user_email: 'hothritik1@gmail.com' },
+          { user_id: 24, user_name: 'Shizuha', user_email: 'shizuha@shizuha.com', participant_type: 'agent' },
+        ],
+      },
+    ]
+    const rows = agentConversations(conversations, 3, { email: 'hothritik1@gmail.com' })
+    expect(rows[0]?.username).toBe('Shizuha')
+    expect(rows[0]?.displayName).toBe('Shizuha')
+  })
+
   it('matches a conversation by username, not any agent_role', () => {
     const conversations = [
       {

@@ -117,10 +117,10 @@ export function findAgentConversation(conversations, username) {
   ) || null
 }
 
-export function conversationMatchesQuery(conversation, query, currentUserId) {
+export function conversationMatchesQuery(conversation, query, currentUserId, currentUser) {
   const q = String(query || '').trim().toLowerCase()
   if (!q || !conversation) return true
-  const other = conversationPeer(conversation, currentUserId)
+  const other = conversationPeer(conversation, currentUserId, currentUser)
   const blob = [
     conversation.name,
     conversation.last_message_preview,
@@ -153,18 +153,20 @@ export function mergeAgentSearchHits(...lists) {
   return out
 }
 
-export function agentConversations(conversations, currentUserId) {
+export function agentConversations(conversations, currentUserId, currentUser) {
   if (!Array.isArray(conversations)) return []
   const seen = new Set()
   const out = []
   for (const conv of conversations) {
     if (conv?.conversation_type === 'group') continue
-    const other = conversationPeer(conv, currentUserId)
+    const other = conversationPeer(conv, currentUserId, currentUser)
+    const email = String(other?.email || other?.user_email || '')
     const looksAgent = Boolean(
       other?.agent_role
       || other?.is_agent
-      || String(other?.email || '').endsWith('@shizuha.com')
-      || String(other?.email || '').includes('@agents.'),
+      || other?.participant_type === 'agent'
+      || email.endsWith('@shizuha.com')
+      || email.includes('@agents.'),
     )
     if (!other || !looksAgent) continue
     const username = String(other.username || other.user_name || '').trim()

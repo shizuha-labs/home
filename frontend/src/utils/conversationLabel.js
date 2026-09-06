@@ -13,38 +13,51 @@ export function sameUserId(a, b) {
   return String(a) === String(b)
 }
 
-export function conversationPeer(conv, currentUserId) {
-  if (!conv || currentUserId == null || currentUserId === '') return null
+export function isCurrentUserParticipant(participant, currentUserId, currentUser) {
+  if (!participant) return false
+  if (sameUserId(participant.user_id, currentUserId)) return true
+  const email = String(currentUser?.email || '').trim().toLowerCase()
+  if (email && String(participant.user_email || participant.email || '').trim().toLowerCase() === email) {
+    return true
+  }
+  return false
+}
+
+export function conversationPeer(conv, currentUserId, currentUser) {
+  if (!conv) return null
+  const hasIdentity = (currentUserId != null && currentUserId !== '') || Boolean(currentUser?.email)
+  if (!hasIdentity) return null
   return (conv.participants || []).find(
-    (p) => !sameUserId(p.user_id, currentUserId) && !p.has_left,
+    (p) => !p.has_left && !isCurrentUserParticipant(p, currentUserId, currentUser),
   ) || null
 }
 
-export function isSelfDirectConversation(conv, currentUserId) {
+export function isSelfDirectConversation(conv, currentUserId, currentUser) {
   if (!conv || conv.conversation_type === 'group') return false
-  if (currentUserId == null || currentUserId === '') return false
+  const hasIdentity = (currentUserId != null && currentUserId !== '') || Boolean(currentUser?.email)
+  if (!hasIdentity) return false
   const active = (conv.participants || []).filter((p) => !p.has_left)
   if (active.length === 0) return false
-  return active.every((p) => sameUserId(p.user_id, currentUserId))
+  return active.every((p) => isCurrentUserParticipant(p, currentUserId, currentUser))
 }
 
 /** Inbox rows are recency-equal: no hive/openclaw/hermes pin, no empty-thread boost. */
-export function conversationBelongsInInbox(conv, currentUserId, activeConversationId) {
+export function conversationBelongsInInbox(conv, currentUserId, activeConversationId, currentUser) {
   if (!conv) return false
-  if (isSelfDirectConversation(conv, currentUserId)) return false
+  if (isSelfDirectConversation(conv, currentUserId, currentUser)) return false
   if (activeConversationId && conv.id === activeConversationId) return true
   return Boolean(conv.last_message_at) || Number(conv.message_count || 0) > 0
 }
 
-export function conversationPeerName(conv, currentUserId) {
+export function conversationPeerName(conv, currentUserId, currentUser) {
   if (!conv) return 'Chat'
   if (conv.conversation_type === 'group') return conv.name || 'Group'
-  const other = conversationPeer(conv, currentUserId)
+  const other = conversationPeer(conv, currentUserId, currentUser)
   if (other && !isPlaceholderName(other.user_name, other.user_id)) {
     return other.user_name
   }
   const selfName = (conv.participants || []).find(
-    (p) => sameUserId(p.user_id, currentUserId),
+    (p) => isCurrentUserParticipant(p, currentUserId, currentUser),
   )?.user_name
   const fromList = (conv.participant_names || []).find(
     (n) => n && n !== selfName && !isPlaceholderName(n, other?.user_id),

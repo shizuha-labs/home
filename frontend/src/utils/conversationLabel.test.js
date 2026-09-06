@@ -83,6 +83,20 @@ describe('conversationLabel', () => {
     expect(conversationPeerName(conv, 3)).toBe('Nagi')
   })
 
+  it('labels the Shizuha CoS DM as Shizuha even when stored user id is wrong', () => {
+    const conv = {
+      conversation_type: 'direct',
+      participants: [
+        { user_id: 3, user_name: 'Hritik Soni', user_email: 'hothritik1@gmail.com', participant_type: 'human' },
+        { user_id: 24, user_name: 'Shizuha', user_email: 'shizuha@shizuha.com', participant_type: 'agent' },
+      ],
+      participant_names: ['Hritik Soni', 'Shizuha'],
+    }
+    const me = { id: 1, email: 'hothritik1@gmail.com' }
+    expect(conversationPeerName(conv, 1, me)).toBe('Shizuha')
+    expect(conversationPeerName(conv, 3, me)).toBe('Shizuha')
+  })
+
   it('detects a self-only direct conversation', () => {
     const conv = {
       conversation_type: 'direct',

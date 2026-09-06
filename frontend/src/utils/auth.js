@@ -46,13 +46,15 @@ export function resolveCurrentUserId(user) {
 export function mergeSessionUser(stored, tokenUser) {
   if (!stored && !tokenUser) return null
   const merged = { ...(tokenUser || {}), ...(stored || {}) }
-  const id = resolveCurrentUserId(merged) || resolveCurrentUserId(tokenUser)
+  // The access token is the live identity. A stale shizuha_user.id (often 1)
+  // must not win — that made the operator's Shizuha DM label as "Hritik Soni".
+  const id = resolveCurrentUserId(tokenUser) || resolveCurrentUserId(merged)
   if (id != null) {
     merged.id = id
     merged.user_id = id
   }
-  if (!merged.email && tokenUser?.email) merged.email = tokenUser.email
-  if (!merged.username && tokenUser?.username) merged.username = tokenUser.username
+  if (tokenUser?.email) merged.email = merged.email || tokenUser.email
+  if (tokenUser?.username) merged.username = merged.username || tokenUser.username
   if (!merged.first_name && tokenUser?.first_name) merged.first_name = tokenUser.first_name
   return merged
 }
