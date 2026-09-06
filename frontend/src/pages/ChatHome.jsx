@@ -31,7 +31,7 @@ import { isGrokVoiceOmniModel, mergePendingHeard, pickActiveLiveVoice, readRemem
 import TtsSpeedButton from '../components/assistant/TtsSpeedButton'
 import { useHomeSummary } from '../hooks/useHomeSummary'
 import { useHomeActivity } from '../hooks/useHomeActivity'
-import { getAccessToken, handleUnauthorized } from '../utils/auth'
+import { getAccessToken, handleUnauthorized, resolveCurrentUserId } from '../utils/auth'
 import { emitLiveTrace, setLiveTraceContext } from '../utils/liveTrace'
 import { conversationPeerName } from '../utils/conversationLabel'
 import { conversationIdFromPath, isHomeAppPath, nextThreadAfterRouteChange, threadInitialUnreadCount } from '../utils/conversationRoute'
@@ -96,6 +96,7 @@ function AppsDrawer({ isOpen, onClose }) {
 
 function ChatHomeInner() {
   const { user } = useAuth()
+  const currentUserId = resolveCurrentUserId(user)
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const urlConversationId = useParams().conversationId || conversationIdFromPath(pathname)
@@ -216,10 +217,11 @@ function ChatHomeInner() {
   }, [activeConversationId])
 
   const [personalSeat, setPersonalSeat] = useState(null)
+  const [roster, setRoster] = useState([])
   const ceoHome = isCeoHomeUser(user)
   const pickerOptions = useMemo(() => {
-    const prior = agentConversations(conversations, user?.id)
-    if (ceoHome) return prior
+    const prior = agentConversations(conversations, currentUserId)
+    if (ceoHome) return mergeAgentSearchHits(prior, roster)
     const username = personalHomeAgentUsername(user)
     if (!username) return []
     const existing = prior.find(
@@ -234,7 +236,7 @@ function ChatHomeInner() {
       userId: personalSeat?.identity_user_id || personalSeat?.identityUserId || null,
       conversationId: null,
     }]
-  }, [ceoHome, conversations, personalSeat, user])
+  }, [ceoHome, conversations, currentUserId, personalSeat, roster, user])
   const effectiveHomeAgent = resolveHomeAgentUsername(homeAgent, user)
   useEffect(() => {
     if (!user) return
@@ -246,7 +248,7 @@ function ChatHomeInner() {
     }
   }, [homeAgent, user])
   useEffect(() => {
-    if (!user?.id || ceoHome) return undefined
+    if (!currentUserId || ceoHome) return undefined
     let cancelled = false
     const token = getAuthToken()
     fetch('/hive/api/v1/fleet/personal-agent', {
@@ -265,7 +267,7 @@ function ChatHomeInner() {
       })
       .catch(() => {})
     return () => { cancelled = true }
-  }, [ceoHome, user])
+  }, [ceoHome, currentUserId, user])
   const selectedPicker = pickerOptions.find(
     (row) => String(row.username).toLowerCase() === String(effectiveHomeAgent).toLowerCase(),
   )
@@ -277,7 +279,7 @@ function ChatHomeInner() {
     conversation: liveConversation,
     preferPeer: Boolean(urlConversationId),
     pickerUsername: effectiveHomeAgent,
-    currentUserId: user?.id,
+    currentUserId,
   })
   const [forceCascade, setForceCascade] = useState(false)
   const [awaitingVoicePath, setAwaitingVoicePath] = useState(false)
@@ -288,7 +290,10 @@ function ChatHomeInner() {
   }, [liveTarget.username])
 
   const chooseHomeAgent = useCallback((row) => {
-    const username = writeHomeAgentPref(resolveHomeAgentUsername(row?.username, user))
+    const picked = String(row?.username || '').trim()
+    const username = writeHomeAgentPref(
+      isCeoHomeUser(user) ? picked : resolveHomeAgentUsername(picked, user),
+    )
     setHomeAgent(username)
     if (row?.conversationId) {
       setMiniConvId(row.conversationId)
@@ -300,7 +305,13 @@ function ChatHomeInner() {
     const token = getAuthToken()
     const headers = { Authorization: `Bearer ${token}` }
     const ql = String(q || '').toLowerCase()
-    const keepHit = (row) => !isForbiddenHomeAgentUsername(row?.username, user)
+    const keepHit = (row) => {
+      if (isForbiddenHomeAgentUsername(row?.username, user)) return false
+      const uname = String(row?.username || '').toLowerCase()
+      if (uname && uname === String(user?.username || '').toLowerCase()) return false
+      if (currentUserId != null && Number(row?.userId || row?.user_id) === currentUserId) return false
+      return true
+    }
     const localAgents = (allAgents || [])
       .filter((a) => {
         const blob = `${a.name || ''} ${a.username || ''} ${a.email || ''} ${(a.role || '')}`.toLowerCase()
@@ -331,7 +342,7 @@ function ChatHomeInner() {
           if (!idRes.ok) return []
           const data = await idRes.json()
           return (data.users ?? [])
-            .filter((u) => u.id !== user?.id)
+            .filter((u) => u.id !== currentUserId)
             .map((u) => ({
               userId: u.id,
               username: u.username,
@@ -359,7 +370,15 @@ function ChatHomeInner() {
     ]
     const [hiveHits, idHits, connectHits] = await Promise.all(fetches)
     return mergeAgentSearchHits(localAgents, hiveHits, idHits, connectHits).filter(keepHit).slice(0, 16)
-  }, [allAgents, ceoHome, user])
+  }, [allAgents, ceoHome, currentUserId, user])
+
+  useEffect(() => {
+    let cancelled = false
+    searchHomeAgents('').then((rows) => {
+      if (!cancelled) setRoster(Array.isArray(rows) ? rows : [])
+    })
+    return () => { cancelled = true }
+  }, [searchHomeAgents])
 
   const sendOnOpenThread = useCallback((text) => {
     const dest = urlConversationId || activeConversationId
@@ -451,7 +470,7 @@ function ChatHomeInner() {
     agentUsername: liveTarget.username || effectiveHomeAgent,
     model: liveTarget.model || '',
     messages,
-    userId: user?.id,
+    userId: currentUserId,
     speakEnabled: speakReplies,
     onFallback: (kind) => {
       if (kind !== 'not_voice_agent' && kind !== 'stream_unavailable') return false
@@ -532,17 +551,17 @@ function ChatHomeInner() {
   const lastAgentReply = useMemo(() => {
     const list = Array.isArray(messages) ? messages : []
     const last = [...list].reverse().find((m) => (
-      m.sender_id !== user?.id && !isTalkAckText(m.content) && !isGhostTranscript(m.content)
+      m.sender_id !== currentUserId && !isTalkAckText(m.content) && !isGhostTranscript(m.content)
     ))
     return last?.content || ''
-  }, [messages, user?.id])
+  }, [messages, currentUserId])
   const displayMessages = useMemo(() => {
     const cleaned = Array.isArray(messages)
       ? messages.filter((m) => !isTalkAckText(m?.content) && !isGhostTranscript(m?.content))
       : []
     if (isTalkAckText(lastHeard) || isGhostTranscript(lastHeard)) return cleaned
-    return mergePendingHeard(cleaned, { lastHeard, callActive, userId: user?.id })
-  }, [callActive, lastHeard, messages, user?.id])
+    return mergePendingHeard(cleaned, { lastHeard, callActive, userId: currentUserId })
+  }, [callActive, lastHeard, messages, currentUserId])
   const callFailed = !awaitingVoicePath && callState === 'error'
   const wasCallActiveRef = useRef(false)
   useEffect(() => {
@@ -556,11 +575,11 @@ function ChatHomeInner() {
   useEffect(() => {
     setLiveTraceContext({
       conversationId: miniConvId || activeConversationId || urlConversationId || '',
-      userId: user?.id || '',
+      userId: currentUserId || '',
       agent: effectiveHomeAgent || '',
       route: pathname,
     })
-  }, [activeConversationId, effectiveHomeAgent, miniConvId, pathname, urlConversationId, user?.id])
+  }, [activeConversationId, effectiveHomeAgent, miniConvId, pathname, urlConversationId, currentUserId])
 
   const goHome = useCallback(() => {
     if (activeConversationId && callState !== 'idle') {
@@ -659,7 +678,7 @@ function ChatHomeInner() {
     const key = messageSpeakKey(last)
     if (!key) return
     if (lastSpokenIdRef.current == null) {
-      const agent = last.sender_id === user?.id ? null : last
+      const agent = last.sender_id === currentUserId ? null : last
       if (!agent || !isFreshAgentPersist(agent)) {
         lastSpokenIdRef.current = key
         markPersistSpoken(spokenPersistKeysRef.current, last)
@@ -670,7 +689,7 @@ function ChatHomeInner() {
         return
       }
     }
-    if (last.sender_id === user?.id) return
+    if (last.sender_id === currentUserId) return
     if (alreadySpokePersist(spokenPersistKeysRef.current, last)) return
     lastSpokenIdRef.current = key
     markPersistSpoken(spokenPersistKeysRef.current, last)
@@ -692,7 +711,7 @@ function ChatHomeInner() {
     emitLiveTrace('chat.persist', { leftover: leftover.slice(0, 160), speak: speakReplies ? 1 : 0 })
     if (callActive) notifyReply(leftover)
     else speakText(leftover)
-  }, [messages, speakReplies, callActive, notifyReply, endSpeak, voiceConvId, activeConversationId, user?.id, s2sEnabled])
+  }, [messages, speakReplies, callActive, notifyReply, endSpeak, voiceConvId, activeConversationId, currentUserId, s2sEnabled])
 
   const toggleSpeakReplies = useCallback(() => {
     const next = !speakReplies
@@ -788,7 +807,7 @@ function ChatHomeInner() {
   const activeConv = threadOpen
     ? conversations.find(c => c.id === activeConversationId)
     : null
-  const activeName = threadOpen ? conversationPeerName(activeConv, user?.id) : ''
+  const activeName = threadOpen ? conversationPeerName(activeConv, currentUserId) : ''
   const voiceAgentLabel = threadOpen
     ? (activeName || 'Agent')
     : (selectedPicker?.displayName || effectiveHomeAgent || 'Agent')
@@ -833,7 +852,7 @@ function ChatHomeInner() {
         <ConversationSidebar
           conversations={conversations}
           activeConversationId={activeConversationId}
-          currentUserId={user?.id}
+          currentUserId={currentUserId}
           onlineUsers={onlineUsers}
           pendingRequestCount={pendingRequestCount}
           onSelectConversation={(id) => {
@@ -930,7 +949,7 @@ function ChatHomeInner() {
             key={activeConversationId}
             conversationId={activeConversationId}
             messages={displayMessages}
-            currentUserId={user?.id}
+            currentUserId={currentUserId}
             typingUsers={activeConversationId ? typingUsers.get(activeConversationId) : undefined}
             hasMore={hasMore}
             isLoadingMore={isLoadingMessages}
@@ -959,7 +978,7 @@ function ChatHomeInner() {
       <ConversationSidebar
         conversations={conversations}
         activeConversationId={activeConversationId}
-        currentUserId={user?.id}
+        currentUserId={currentUserId}
         onlineUsers={onlineUsers}
         pendingRequestCount={pendingRequestCount}
         onSelectConversation={(id) => {
@@ -1007,7 +1026,7 @@ function ChatHomeInner() {
             options={pickerOptions}
             onSelect={chooseHomeAgent}
             onSearch={searchHomeAgents}
-            locked={!ceoHome}
+            locked={!ceoHome && Boolean(effectiveHomeAgent)}
           />
           {liveAgents.length > 0 && (
             <p className="flex items-center justify-center gap-2 text-sm text-gray-500 dark:text-gray-400 mb-6">
@@ -1106,7 +1125,7 @@ function ChatHomeInner() {
               <MiniShizuhaChat
                 messages={displayMessages}
                 typingUsers={typingUsers}
-                currentUserId={user?.id}
+                currentUserId={currentUserId}
                 isLoading={isLoadingMessages}
                 agentLabel={selectedPicker?.displayName || effectiveHomeAgent || 'Agent'}
                 onOpenFull={openFullFromMini}
@@ -1192,7 +1211,7 @@ function ChatHomeInner() {
         onSelectUser={handleNewChatUser}
         apiBase="/connect/api"
         getAuthToken={getAuthToken}
-        currentUserId={user?.id}
+        currentUserId={currentUserId}
         extraSearch={searchHomeAgents}
       />
 
@@ -1245,7 +1264,7 @@ export default function ChatHome() {
     <ConnectChatProvider
       getAuthToken={getAuthToken}
       connectApiBase="/connect/api"
-      currentUserId={user?.id}
+      currentUserId={resolveCurrentUserId(user)}
     >
       <ChatHomeInner />
     </ConnectChatProvider>

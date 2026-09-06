@@ -21,6 +21,42 @@ function decodeJwtPayload(token) {
   }
 }
 
+/** ID JWT claims `user_id` (not `id`). Home must not depend on shizuha_user.shape. */
+export function userFromAccessToken(token = getAccessToken()) {
+  const payload = decodeJwtPayload(token)
+  if (!payload || typeof payload !== 'object') return null
+  const raw = payload.user_id ?? payload.sub ?? payload.id
+  const n = Number(raw)
+  const id = Number.isInteger(n) && n > 0 ? n : null
+  if (!id && !payload.email && !payload.username) return null
+  return {
+    id,
+    user_id: id,
+    email: payload.email || '',
+    username: payload.username || payload.preferred_username || '',
+    first_name: payload.first_name || payload.given_name || '',
+  }
+}
+
+export function resolveCurrentUserId(user) {
+  const n = Number(user?.id ?? user?.user_id)
+  return Number.isInteger(n) && n > 0 ? n : null
+}
+
+export function mergeSessionUser(stored, tokenUser) {
+  if (!stored && !tokenUser) return null
+  const merged = { ...(tokenUser || {}), ...(stored || {}) }
+  const id = resolveCurrentUserId(merged) || resolveCurrentUserId(tokenUser)
+  if (id != null) {
+    merged.id = id
+    merged.user_id = id
+  }
+  if (!merged.email && tokenUser?.email) merged.email = tokenUser.email
+  if (!merged.username && tokenUser?.username) merged.username = tokenUser.username
+  if (!merged.first_name && tokenUser?.first_name) merged.first_name = tokenUser.first_name
+  return merged
+}
+
 export function isAccessTokenExpired(token = getAccessToken()) {
   if (!token) return true
   const payload = decodeJwtPayload(token)

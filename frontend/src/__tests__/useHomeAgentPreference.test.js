@@ -33,6 +33,7 @@ describe('home agent preference', () => {
     expect(isCeoHomeUser({ username: 'hritik' })).toBe(true)
     expect(isCeoHomeUser({ id: 3 })).toBe(true)
     expect(isCeoHomeUser({ user_id: 3 })).toBe(true)
+    expect(isCeoHomeUser({ user_id: '3', display_name: 'Hritik Soni' })).toBe(true)
     expect(suggestedHomeAgentUsername({ id: 3, username: 'hritik' })).toBe('ena')
     expect(suggestedHomeAgentUsername({ user_id: 3 })).toBe('ena')
     expect(resolveHomeAgentUsername('', { id: 3 })).toBe('ena')

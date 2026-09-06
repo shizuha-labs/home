@@ -64,8 +64,9 @@ export default function HomeAgentPicker({
   }, [options, hits])
 
   const label = selectedLabel || selectedUsername || 'Choose an agent'
+  const canSwitch = !locked || !selectedUsername
 
-  if (locked) {
+  if (!canSwitch) {
     return (
       <div className="relative mx-auto mb-4 w-full max-w-md">
         <div

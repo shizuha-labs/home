@@ -94,6 +94,10 @@ vi.mock('../hooks/useHomeActivity', () => ({
 vi.mock('../utils/auth', () => ({
   getAccessToken: () => 'test-token',
   handleUnauthorized: () => false,
+  resolveCurrentUserId: (user) => {
+    const n = Number(user?.id ?? user?.user_id)
+    return Number.isInteger(n) && n > 0 ? n : null
+  },
 }))
 
 vi.mock('../components/dashboard/CommandCenterDashboard', () => ({

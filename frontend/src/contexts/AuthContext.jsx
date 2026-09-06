@@ -5,7 +5,9 @@ import {
   clearAuthStorage,
   expireSessionAndRedirect,
   isAccessTokenExpired,
+  mergeSessionUser,
   refreshSession,
+  userFromAccessToken,
 } from '../utils/auth'
 
 const AuthContext = createContext(null)
@@ -38,15 +40,31 @@ export function AuthProvider({ children }) {
           return
         }
       }
-      if ((localStorage.getItem(ACCESS_TOKEN_KEY) || accessToken) && storedUser) {
+      const token = localStorage.getItem(ACCESS_TOKEN_KEY) || accessToken
+      const tokenUser = userFromAccessToken(token)
+      let stored = null
+      if (storedUser) {
         try {
-          const userData = JSON.parse(storedUser)
-          setUser(userData)
-          setIsAuthenticated(true)
+          stored = JSON.parse(storedUser)
         } catch (error) {
           console.error('Failed to parse stored user:', error)
-          setUser(null)
-          setIsAuthenticated(false)
+        }
+      }
+      const merged = mergeSessionUser(stored, tokenUser)
+      if (token && merged) {
+        setUser(merged)
+        setIsAuthenticated(true)
+        if (!stored?.username || !stored?.first_name || stored?.id == null) {
+          fetch('/id/api/auth/user/', { headers: { Authorization: `Bearer ${token}` } })
+            .then((res) => (res.ok ? res.json() : null))
+            .then((fresh) => {
+              if (!fresh) return
+              const next = mergeSessionUser(fresh, userFromAccessToken())
+              if (!next) return
+              try { localStorage.setItem(USER_KEY, JSON.stringify(next)) } catch { /* private mode */ }
+              setUser(next)
+            })
+            .catch(() => {})
         }
       } else {
         setUser(null)
@@ -71,7 +89,12 @@ export function AuthProvider({ children }) {
   // Listen for storage events (cross-tab sync)
   useEffect(() => {
     const handleStorageChange = (e) => {
-      if (e.type === 'shizuha-auth-cleared' || e.key === ACCESS_TOKEN_KEY || e.key === USER_KEY) {
+      if (
+        e.type === 'shizuha-auth-cleared'
+        || e.type === 'shizuha-auth-refreshed'
+        || e.key === ACCESS_TOKEN_KEY
+        || e.key === USER_KEY
+      ) {
         const accessToken = localStorage.getItem(ACCESS_TOKEN_KEY)
         const storedUser = localStorage.getItem(USER_KEY)
 
@@ -79,12 +102,16 @@ export function AuthProvider({ children }) {
           expireSessionAndRedirect()
           setUser(null)
           setIsAuthenticated(false)
-        } else if (accessToken && storedUser) {
-          try {
-            const userData = JSON.parse(storedUser)
-            setUser(userData)
+        } else if (accessToken) {
+          let stored = null
+          if (storedUser) {
+            try { stored = JSON.parse(storedUser) } catch { stored = null }
+          }
+          const merged = mergeSessionUser(stored, userFromAccessToken(accessToken))
+          if (merged) {
+            setUser(merged)
             setIsAuthenticated(true)
-          } catch {
+          } else {
             setUser(null)
             setIsAuthenticated(false)
           }
@@ -97,9 +124,11 @@ export function AuthProvider({ children }) {
 
     window.addEventListener('storage', handleStorageChange)
     window.addEventListener('shizuha-auth-cleared', handleStorageChange)
+    window.addEventListener('shizuha-auth-refreshed', handleStorageChange)
     return () => {
       window.removeEventListener('storage', handleStorageChange)
       window.removeEventListener('shizuha-auth-cleared', handleStorageChange)
+      window.removeEventListener('shizuha-auth-refreshed', handleStorageChange)
     }
   }, [])
 

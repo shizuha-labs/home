@@ -37,6 +37,10 @@ import LiveVoiceOverlay from '../components/assistant/LiveVoiceOverlay'
 
 vi.mock('../utils/auth', () => ({
   getAccessToken: vi.fn(() => 'test-token'),
+  resolveCurrentUserId: (user) => {
+    const n = Number(user?.id ?? user?.user_id)
+    return Number.isInteger(n) && n > 0 ? n : null
+  },
 }))
 
 const startStreamingStt = vi.fn()
