@@ -19,15 +19,21 @@
     <meta name="twitter:card" content="summary" />
     <title>Shizuha</title>
 
-    <!-- VEN-148: Plausible Analytics for the Forge API launch funnel.
-         Domain-level install lets /forge/pricing pageviews and custom funnel
-         goals resolve in the same Plausible dashboard. -->
+    <!-- VEN-148 Forge analytics, with VEN-194's route-level privacy boundary.
+         The third-party script is never requested on Books Compliance,
+         confirmation, recovery, or rights surfaces. -->
     <script>
-      window.plausible = window.plausible || function() {
-        (window.plausible.q = window.plausible.q || []).push(arguments)
+      if (!window.location.pathname.startsWith('/books/compliance')) {
+        window.plausible = window.plausible || function() {
+          (window.plausible.q = window.plausible.q || []).push(arguments)
+        }
+        var plausibleScript = document.createElement('script')
+        plausibleScript.defer = true
+        plausibleScript.dataset.domain = 'shizuha.com'
+        plausibleScript.src = 'https://plausible.io/js/script.js'
+        document.head.appendChild(plausibleScript)
       }
     </script>
-    <script defer data-domain="shizuha.com" src="https://plausible.io/js/script.js"></script>
   </head>
   <body>
     <div id="root"></div>

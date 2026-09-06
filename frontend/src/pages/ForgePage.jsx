@@ -299,6 +299,12 @@ export default function ForgePage() {
             <p className="mt-4 text-lg text-gray-600 dark:text-gray-300">
               One REST call to FLUX, no GPU to manage. <strong>$0.02/image</strong> after <strong>10 free/day</strong>.
             </p>
+            <a
+              href="https://cortex.shizuha.com/studio"
+              className="mt-6 inline-flex items-center justify-center rounded-lg bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-brand-700"
+            >
+              Generate a video in Forge Studio →
+            </a>
             <div className="mt-8">
               <CopyableCode label="curl — generate your first image">{CODE_SNIPPET}</CopyableCode>
             </div>

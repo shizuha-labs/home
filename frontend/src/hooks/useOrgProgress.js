@@ -13,6 +13,7 @@ import { getAccessToken, handleUnauthorized } from '../utils/auth'
  *                            totals: { created, completed, terminal } },
  *     by_status: { <slug>: count }, throughput: [{ team, status, samples,
  *     avg_dwell_seconds, p90_dwell_seconds, throughput_out_per_day }],
+ *     open_dwell: same shape, current open-interval dwell (slowest-stages tile),
  *     snapshot: { open, blocked, in_progress, overdue,
  *                 completed_window, created_window, terminal_window } }
  *

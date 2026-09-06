@@ -35,6 +35,14 @@ const routes = [
       'Sign up for a Shizuha Forge API key and make your first image generation request with the free tier.',
   },
   {
+    // VEN-174: /forge/docs must have its own prerendered shell, or nginx's
+    // `try_files $uri/` hits the bare directory and 403s (same as bare forge/).
+    output: 'forge/docs/index.html',
+    title: 'Forge API Documentation — Shizuha',
+    description:
+      'Forge API developer docs: authentication, the POST /api/forge/generate endpoint, rate limits, status codes, and curl/Python/JavaScript examples.',
+  },
+  {
     output: 'autonomous-org/index.html',
     title: 'Shizuha Autonomous Org — managed AI workforce for startups',
     description:
@@ -63,6 +71,24 @@ const routes = [
     title: 'Forge API Dashboard — Shizuha',
     description:
       'Manage your Shizuha Forge API key, usage, free-tier quota, billing status, and account settings.',
+  },
+  {
+    output: 'books/compliance/index.html',
+    title: 'Books Compliance Cockpit — GST readiness workflow',
+    description:
+      'India-hosted Books compliance readiness for GST tracking, reconciliation, evidence and reports. Request-access validation only; no payment or tax advice.',
+  },
+  {
+    output: 'books/compliance/pricing/index.html',
+    title: 'Books Compliance Cockpit Pricing — validation only',
+    description:
+      '₹0 demo and ₹499/month validation hypothesis for Books Compliance readiness. Subject to change; request-access only, no payment.',
+  },
+  {
+    output: 'books/compliance/confirmation/index.html',
+    title: 'Confirm Books Compliance request — Shizuha',
+    description:
+      'Deliberately confirm a Books Compliance request. Opening this page alone changes nothing.',
   },
 ]
 

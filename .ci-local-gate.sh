@@ -1,6 +1,7 @@
 #!/bin/bash
 # Local mirror of home deploy-backend authz-invariant job: the SAME pytest
-# selection, deps from pip-cache (as CI does).
+# selection from the locked uv project (backend/pyproject.toml + backend/uv.lock),
+# as CI does. PLAT-5821: no more pip -r requirements.txt — uv sync --locked.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 docker volume create home-gate-pipcache >/dev/null
@@ -8,8 +9,11 @@ docker run --rm -v "$PWD":/src -v home-gate-pipcache:/root/.cache/pip -w /src py
 python -m pip install --quiet \
   --index-url "${PIP_INDEX_URL:-http://192.168.0.136:30511/simple/}" \
   --trusted-host 192.168.0.136 \
-  -r backend/requirements.txt pytest
+  uv==0.11.26
 cd backend
+env -u UV_INDEX_URL -u UV_DEFAULT_INDEX -u UV_INSECURE_HOST uv lock --check
+env -u UV_INDEX_URL -u UV_DEFAULT_INDEX -u UV_INSECURE_HOST uv sync --locked --extra dev
+. .venv/bin/activate
 python -m pytest -q \
   tests/test_summary.py::test_requesting_foreign_org_is_403 \
   tests/test_summary.py::test_two_org_authz_matrix_rejects_selectors_and_stale_claim_cache \

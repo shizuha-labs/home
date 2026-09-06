@@ -1,3 +1,77 @@
+/** After a clearly finished question, wait this long for a late clause. */
+export const STT_COMPLETE_HANGOVER_MS = 3200
+/** Human-like pause after a mid-thought, digit string, or period-only clause. */
+export const STT_INCOMPLETE_HANGOVER_MS = 4000
+/** Never send while the mic is still loud — hangover is not a hard cut. */
+export const STT_COMMIT_QUIET_MS = 1400
+/** After mute, commit a finished sentence soon — mute is not “throw this away”. */
+export const STT_MUTE_COMMIT_MS = 400
+
+const INCOMPLETE_TAIL = /\b(a|an|and|at|but|check|for|if|in|of|on|or|so|the|to|with|my|your|this|that|these|those|first|second|third|want|see|look|tell|give|pull|open|about|task|personally|perhaps|maybe|just|please|then|also|there|here|like|into|login|log)$/i
+const NUMBER_WORDS = /\b(zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b/i
+
+/** True when the transcript is a mid-thought, not a finished command.
+ * Grok often appends a period or ? on an unfinished clause. */
+export function utteranceLooksIncomplete(text) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim()
+  if (!t) return true
+  const stripped = t.replace(/[.!?…]+$/g, '')
+  if (/\b\d(?:\s+\d)+\b/.test(stripped) || NUMBER_WORDS.test(stripped)) return true
+  if (INCOMPLETE_TAIL.test(stripped)) return true
+  if (/[?!…]$/.test(t) && stripped.split(/\s+/).length >= 2) return false
+  return true
+}
+
+export function sttCommitHangoverMs(text) {
+  return utteranceLooksIncomplete(text) ? STT_INCOMPLETE_HANGOVER_MS : STT_COMPLETE_HANGOVER_MS
+}
+
+/** Mute is phone-mute: send a finished sentence, never a 1–2 word fragment. */
+export function shouldCommitOnMute(text) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim()
+  if (!t) return false
+  const words = t.replace(/[.!?…]+$/g, '').split(/\s+/).filter(Boolean)
+  if (words.length <= 2) return false
+  if (/[?!…]$/.test(t)) return true
+  if (INCOMPLETE_TAIL.test(t.replace(/[.]+$/, ''))) return false
+  return words.length >= 4
+}
+
+/** Grok often resets the running transcript after a mid-thought pause.
+ * A new partial that does not extend the pending clause is still one turn. */
+export function stitchHeard(prev, next) {
+  const a = String(prev || '').replace(/\s+/g, ' ').trim()
+  const b = String(next || '').replace(/\s+/g, ' ').trim()
+  if (!a) return b
+  if (!b) return a
+  if (b === a) return b
+  if (b.startsWith(a)) return b
+  if (a.startsWith(b) && a.length > b.length) return a
+  if (a.toLowerCase().includes(b.toLowerCase())) return a
+  if (b.toLowerCase().includes(a.toLowerCase())) return b
+  const aWords = a.split(' ')
+  const bWords = b.split(' ')
+  for (let n = Math.min(aWords.length, bWords.length); n >= 2; n -= 1) {
+    if (aWords.slice(-n).join(' ').toLowerCase() === bWords.slice(0, n).join(' ').toLowerCase()) {
+      return [...aWords, ...bWords.slice(n)].join(' ')
+    }
+  }
+  const max = Math.min(a.length, b.length)
+  for (let n = max; n >= 8; n -= 1) {
+    if (a.slice(-n).toLowerCase() === b.slice(0, n).toLowerCase()) {
+      return `${a}${b.slice(n)}`.replace(/\s+/g, ' ').trim()
+    }
+  }
+  return `${a} ${b}`
+}
+
+export function isTranscriptExtension(prev, next) {
+  const a = String(prev || '').replace(/\s+/g, ' ').trim()
+  const b = String(next || '').replace(/\s+/g, ' ').trim()
+  if (!a || !b) return true
+  return b.startsWith(a) || a.startsWith(b)
+}
+
 const wsUrl = () => {
   const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   return `${scheme}//${window.location.host}/voice/api/stt/stream`
@@ -17,7 +91,7 @@ const toPcm16 = (samples) => {
  * Permission/context startup continues in the background, checking cancellation
  * after every await before it can create or connect the next resource.
  */
-export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, onError }) {
+export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, onError, call_id, trace_id, conversation_id, session_id, seed, holdCount = 0 } = {}) {
   let stream = null
   let context = null
   let source = null
@@ -34,11 +108,24 @@ export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, 
   let firstAudioAt = 0
   let firstPartialMs = null
   let lastLoudAt = 0
+  let commitTimer = null
+  const seedText = String(seed || '').trim()
+  let pendingFinal = seedText ? { text: seedText, event: { type: 'seed', text: seedText } } : null
+  let lastPartial = seedText
+  let micEnabled = true
+
+  const stillLoud = () => !!(lastLoudAt && (performance.now() - lastLoudAt) < STT_COMMIT_QUIET_MS)
 
   const emitIdle = () => {
     if (idleDelivered) return
     idleDelivered = true
     onState?.('idle')
+  }
+
+  const clearCommit = () => {
+    if (commitTimer != null) window.clearTimeout(commitTimer)
+    commitTimer = null
+    pendingFinal = null
   }
 
   const stopResources = () => {
@@ -57,6 +144,7 @@ export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, 
   const close = () => {
     cancelled = true
     captureEnded = true
+    clearCommit()
     if (closeTimer) window.clearTimeout(closeTimer)
     closeTimer = null
     stopResources()
@@ -94,11 +182,64 @@ export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, 
     const clean = String(text || '').trim()
     if (!clean || finalDelivered) return
     finalDelivered = true
+    clearCommit()
     onFinal?.(clean, event)
   }
 
+  const commitPending = () => {
+    const pending = pendingFinal
+    commitTimer = null
+    if (!pending || finalDelivered) return
+    if (micEnabled && stillLoud()) {
+      commitTimer = window.setTimeout(commitPending, STT_COMMIT_QUIET_MS)
+      return
+    }
+    pendingFinal = null
+    finishCapture(true)
+    deliverFinal(pending.text, pending.event)
+  }
+
+  const armCommit = (text, event, delayMs = sttCommitHangoverMs(text)) => {
+    if (finalDelivered || cancelled) return
+    if (commitTimer != null) window.clearTimeout(commitTimer)
+    pendingFinal = { text, event }
+    commitTimer = window.setTimeout(commitPending, delayMs)
+  }
+
+  const setMicEnabled = (on) => {
+    micEnabled = !!on
+    const tracks = stream?.getAudioTracks?.() || stream?.getTracks?.() || []
+    tracks.forEach((track) => { track.enabled = micEnabled })
+  }
+
+  const pendingText = () => (pendingFinal?.text || lastPartial || '').trim()
+
+  const discardPending = () => {
+    clearCommit()
+    lastPartial = ''
+    pendingFinal = null
+  }
+
+  const hintTurnComplete = () => {
+    if (finalDelivered || cancelled) return
+    const text = pendingText()
+    if (!text) return
+    armCommit(text, pendingFinal?.event || { type: 'transcript.partial', text, speech_final: true }, STT_MUTE_COMMIT_MS)
+  }
+
   const controller = {
+    setMicEnabled,
+    pendingText,
+    discardPending,
+    hintTurnComplete,
     stop: () => {
+      if (pendingFinal) {
+        const pending = pendingFinal
+        clearCommit()
+        finishCapture(true)
+        deliverFinal(pending.text, pending.event)
+        return
+      }
       if (!ready) {
         cancelled = true
         close()
@@ -140,6 +281,10 @@ export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, 
     processor.onaudioprocess = (event) => {
       if (!ready || captureEnded || socket?.readyState !== WebSocket.OPEN) return
       const samples = event.inputBuffer.getChannelData(0)
+      if (!micEnabled) {
+        socket.send(new Int16Array(samples.length).buffer)
+        return
+      }
       const now = performance.now()
       if (!firstAudioAt) firstAudioAt = now
       let sum = 0
@@ -154,6 +299,10 @@ export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, 
         token,
         sample_rate: context?.sampleRate || 16000,
         language: navigator.language || 'en',
+        call_id,
+        trace_id,
+        conversation_id,
+        session_id,
       }))
     }
     socket.onmessage = ({ data }) => {
@@ -168,6 +317,9 @@ export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, 
         } else {
           source?.connect(processor)
           onState?.('listening')
+          if (pendingFinal && !commitTimer && !finalDelivered) {
+            armCommit(pendingFinal.text, pendingFinal.event)
+          }
         }
         return
       }
@@ -186,15 +338,39 @@ export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, 
           },
         }
         const text = String(event.text || '').trim()
-        if (text) onPartial?.(text, timedEvent)
+        if (!text) return
+        const stitched = pendingFinal ? stitchHeard(pendingFinal.text, text) : text
+        lastPartial = stitched
+        onPartial?.(stitched, timedEvent)
         if (event.speech_final) {
-          finishCapture(true)
-          deliverFinal(text, timedEvent)
+          // Do not tear the mic down on the first VAD silence. Grok's
+          // speech_final can fire mid-clause; hangover + Smart Turn wait
+          // for the rest of the sentence (industry endpointing).
+          armCommit(stitched, timedEvent)
+        } else if (pendingFinal && !isTranscriptExtension(pendingFinal.text, text)) {
+          // New clause after a pause — keep one turn, refresh hangover.
+          armCommit(stitched, timedEvent)
+        } else if (pendingFinal) {
+          clearCommit()
         }
         return
       }
       if (event.type === 'transcript.done') {
-        deliverFinal(event.text, event)
+        const text = stitchHeard(pendingFinal?.text || lastPartial, event.text)
+        const grew = !seedText || text.length > seedText.length
+        const hold = !!(
+          text
+          && holdCount < 3
+          && (stillLoud() || (utteranceLooksIncomplete(text) && grew))
+        )
+        if (hold) {
+          lastPartial = text
+          pendingFinal = { text, event }
+          onDone?.({ ...event, hold: true, text, holdCount: holdCount + 1 })
+          close()
+          return
+        }
+        deliverFinal(text, event)
         onDone?.(event)
         close()
         return

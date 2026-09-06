@@ -253,6 +253,10 @@ def test_tasks_widget_buckets_on_status_category_not_raw_slug():
         assert "assignee_email" not in request.url.params
         assert request.url.params.get("is_active") == "true"
         assert request.url.params.get("mode") == "task"
+        # Pulse-meltdown guard: never re-introduce the 200-row full list /
+        # permission-hint double COUNT that saturated Postgres.
+        assert request.url.params.get("limit") == "50"
+        assert request.url.params.get("permission_hint") == "false"
         return httpx.Response(200, json={"results": [
             {"status": "pending", "status_category": "todo"},
             {"status": "shaping", "status_category": "todo"},

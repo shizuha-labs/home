@@ -50,6 +50,13 @@ class Settings:
     # degrades ONE widget, never the page (async-frontends doctrine).
     SOURCE_TIMEOUT_SECONDS: float = float(os.environ.get("HOME_BFF_SOURCE_TIMEOUT", "2.5"))
 
+    # PLAT-5298: total budget for the /api/home/activity poll. The live feed
+    # fans out per-org (worst case 8 x SOURCE_TIMEOUT) which alone can exceed the
+    # nginx /api/home/ read timeout (5s) and surface a hard 504 unless the whole
+    # handler is bounded. On expiry the route serves the last-good cache.
+    # Keep strictly under the nginx /api/home/ proxy_read_timeout (5s).
+    ACTIVITY_FETCH_BUDGET_SECONDS: float = float(os.environ.get("HOME_BFF_ACTIVITY_BUDGET", "4"))
+
     # The org-progress dashboard runs a heavier pulse analytics query (per-item
     # transition scan for throughput/dwell), so it gets its own longer budget —
     # still fail-soft (degraded widget on timeout), just not clipped at 2.5s.
@@ -58,7 +65,10 @@ class Settings:
 
     # Best-effort in-process cache. Fresh hits avoid fan-out work; stale hits are
     # served only when a source fails, so the page remains useful during brownouts.
-    CACHE_TTL_SECONDS: float = float(os.environ.get("HOME_BFF_CACHE_TTL", "15"))
+    # Bumped default 15→30s: home dashboard was re-fanning to Pulse (org-progress
+    # 40–50s, items list 100s under DISTINCT pile-up) every 15s per open tab ×
+    # backend replicas, starving MCP/API. Still short enough for a live feel.
+    CACHE_TTL_SECONDS: float = float(os.environ.get("HOME_BFF_CACHE_TTL", "30"))
     STALE_TTL_SECONDS: float = float(os.environ.get("HOME_BFF_STALE_TTL", "300"))
 
     # VEN-97 AuditLead intent records: no payment/fulfillment, minimal PII.
@@ -81,6 +91,12 @@ class Settings:
 
     # HIVE-603 §6.2 per-instance connection cap.
     HOME_SSE_MAX_CONNECTIONS: int = int(os.environ.get("HOME_SSE_MAX_CONNECTIONS", "100"))
+
+    # Live / voice browser traces. Join key is the verified caller + conversation.
+    LIVE_TRACE_PREFIX: str = os.environ.get("HOME_LIVE_TRACE_PREFIX", "home:live-trace:v1:")
+    LIVE_TRACE_MAXLEN: int = int(os.environ.get("HOME_LIVE_TRACE_MAXLEN", "4000"))
+    LIVE_TRACE_TTL_SECONDS: int = int(os.environ.get("HOME_LIVE_TRACE_TTL", str(7 * 24 * 3600)))
+    LIVE_TRACE_RATE_PER_MINUTE: int = int(os.environ.get("HOME_LIVE_TRACE_RATE", "240"))
 
 
 settings = Settings()

@@ -12,6 +12,13 @@
 # Context: Monorepo root (to access /packages)
 # =============================================================================
 
+# Previous live image. CI passes the currently serving tag so old hashed
+# JS/CSS stay in the new image. A rolling deploy otherwise 404s the last
+# HTML's stylesheet (unstyled shizuha.com). Default is empty nginx so a
+# local build without the registry still works.
+ARG PREV_FRONTEND_IMAGE=nginx:alpine
+FROM ${PREV_FRONTEND_IMAGE} AS prev-assets
+
 # Stage 1: Build
 FROM node:20-alpine AS builder
 
@@ -46,6 +53,11 @@ RUN npm install
 # Copy source from frontend subdirectory
 COPY ${FRONTEND_PATH}/frontend/ .
 
+# prebuild guardrail (scripts/nginxResearchProxy.guardrail.test.mjs) resolves
+# ../../nginx.prod.conf from /app/scripts → /nginx.prod.conf. Stage 2 already
+# copies this file into nginx; builder must have it too or `npm run build` 404s.
+COPY ${FRONTEND_PATH}/nginx.prod.conf /nginx.prod.conf
+
 # Build args for Vite
 ARG VITE_BASE_PATH=/
 ARG VITE_API_BASE=/api
@@ -66,7 +78,11 @@ ARG FRONTEND_PATH=home
 COPY ${FRONTEND_PATH}/nginx.prod.conf /etc/nginx/conf.d/default.conf
 RUN nginx -t
 
-# Copy built static files
+# Keep the previous release's hashed files, then overlay this build.
+COPY --from=prev-assets /usr/share/nginx/html /tmp/prev-html
+RUN mkdir -p /usr/share/nginx/html/assets \
+ && if [ -d /tmp/prev-html/assets ]; then cp -a /tmp/prev-html/assets/. /usr/share/nginx/html/assets/; fi \
+ && rm -rf /tmp/prev-html
 COPY --from=builder /app/dist /usr/share/nginx/html
 
 # Expose port 80

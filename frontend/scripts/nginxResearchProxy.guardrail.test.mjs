@@ -2,6 +2,14 @@ import { readFileSync } from 'node:fs'
 
 const conf = readFileSync(new URL('../../nginx.prod.conf', import.meta.url), 'utf8')
 
+if (!/^\s*absolute_redirect\s+off;\s*$/m.test(conf)) {
+  throw new Error('nginx.prod.conf must keep automatic slash redirects relative so ingress HTTPS is preserved')
+}
+
+if (!/try_files\s+\$uri\s+\$uri\/\s+\/index\.html;/.test(conf)) {
+  throw new Error('nginx.prod.conf must retain directory-aware SPA canonicalization coverage')
+}
+
 const retryDirectives = [
   'proxy_next_upstream error timeout http_502 http_503 http_504;',
   'proxy_next_upstream_tries 3;',

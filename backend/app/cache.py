@@ -63,6 +63,21 @@ class WidgetCache:
             return Widget.stale_(data=entry.widget.data, as_of=entry.widget.as_of)
         return widget
 
+    @staticmethod
+    def entry_or_fallback(key: str) -> Widget:
+        """PLAT-5298: serve the last-good cached widget when the live poll
+        exceeded its total budget, or a degraded marker if none is cached.
+
+        Used by the activity poll's hard deadline: the live fan-out may not
+        raise (slow-but-succeeding downstream), so get_or_fetch's exception
+        path never fires; this gives a bounded fallback without ever turning a
+        transient slowness into a visible gateway error or a blank widget.
+        """
+        entry = widget_cache._store.get(key)
+        if entry:
+            return Widget.stale_(data=entry.widget.data, as_of=entry.widget.as_of)
+        return Widget.degraded_()
+
 
 widget_cache = WidgetCache()
 

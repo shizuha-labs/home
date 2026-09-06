@@ -40,7 +40,7 @@ export const WIDGET_KEYS = [
  *   widget: (key: string) => {status: string, as_of?: string, data?: any},
  *   refresh: () => void }}
  */
-export function useHomeSummary({ orgId, refreshMs = 30000 } = {}) {
+export function useHomeSummary({ orgId, refreshMs = 30000, enabled = true } = {}) {
   const [summary, setSummary] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -74,6 +74,7 @@ export function useHomeSummary({ orgId, refreshMs = 30000 } = {}) {
   }, [orgId])
 
   useEffect(() => {
+    if (!enabled) return undefined
     load()
     if (!refreshMs) return () => abortRef.current?.abort()
     const t = setInterval(load, refreshMs)
@@ -81,7 +82,7 @@ export function useHomeSummary({ orgId, refreshMs = 30000 } = {}) {
       clearInterval(t)
       abortRef.current?.abort()
     }
-  }, [load, refreshMs])
+  }, [enabled, load, refreshMs])
 
   // widget(key): resolve a widget's envelope, defaulting to a safe status so the
   // UI always has something to render (skeleton while loading, degraded on error).
