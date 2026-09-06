@@ -5,6 +5,8 @@
  * That seat is governance/escalation, not a personal or customer concierge.
  * Preference is local until ID/Connect grows a profile field.
  */
+import { conversationPeer } from '../utils/conversationLabel'
+
 export const HOME_AGENT_PREF_KEY = 'shizuha_home_agent'
 
 export function readHomeAgentPref() {
@@ -112,7 +114,7 @@ export function findAgentConversation(conversations, username) {
 export function conversationMatchesQuery(conversation, query, currentUserId) {
   const q = String(query || '').trim().toLowerCase()
   if (!q || !conversation) return true
-  const other = (conversation.participants || []).find((p) => p.user_id !== currentUserId)
+  const other = conversationPeer(conversation, currentUserId)
   const blob = [
     conversation.name,
     conversation.last_message_preview,
@@ -151,7 +153,7 @@ export function agentConversations(conversations, currentUserId) {
   const out = []
   for (const conv of conversations) {
     if (conv?.conversation_type === 'group') continue
-    const other = (conv.participants || []).find((p) => p.user_id !== currentUserId)
+    const other = conversationPeer(conv, currentUserId)
     const looksAgent = Boolean(
       other?.agent_role
       || other?.is_agent

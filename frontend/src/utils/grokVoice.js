@@ -1,5 +1,6 @@
 /** Grok Voice Think Fast (and later grok-voice-*) — native speech-to-speech. */
 import { isPersonalHomeAgentUsername } from '../hooks/useHomeAgentPreference'
+import { conversationPeer } from './conversationLabel'
 
 export function stripGrokVoicePrefix(model) {
   let bare = String(model || '').trim().toLowerCase()
@@ -16,9 +17,7 @@ export function isGrokVoiceOmniModel(model) {
 }
 
 export function conversationPeerUsername(conversation, currentUserId) {
-  const other = (conversation?.participants || []).find(
-    (p) => p.user_id !== currentUserId && !p.has_left,
-  )
+  const other = conversationPeer(conversation, currentUserId)
   const raw = other?.username || other?.user_name || other?.email || ''
   return String(raw).trim().split('@')[0].toLowerCase()
 }
