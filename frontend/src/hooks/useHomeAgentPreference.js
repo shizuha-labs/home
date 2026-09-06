@@ -37,7 +37,13 @@ export const ORG_HOME_AGENTS = new Set(['yuna', 'hina', 'ena', 'aya'])
 const CEO_HOME_EMAILS = new Set(['hothritik1@gmail.com', 'hritik@shizuha.com'])
 
 export function isCeoHomeUser(user) {
-  return CEO_HOME_EMAILS.has(String(user?.email || '').toLowerCase())
+  if (!user) return false
+  const email = String(user.email || '').toLowerCase()
+  if (CEO_HOME_EMAILS.has(email)) return true
+  const username = String(user.username || '').toLowerCase()
+  if (username === 'hritik' || username === 'hothritik1') return true
+  const id = Number(user.id ?? user.user_id)
+  return Number.isInteger(id) && id === 3
 }
 
 export function isPersonalHomeAgentUsername(username) {
@@ -45,7 +51,7 @@ export function isPersonalHomeAgentUsername(username) {
 }
 
 export function personalHomeAgentUsername(user) {
-  const id = Number(user?.id)
+  const id = Number(user?.id ?? user?.user_id)
   if (!Number.isInteger(id) || id <= 0) return ''
   return `shizuha-${id}`
 }

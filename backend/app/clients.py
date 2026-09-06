@@ -413,6 +413,7 @@ async def fetch_agents_live(client: httpx.AsyncClient, bearer: str,
 
 
 CEO_HOME_EMAILS = frozenset({"hothritik1@gmail.com", "hritik@shizuha.com"})
+CEO_HOME_USER_IDS = frozenset({3})
 ORG_TALK_AGENT_USERNAMES = frozenset({"yuna", "hina", "ena", "aya"})
 
 
@@ -434,6 +435,11 @@ def caller_may_talk_to_agent(caller, username: str) -> bool:
     email = str(getattr(caller, "email", "") or "").strip().lower() if caller is not None else ""
     if email in CEO_HOME_EMAILS:
         return True
+    try:
+        if int(getattr(caller, "user_id", 0) or 0) in CEO_HOME_USER_IDS:
+            return True
+    except (TypeError, ValueError):
+        pass
     if raw in ORG_TALK_AGENT_USERNAMES:
         return False
     personal = personal_home_agent_username(getattr(caller, "user_id", None) if caller is not None else None)

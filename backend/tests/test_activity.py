@@ -212,6 +212,26 @@ def test_talk_agents_finds_hina_by_username_for_ceo(monkeypatch):
     assert rows[0]["userId"] == 42
 
 
+def test_talk_agents_user_id_3_without_ceo_email_can_search_org_seats(monkeypatch):
+    widget_cache.clear()
+
+    async def _fake_agents(_client, _bearer, _org_id=None):
+        return _talk_roster()
+
+    monkeypatch.setattr("app.clients.fetch_agents_live", _fake_agents)
+    resp = client.get(
+        "/api/home/talk-agents?q=hina",
+        headers=_auth(_token(user_id=3, email="operator@example.com")),
+    )
+    assert resp.status_code == 200
+    assert resp.json()["results"][0]["username"] == "hina"
+    roster = client.get(
+        "/api/home/talk-agents",
+        headers=_auth(_token(user_id=3, email="operator@example.com")),
+    )
+    assert {row["username"] for row in roster.json()["results"]} >= {"hina", "yuna"}
+
+
 def test_talk_agents_hides_org_yuna_from_customers(monkeypatch):
     widget_cache.clear()
 

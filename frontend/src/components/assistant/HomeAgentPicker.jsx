@@ -28,22 +28,23 @@ export default function HomeAgentPicker({
   }, [open])
 
   useEffect(() => {
-    if (!open || !query.trim() || typeof onSearch !== 'function') {
-      setHits([])
+    if (!open || typeof onSearch !== 'function') {
+      if (!open) setHits([])
       return undefined
     }
     let cancelled = false
     setSearching(true)
+    const q = query.trim()
     const t = setTimeout(async () => {
       try {
-        const found = await onSearch(query.trim())
+        const found = await onSearch(q)
         if (!cancelled) setHits(Array.isArray(found) ? found : [])
       } catch {
         if (!cancelled) setHits([])
       } finally {
         if (!cancelled) setSearching(false)
       }
-    }, 200)
+    }, q ? 200 : 0)
     return () => {
       cancelled = true
       clearTimeout(t)

@@ -320,7 +320,7 @@ function ChatHomeInner() {
         return data.results ?? data.agents ?? []
       })
       .catch(() => [])
-    if (!ceoHome) {
+    if (!ceoHome || !ql) {
       const hiveHits = await hiveFetch
       return mergeAgentSearchHits(localAgents, hiveHits).filter(keepHit).slice(0, 16)
     }

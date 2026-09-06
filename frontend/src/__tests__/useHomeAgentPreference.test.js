@@ -4,6 +4,7 @@ import {
   conversationMatchesQuery,
   findAgentConversation,
   homeAgentDisplayName,
+  isCeoHomeUser,
   isForbiddenHomeAgentUsername,
   mergeAgentSearchHits,
   participantMatchesAgent,
@@ -26,6 +27,16 @@ describe('home agent preference', () => {
   it('suggests ena for the CEO mailbox', () => {
     expect(suggestedHomeAgentUsername({ email: 'hothritik1@gmail.com' })).toBe('ena')
     expect(suggestedHomeAgentUsername({ email: 'hritik@shizuha.com' })).toBe('ena')
+  })
+
+  it('recognizes the CEO by username or id when email is missing', () => {
+    expect(isCeoHomeUser({ username: 'hritik' })).toBe(true)
+    expect(isCeoHomeUser({ id: 3 })).toBe(true)
+    expect(isCeoHomeUser({ user_id: 3 })).toBe(true)
+    expect(suggestedHomeAgentUsername({ id: 3, username: 'hritik' })).toBe('ena')
+    expect(suggestedHomeAgentUsername({ user_id: 3 })).toBe('ena')
+    expect(resolveHomeAgentUsername('', { id: 3 })).toBe('ena')
+    expect(personalHomeAgentUsername({ user_id: 279 })).toBe('shizuha-279')
   })
 
   it('binds customers to their own personal Shizuha, never fleet Yuna', () => {
