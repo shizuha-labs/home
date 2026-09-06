@@ -28,6 +28,14 @@ export function isSelfDirectConversation(conv, currentUserId) {
   return active.every((p) => sameUserId(p.user_id, currentUserId))
 }
 
+/** Inbox rows are recency-equal: no hive/openclaw/hermes pin, no empty-thread boost. */
+export function conversationBelongsInInbox(conv, currentUserId, activeConversationId) {
+  if (!conv) return false
+  if (isSelfDirectConversation(conv, currentUserId)) return false
+  if (activeConversationId && conv.id === activeConversationId) return true
+  return Boolean(conv.last_message_at) || Number(conv.message_count || 0) > 0
+}
+
 export function conversationPeerName(conv, currentUserId) {
   if (!conv) return 'Chat'
   if (conv.conversation_type === 'group') return conv.name || 'Group'

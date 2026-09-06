@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Avatar } from '@shizuha/chat'
 import { sanitizeMessagePreview } from '../../utils/messagePreview'
 import { conversationMatchesQuery } from '../../hooks/useHomeAgentPreference'
-import { conversationPeer, conversationPeerName, isSelfDirectConversation } from '../../utils/conversationLabel'
+import { conversationBelongsInInbox, conversationPeer, conversationPeerName } from '../../utils/conversationLabel'
 
 /**
  * Home conversation rail: search existing chats AND start a chat with a
@@ -25,10 +25,12 @@ export default function ConversationSidebar({
   const [searching, setSearching] = useState(false)
 
   const filtered = useMemo(() => {
-    const rows = conversations.filter((c) => !isSelfDirectConversation(c, currentUserId))
+    const rows = conversations.filter((c) =>
+      conversationBelongsInInbox(c, currentUserId, activeConversationId),
+    )
     if (!query.trim()) return rows
     return rows.filter((c) => conversationMatchesQuery(c, query, currentUserId))
-  }, [conversations, query, currentUserId])
+  }, [conversations, query, currentUserId, activeConversationId])
 
   useEffect(() => {
     const q = query.trim()

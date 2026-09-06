@@ -1,4 +1,5 @@
 import {
+  conversationBelongsInInbox,
   conversationPeer,
   conversationPeerName,
   isPlaceholderName,
@@ -91,5 +92,31 @@ describe('conversationLabel', () => {
     expect(isSelfDirectConversation(conv, 3)).toBe(true)
     expect(isSelfDirectConversation(conv, '3')).toBe(true)
     expect(isSelfDirectConversation(conv, 17)).toBe(false)
+  })
+
+  it('lists every counterpart by recency, including hive agents', () => {
+    const claw = {
+      id: 'claw-empty',
+      conversation_type: 'direct',
+      message_count: 0,
+      last_message_at: null,
+      participants: [
+        { user_id: 3, user_name: 'Hritik Soni' },
+        { user_id: 1616370251, user_name: 'Claw (openclaw)' },
+      ],
+    }
+    const mio = {
+      id: 'mio-recent',
+      conversation_type: 'direct',
+      message_count: 2,
+      last_message_at: '2026-09-06T07:29:27Z',
+      participants: [
+        { user_id: 3, user_name: 'Hritik Soni' },
+        { user_id: 44, user_name: 'Mio' },
+      ],
+    }
+    expect(conversationBelongsInInbox(claw, 3)).toBe(false)
+    expect(conversationBelongsInInbox(mio, 3)).toBe(true)
+    expect(conversationBelongsInInbox(claw, 3, 'claw-empty')).toBe(true)
   })
 })
