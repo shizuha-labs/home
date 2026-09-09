@@ -19,7 +19,19 @@ test.describe('Authentication', () => {
 
   test.describe('Landing Page (Unauthenticated)', () => {
 
+    test('public / has no pageerror when there is no JWT', async ({ page }) => {
+      const pageerrors = []
+      page.on('pageerror', (err) => pageerrors.push(String(err)))
+      await page.goto('/')
+      await page.waitForLoadState('domcontentloaded')
+      await page.waitForTimeout(1500)
+      expect(pageerrors, pageerrors.join('\n')).toEqual([])
+      await expect(page.locator('h1').first()).toBeVisible({ timeout: 10000 })
+    })
+
     test('should show landing page when unauthenticated', async ({ page }) => {
+      const pageerrors = []
+      page.on('pageerror', (err) => pageerrors.push(String(err)))
       // Clear any existing auth state first
       await page.goto('/home/')
       await page.waitForLoadState('domcontentloaded')
@@ -28,6 +40,7 @@ test.describe('Authentication', () => {
       // Reload to see unauthenticated state
       await page.reload()
       await page.waitForLoadState('networkidle', { timeout: 15000 })
+      expect(pageerrors, pageerrors.join('\n')).toEqual([])
 
       // Should show landing page hero content
       await expect(page.locator('h1').filter({ hasText: /AI agents for/i }).first()).toBeVisible({ timeout: 10000 })
@@ -40,11 +53,14 @@ test.describe('Authentication', () => {
     })
 
     test('should show "Shizuha" branding in navbar', async ({ page }) => {
+      const pageerrors = []
+      page.on('pageerror', (err) => pageerrors.push(String(err)))
       await page.goto('/home/')
       await page.waitForLoadState('domcontentloaded')
       await clearAuthState(page)
       await page.reload()
       await page.waitForLoadState('networkidle', { timeout: 15000 })
+      expect(pageerrors, pageerrors.join('\n')).toEqual([])
 
       // Check for Shizuha branding
       await expect(page.locator('text=Shizuha').first()).toBeVisible()

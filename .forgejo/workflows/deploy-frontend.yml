@@ -50,6 +50,10 @@ jobs:
           npm run lint
           node scripts/booksCompliance.guardrail.test.mjs
           node scripts/nginxResearchProxy.guardrail.test.mjs
+          # Public pages must boot with no JWT. 5d91610 shipped a split-on-null
+          # crash because vitest only fed fake JWTs and deploy did not wait for
+          # the test job — this guardrail is in quality so it blocks the roll.
+          node scripts/loggedOutAuth.guardrail.test.mjs
 
   # PLAT-6170: wire the frontend vitest regression suite into a CI gate so
   # component tests (e.g. the degraded-vs-empty command-center task-status
@@ -167,7 +171,10 @@ jobs:
           exit 1
 
   build-and-deploy:
-    needs: quality
+    # PLAT-6170: vitest must block the roll. Quality-only `needs` let 5d91610
+    # ship a logged-out TypeError while the test job was still running (and
+    # that suite never called userFromAccessToken(null) anyway).
+    needs: [quality, test]
     if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     steps:
