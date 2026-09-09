@@ -8,6 +8,12 @@ function fakeJwt(payload) {
 }
 
 describe('session user from ID JWT', () => {
+  it('returns null when there is no access token (logged-out public pages)', () => {
+    expect(userFromAccessToken(null)).toBeNull()
+    expect(userFromAccessToken('')).toBeNull()
+    expect(userFromAccessToken()).toBeNull()
+  })
+
   it('reads user_id from the access token, not id', () => {
     const token = fakeJwt({ user_id: 3, email: 'hothritik1@gmail.com', username: 'hritik' })
     expect(userFromAccessToken(token)).toEqual({

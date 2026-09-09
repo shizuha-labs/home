@@ -11,7 +11,8 @@ export function getAccessToken() {
 }
 
 function decodeJwtPayload(token) {
-  const [, payload] = token.split('.')
+  if (typeof token !== 'string' || !token) return null
+  const payload = token.split('.')[1]
   if (!payload) return null
   try {
     const normalized = payload.replace(/-/g, '+').replace(/_/g, '/')
