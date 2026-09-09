@@ -220,7 +220,6 @@ jobs:
           cleanup() {
             local rc=$?
             set +e
-            kubectl delete deploy,svc -n build "${PREVIEW_NAME}" --ignore-not-found >/dev/null 2>&1
             kubectl delete job,cm -n build "ci-smoke-home-frontend-${SHORT}" "ci-smoke-home-frontend-${SHORT}-preview" --ignore-not-found >/dev/null 2>&1
             if [ "${PROMOTED}" != 1 ] && [ "${ROLLED}" = 1 ] && [ -n "${PREV_ROLL_IMAGE}" ]; then
               echo "::error::post-roll gate failed (rc=${rc}); rolling back to ${PREV_ROLL_IMAGE}"
@@ -340,9 +339,109 @@ jobs:
               if [ "${FAILED}" = "True" ] || [ "$(date +%s)" -ge "${DEADLINE}" ]; then break; fi
               sleep 5
             done
-            kubectl logs -n build "job/${NAME}" --tail=80 || true
+            kubectl logs -n build "job/${NAME}" --all-containers --tail=80 || true
             if [ "${OK}" != "1" ]; then
               echo "::error::public pageerror smoke failed (${NAME} base=${BASE})"
+              return 1
+            fi
+            return 0
+          }
+
+          # origin-ci-deployer can create Jobs+ConfigMaps in build, not
+          # Deployments or Services (40223 Forbidden). Same-pod nginx +
+          # Playwright on 127.0.0.1 needs no extra RBAC and never hits DNS.
+          run_preview_pageerror_smoke() {
+            local NAME="ci-smoke-home-frontend-${SHORT}-preview"
+            write_smoke_script
+            kubectl delete job -n build "${NAME}" --ignore-not-found
+            kubectl delete configmap -n build "${NAME}" --ignore-not-found
+            kubectl create configmap -n build "${NAME}" --from-file=smoke.mjs=/tmp/publicPageerrorSmoke.mjs
+            cat <<YAML | kubectl apply -f -
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: ${NAME}
+            namespace: build
+            labels: { app: ci-smoke, service: home-frontend, kind: preview }
+          spec:
+            backoffLimit: 0
+            ttlSecondsAfterFinished: 300
+            activeDeadlineSeconds: 240
+            template:
+              spec:
+                restartPolicy: Never
+                nodeSelector: { kubernetes.io/arch: amd64 }
+                shareProcessNamespace: false
+                tolerations:
+                  - { key: node.shizuha/workstation, operator: Exists, effect: NoSchedule }
+                  - { key: shizuha.com/inference-paused, operator: Exists, effect: NoSchedule }
+                  - { key: operator, operator: Equal, value: unschedulable, effect: NoSchedule }
+                affinity:
+                  nodeAffinity:
+                    requiredDuringSchedulingIgnoredDuringExecution:
+                      nodeSelectorTerms:
+                      - matchExpressions:
+                        - { key: node-role.kubernetes.io/control-plane, operator: DoesNotExist }
+                        - { key: kubernetes.io/hostname, operator: NotIn, values: [i9-ws] }
+                containers:
+                  - name: frontend
+                    image: localhost:30500/shizuha-home-frontend:${FTAG}
+                    imagePullPolicy: Always
+                    command: ["/bin/sh","-c"]
+                    args:
+                      - |
+                        nginx -g 'daemon off;' &
+                        i=0
+                        while [ "\$i" -lt 180 ]; do
+                          if [ -f /shared/done ]; then
+                            kill %1 2>/dev/null || true
+                            exit 0
+                          fi
+                          i=\$((i+1))
+                          sleep 1
+                        done
+                        exit 1
+                    volumeMounts: [{ mountPath: /shared, name: shared }]
+                  - name: smoke
+                    image: mcr.microsoft.com/playwright:v1.58.2-noble
+                    command: ["/bin/bash","-lc"]
+                    args:
+                      - |
+                        set -euo pipefail
+                        echo "SMOKE_START preview=http://127.0.0.1"
+                        for i in \$(seq 1 60); do
+                          curl -fsS http://127.0.0.1/health >/dev/null && break
+                          sleep 1
+                        done
+                        curl -fsS http://127.0.0.1/health >/dev/null
+                        cp /smoke/smoke.mjs /tmp/smoke.mjs
+                        cd /tmp
+                        npm i --no-fund --no-audit playwright-core@1.58.2
+                        PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+                          PUBLIC_BASE=http://127.0.0.1 \
+                          PUBLIC_PATHS='/, /dojo, /forge/, /research, /docs' \
+                          node /tmp/smoke.mjs
+                        touch /shared/done
+                    volumeMounts:
+                      - { mountPath: /smoke, name: smoke, readOnly: true }
+                      - { mountPath: /shared, name: shared }
+                volumes:
+                  - { name: smoke, configMap: { name: ${NAME} } }
+                  - { name: shared, emptyDir: {} }
+          YAML
+            local DEADLINE=$(( $(date +%s) + 240 ))
+            local OK=0
+            while true; do
+              local COMPLETE FAILED
+              COMPLETE="$(kubectl get job -n build "${NAME}" -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null || true)"
+              FAILED="$(kubectl get job -n build "${NAME}" -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null || true)"
+              if [ "${COMPLETE}" = "True" ]; then OK=1; break; fi
+              if [ "${FAILED}" = "True" ] || [ "$(date +%s)" -ge "${DEADLINE}" ]; then break; fi
+              sleep 5
+            done
+            kubectl logs -n build "job/${NAME}" --all-containers --tail=80 || true
+            if [ "${OK}" != "1" ]; then
+              echo "::error::preview pageerror smoke failed (${NAME})"
               return 1
             fi
             return 0
@@ -574,55 +673,7 @@ jobs:
             echo "--- recent deployment events ---"
             kubectl -n shizuha get events --field-selector involvedObject.name=shizuha-home-frontend --sort-by=.lastTimestamp | tail -20 || true
           }
-          cat <<YAML | kubectl apply -f -
-          apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: ${PREVIEW_NAME}
-            namespace: build
-            labels: { app: ci-preview-home-frontend, sha: "${SHORT}" }
-          spec:
-            replicas: 1
-            selector:
-              matchLabels: { app: ci-preview-home-frontend, sha: "${SHORT}" }
-            template:
-              metadata:
-                labels: { app: ci-preview-home-frontend, sha: "${SHORT}" }
-              spec:
-                restartPolicy: Always
-                tolerations:
-                  - { key: node.shizuha/workstation, operator: Exists, effect: NoSchedule }
-                  - { key: shizuha.com/inference-paused, operator: Exists, effect: NoSchedule }
-                  - { key: operator, operator: Equal, value: unschedulable, effect: NoSchedule }
-                affinity:
-                  nodeAffinity:
-                    requiredDuringSchedulingIgnoredDuringExecution:
-                      nodeSelectorTerms:
-                      - matchExpressions:
-                        - { key: node-role.kubernetes.io/control-plane, operator: DoesNotExist }
-                        - { key: kubernetes.io/hostname, operator: NotIn, values: [i9-ws] }
-                containers:
-                  - name: frontend
-                    image: localhost:30500/shizuha-home-frontend:${FTAG}
-                    imagePullPolicy: Always
-                    ports: [{ containerPort: 80, name: http }]
-                    readinessProbe:
-                      httpGet: { path: /health, port: 80 }
-                      initialDelaySeconds: 2
-                      periodSeconds: 3
-          ---
-          apiVersion: v1
-          kind: Service
-          metadata:
-            name: ${PREVIEW_NAME}
-            namespace: build
-            labels: { app: ci-preview-home-frontend, sha: "${SHORT}" }
-          spec:
-            selector: { app: ci-preview-home-frontend, sha: "${SHORT}" }
-            ports: [{ port: 80, targetPort: 80, name: http }]
-          YAML
-          kubectl -n build rollout status "deploy/${PREVIEW_NAME}" --timeout=180s
-          run_pageerror_smoke "http://${PREVIEW_NAME}.build.svc.cluster.local" "ci-smoke-home-frontend-${SHORT}-preview"
+          run_preview_pageerror_smoke
 
           for attempt in 1 2 3; do
             kubectl set image -n shizuha deploy/shizuha-home-frontend frontend="localhost:30500/shizuha-home-frontend:${FTAG}"
