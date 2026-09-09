@@ -5,17 +5,12 @@ const paths = (process.env.PUBLIC_PATHS || '/, /dojo, /forge/, /research, /docs'
   .split(',')
   .map((p) => p.trim())
   .filter(Boolean)
-const chrome = process.env.PLAYWRIGHT_CHROME
-  || '/ms-playwright/chromium-1208/chrome-linux64/chrome'
-
-const browser = await chromium.launch({
-  executablePath: chrome,
-  headless: true,
-})
+const browser = await chromium.launch({ headless: true })
 
 const failures = []
 for (const path of paths) {
   const url = path.startsWith('http') ? path : `${base}${path.startsWith('/') ? path : `/${path}`}`
+  console.log(`SMOKE visiting ${url}`)
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } })
   const page = await context.newPage()
   const pageerrors = []
