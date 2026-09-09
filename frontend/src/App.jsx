@@ -21,6 +21,7 @@ import BooksCompliancePage from './pages/BooksCompliancePage'
 import BooksCompliancePricingPage from './pages/BooksCompliancePricingPage'
 import BooksComplianceConfirmationPage from './pages/BooksComplianceConfirmationPage'
 import LiveTracePage from './pages/LiveTracePage'
+import { TermsPage, PrivacyPage } from './pages/LegalPage'
 
 const FORGE_STUDIO_URL = 'https://cortex.shizuha.com/studio'
 
@@ -96,6 +97,10 @@ export default function App() {
       <Route path="/books/compliance/pricing" element={<BooksCompliancePricingPage />} />
       <Route path="/books/compliance/confirmation" element={<BooksComplianceConfirmationPage />} />
       <Route path="/live-trace" element={<LiveTracePage />} />
+      {/* DOJO-87: published legal pages (HIVE-323). /legal is a legacy alias. */}
+      <Route path="/terms" element={<TermsPage />} />
+      <Route path="/privacy" element={<PrivacyPage />} />
+      <Route path="/legal" element={<Navigate to="/terms" replace />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
