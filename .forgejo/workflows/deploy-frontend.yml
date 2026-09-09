@@ -488,8 +488,15 @@ jobs:
           # public routes with no JWT; any pageerror rolls the previous image
           # back and fails this job.
           SMOKE_JOB="ci-smoke-home-frontend-${SHORT}"
-          SMOKE_SRC="${GITHUB_WORKSPACE:-.}/frontend/scripts/publicPageerrorSmoke.mjs"
-          test -f "${SMOKE_SRC}"
+          echo "smoke cwd=${PWD} GITHUB_WORKSPACE=${GITHUB_WORKSPACE:-} HOME=${HOME:-}"
+          SMOKE_SRC="$(find "${GITHUB_WORKSPACE:-.}" "${PWD}" -name publicPageerrorSmoke.mjs 2>/dev/null | head -1)"
+          echo "SMOKE_SRC=${SMOKE_SRC}"
+          if [ -z "${SMOKE_SRC}" ] || [ ! -f "${SMOKE_SRC}" ]; then
+            echo "::error::publicPageerrorSmoke.mjs not in checkout"
+            ls -la "${GITHUB_WORKSPACE:-.}" "${PWD}" || true
+            ls -la frontend/scripts || true
+            exit 1
+          fi
           kubectl delete job -n build "${SMOKE_JOB}" --ignore-not-found
           kubectl delete configmap -n build "${SMOKE_JOB}" --ignore-not-found
           kubectl create configmap -n build "${SMOKE_JOB}" \
