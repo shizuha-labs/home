@@ -220,7 +220,7 @@ jobs:
           cleanup() {
             local rc=$?
             set +e
-            kubectl delete job,cm -n build "ci-smoke-home-frontend-${SHORT}" "ci-smoke-home-frontend-${SHORT}-preview" --ignore-not-found >/dev/null 2>&1
+            kubectl delete job -n build "ci-smoke-home-frontend-${SHORT}" "ci-smoke-home-frontend-${SHORT}-preview" --ignore-not-found >/dev/null 2>&1
             if [ "${PROMOTED}" != 1 ] && [ "${ROLLED}" = 1 ] && [ -n "${PREV_ROLL_IMAGE}" ]; then
               echo "::error::post-roll gate failed (rc=${rc}); rolling back to ${PREV_ROLL_IMAGE}"
               kubectl set image -n shizuha deploy/shizuha-home-frontend frontend="${PREV_ROLL_IMAGE}"
@@ -280,9 +280,9 @@ jobs:
             local BASE="$1"
             local NAME="$2"
             write_smoke_script
+            local SMOKE_B64
+            SMOKE_B64="$(base64 -w0 /tmp/publicPageerrorSmoke.mjs)"
             kubectl delete job -n build "${NAME}" --ignore-not-found
-            kubectl delete configmap -n build "${NAME}" --ignore-not-found
-            kubectl create configmap -n build "${NAME}" --from-file=smoke.mjs=/tmp/publicPageerrorSmoke.mjs
             cat <<YAML | kubectl apply -f -
           apiVersion: batch/v1
           kind: Job
@@ -317,17 +317,13 @@ jobs:
                       - |
                         set -euo pipefail
                         echo "SMOKE_START base=${BASE}"
-                        cp /smoke/smoke.mjs /tmp/smoke.mjs
+                        printf '%s' '${SMOKE_B64}' | base64 -d > /tmp/smoke.mjs
                         cd /tmp
                         npm i --no-fund --no-audit playwright-core@1.58.2
                         PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
                           PUBLIC_BASE=${BASE} \
                           PUBLIC_PATHS='/, /dojo, /forge/, /research, /docs' \
                           node /tmp/smoke.mjs
-                    volumeMounts: [{ mountPath: /smoke, name: smoke, readOnly: true }]
-                volumes:
-                  - name: smoke
-                    configMap: { name: ${NAME} }
           YAML
             local DEADLINE=$(( $(date +%s) + 240 ))
             local OK=0
@@ -353,9 +349,9 @@ jobs:
           run_preview_pageerror_smoke() {
             local NAME="ci-smoke-home-frontend-${SHORT}-preview"
             write_smoke_script
+            local SMOKE_B64
+            SMOKE_B64="$(base64 -w0 /tmp/publicPageerrorSmoke.mjs)"
             kubectl delete job -n build "${NAME}" --ignore-not-found
-            kubectl delete configmap -n build "${NAME}" --ignore-not-found
-            kubectl create configmap -n build "${NAME}" --from-file=smoke.mjs=/tmp/publicPageerrorSmoke.mjs
             cat <<YAML | kubectl apply -f -
           apiVersion: batch/v1
           kind: Job
@@ -414,7 +410,7 @@ jobs:
                           sleep 1
                         done
                         curl -fsS http://127.0.0.1/health >/dev/null
-                        cp /smoke/smoke.mjs /tmp/smoke.mjs
+                        printf '%s' '${SMOKE_B64}' | base64 -d > /tmp/smoke.mjs
                         cd /tmp
                         npm i --no-fund --no-audit playwright-core@1.58.2
                         PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
@@ -423,10 +419,8 @@ jobs:
                           node /tmp/smoke.mjs
                         touch /shared/done
                     volumeMounts:
-                      - { mountPath: /smoke, name: smoke, readOnly: true }
                       - { mountPath: /shared, name: shared }
                 volumes:
-                  - { name: smoke, configMap: { name: ${NAME} } }
                   - { name: shared, emptyDir: {} }
           YAML
             local DEADLINE=$(( $(date +%s) + 240 ))
