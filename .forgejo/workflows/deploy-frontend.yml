@@ -488,10 +488,12 @@ jobs:
           # public routes with no JWT; any pageerror rolls the previous image
           # back and fails this job.
           SMOKE_JOB="ci-smoke-home-frontend-${SHORT}"
+          SMOKE_SRC="${GITHUB_WORKSPACE:-.}/frontend/scripts/publicPageerrorSmoke.mjs"
+          test -f "${SMOKE_SRC}"
           kubectl delete job -n build "${SMOKE_JOB}" --ignore-not-found
           kubectl delete configmap -n build "${SMOKE_JOB}" --ignore-not-found
           kubectl create configmap -n build "${SMOKE_JOB}" \
-            --from-file=smoke.mjs=frontend/scripts/publicPageerrorSmoke.mjs
+            --from-file=smoke.mjs="${SMOKE_SRC}"
           cat <<YAML | kubectl apply -f -
           apiVersion: batch/v1
           kind: Job
