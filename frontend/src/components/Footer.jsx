@@ -53,6 +53,19 @@ export default function Footer() {
             >
               Books Compliance
             </a>
+            {/* DOJO-87: published legal pages must be reachable from every public surface. */}
+            <a
+              href="/terms"
+              className="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white transition-colors"
+            >
+              Terms
+            </a>
+            <a
+              href="/privacy"
+              className="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white transition-colors"
+            >
+              Privacy
+            </a>
           </div>
 
           {/* Copyright */}

@@ -90,6 +90,21 @@ const routes = [
     description:
       'Deliberately confirm a Books Compliance request. Opening this page alone changes nothing.',
   },
+  {
+    // DOJO-87: /terms and /privacy must serve real legal-route shells (not the
+    // bare-directory 403 the `try_files $uri/` fallback would produce), with
+    // legal metadata for crawlers. The SPA renders the full text client-side.
+    output: 'terms/index.html',
+    title: 'Terms of Service — Shizuha',
+    description:
+      'Shizuha Global Terms of Service: acceptable use, autonomous agent liability, AI output, fees, grievance officer, and governing law for all Shizuha services.',
+  },
+  {
+    output: 'privacy/index.html',
+    title: 'Privacy Policy — Shizuha',
+    description:
+      'Shizuha Global Privacy Policy: what personal data we collect, how we use it, India data location, DPDP Act 2023 rights, Dojo privacy, and grievance contacts.',
+  },
 ]
 
 const replaceTag = (html, pattern, replacement) => {
