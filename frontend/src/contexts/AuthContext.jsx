@@ -40,8 +40,8 @@ export function AuthProvider({ children }) {
           return
         }
       }
-      const token = localStorage.getItem(ACCESS_TOKEN_KEY) || accessToken
-      const tokenUser = userFromAccessToken(token)
+      const token = localStorage.getItem(ACCESS_TOKEN_KEY) || accessToken || ''
+      const tokenUser = token ? userFromAccessToken(token) : null
       let stored = null
       if (storedUser) {
         try {

@@ -50,6 +50,14 @@ jobs:
           npm run lint
           node scripts/booksCompliance.guardrail.test.mjs
           node scripts/nginxResearchProxy.guardrail.test.mjs
+          # Public pages must boot with no JWT. 5d91610 shipped a split-on-null
+          # crash because vitest only fed fake JWTs and deploy did not wait for
+          # the test job — this guardrail is in quality so it blocks the roll.
+          node scripts/loggedOutAuth.guardrail.test.mjs
+          # The pageerror Job must exist, run before AND after set-image, and
+          # roll back on any post-roll failure. A workflow that only curls 200
+          # will ship the next AuthProvider TypeError (5d91610 / 40213).
+          node scripts/deployFrontendGate.guardrail.test.mjs
 
   # PLAT-6170: wire the frontend vitest regression suite into a CI gate so
   # component tests (e.g. the degraded-vs-empty command-center task-status
@@ -167,7 +175,10 @@ jobs:
           exit 1
 
   build-and-deploy:
-    needs: quality
+    # PLAT-6170: vitest must block the roll. Quality-only `needs` let 5d91610
+    # ship a logged-out TypeError while the test job was still running (and
+    # that suite never called userFromAccessToken(null) anyway).
+    needs: [quality, test]
     if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     steps:
@@ -191,13 +202,244 @@ jobs:
           FTAG="home-frontend-${SHORT}"
           REG="registry.registry.svc.cluster.local:5000"
           echo "Multi-arch build shizuha-home-frontend:${FTAG} (amd64 + arm64)"
-          PREV_FRONTEND_IMAGE="$(kubectl -n shizuha get deploy shizuha-home-frontend -o jsonpath='{.spec.template.spec.containers[0].image}')"
+          PREV_ROLL_IMAGE="$(kubectl -n shizuha get deploy shizuha-home-frontend -o jsonpath='{.spec.template.spec.containers[0].image}')"
           # The live deployment references the registry via the node-local localhost:30500
           # host, which is NOT reachable from inside the kaniko build pod (its own loopback).
           # Normalize to the in-cluster registry service so kaniko can pull the previous
           # image to carry forward the hashed CSS/JS assets.
-          PREV_FRONTEND_IMAGE="${PREV_FRONTEND_IMAGE//localhost:30500/${REG}}"
+          PREV_FRONTEND_IMAGE="${PREV_ROLL_IMAGE//localhost:30500/${REG}}"
           echo "Carry forward hashed assets from ${PREV_FRONTEND_IMAGE}"
+          # 5d91610 shipped a logged-out TypeError; c65b902/982a4e9/5dcdeb7 then
+          # rolled the new image and died before the Playwright Job existed, so
+          # rollback never ran. Trap any post-roll failure, inline the smoke
+          # script (no find|head under pipefail), and smoke a preview pod
+          # BEFORE set-image so a crashing SPA never reaches shizuha.com.
+          PROMOTED=0
+          ROLLED=0
+          PREVIEW_NAME="ci-preview-home-frontend-${SHORT}"
+          cleanup() {
+            local rc=$?
+            set +e
+            kubectl delete job -n build "ci-smoke-home-frontend-${SHORT}" "ci-smoke-home-frontend-${SHORT}-preview" --ignore-not-found >/dev/null 2>&1
+            if [ "${PROMOTED}" != 1 ] && [ "${ROLLED}" = 1 ] && [ -n "${PREV_ROLL_IMAGE}" ]; then
+              echo "::error::post-roll gate failed (rc=${rc}); rolling back to ${PREV_ROLL_IMAGE}"
+              kubectl set image -n shizuha deploy/shizuha-home-frontend frontend="${PREV_ROLL_IMAGE}"
+              kubectl rollout status -n shizuha deploy/shizuha-home-frontend --timeout=180s
+            fi
+            exit "${rc}"
+          }
+          trap cleanup EXIT
+
+          write_smoke_script() {
+            cat > /tmp/publicPageerrorSmoke.mjs << 'SMOKE_EOF'
+          import { chromium } from 'playwright-core'
+
+          const base = (process.env.PUBLIC_BASE || 'https://shizuha.com').replace(/\/$/, '')
+          const paths = (process.env.PUBLIC_PATHS || '/, /dojo, /forge/, /research, /docs')
+            .split(',')
+            .map((p) => p.trim())
+            .filter(Boolean)
+          const browser = await chromium.launch({ headless: true })
+
+          const failures = []
+          for (const path of paths) {
+            const url = path.startsWith('http') ? path : `${base}${path.startsWith('/') ? path : `/${path}`}`
+            console.log(`SMOKE visiting ${url}`)
+            const context = await browser.newContext({ viewport: { width: 1280, height: 800 } })
+            const page = await context.newPage()
+            const pageerrors = []
+            page.on('pageerror', (err) => pageerrors.push(String(err)))
+            let status = null
+            try {
+              const resp = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 })
+              status = resp?.status() ?? null
+              await page.waitForTimeout(2000)
+            } catch (err) {
+              failures.push({ url, status, error: String(err), pageerrors })
+              await context.close()
+              continue
+            }
+            if (status && status >= 500) {
+              failures.push({ url, status, error: `HTTP ${status}`, pageerrors })
+            } else if (pageerrors.length) {
+              failures.push({ url, status, error: 'pageerror', pageerrors })
+            }
+            await context.close()
+          }
+          await browser.close()
+
+          if (failures.length) {
+            console.error(JSON.stringify({ ok: false, failures }, null, 2))
+            process.exit(2)
+          }
+          console.log(JSON.stringify({ ok: true, paths, base }))
+          SMOKE_EOF
+          }
+
+          run_pageerror_smoke() {
+            local BASE="$1"
+            local NAME="$2"
+            write_smoke_script
+            local SMOKE_B64
+            SMOKE_B64="$(base64 -w0 /tmp/publicPageerrorSmoke.mjs)"
+            kubectl delete job -n build "${NAME}" --ignore-not-found
+            cat <<YAML | kubectl apply -f -
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: ${NAME}
+            namespace: build
+            labels: { app: ci-smoke, service: home-frontend }
+          spec:
+            backoffLimit: 0
+            ttlSecondsAfterFinished: 300
+            activeDeadlineSeconds: 240
+            template:
+              spec:
+                restartPolicy: Never
+                nodeSelector: { kubernetes.io/arch: amd64 }
+                tolerations:
+                  - { key: node.shizuha/workstation, operator: Exists, effect: NoSchedule }
+                  - { key: shizuha.com/inference-paused, operator: Exists, effect: NoSchedule }
+                  - { key: operator, operator: Equal, value: unschedulable, effect: NoSchedule }
+                affinity:
+                  nodeAffinity:
+                    requiredDuringSchedulingIgnoredDuringExecution:
+                      nodeSelectorTerms:
+                      - matchExpressions:
+                        - { key: node-role.kubernetes.io/control-plane, operator: DoesNotExist }
+                        - { key: kubernetes.io/hostname, operator: NotIn, values: [i9-ws] }
+                containers:
+                  - name: smoke
+                    image: mcr.microsoft.com/playwright:v1.58.2-noble
+                    command: ["/bin/bash", "-lc"]
+                    args:
+                      - |
+                        set -euo pipefail
+                        echo "SMOKE_START base=${BASE}"
+                        printf '%s' '${SMOKE_B64}' | base64 -d > /tmp/smoke.mjs
+                        cd /tmp
+                        npm i --no-fund --no-audit playwright-core@1.58.2
+                        PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+                          PUBLIC_BASE=${BASE} \
+                          PUBLIC_PATHS='/, /dojo, /forge/, /research, /docs' \
+                          node /tmp/smoke.mjs
+          YAML
+            local DEADLINE=$(( $(date +%s) + 240 ))
+            local OK=0
+            while true; do
+              local COMPLETE FAILED
+              COMPLETE="$(kubectl get job -n build "${NAME}" -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null || true)"
+              FAILED="$(kubectl get job -n build "${NAME}" -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null || true)"
+              if [ "${COMPLETE}" = "True" ]; then OK=1; break; fi
+              if [ "${FAILED}" = "True" ] || [ "$(date +%s)" -ge "${DEADLINE}" ]; then break; fi
+              sleep 5
+            done
+            kubectl logs -n build "job/${NAME}" --all-containers --tail=80 || true
+            if [ "${OK}" != "1" ]; then
+              echo "::error::public pageerror smoke failed (${NAME} base=${BASE})"
+              return 1
+            fi
+            return 0
+          }
+
+          # origin-ci-deployer can create Jobs+ConfigMaps in build, not
+          # Deployments or Services (40223 Forbidden). Same-pod nginx +
+          # Playwright on 127.0.0.1 needs no extra RBAC and never hits DNS.
+          run_preview_pageerror_smoke() {
+            local NAME="ci-smoke-home-frontend-${SHORT}-preview"
+            write_smoke_script
+            local SMOKE_B64
+            SMOKE_B64="$(base64 -w0 /tmp/publicPageerrorSmoke.mjs)"
+            kubectl delete job -n build "${NAME}" --ignore-not-found
+            cat <<YAML | kubectl apply -f -
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: ${NAME}
+            namespace: build
+            labels: { app: ci-smoke, service: home-frontend, kind: preview }
+          spec:
+            backoffLimit: 0
+            ttlSecondsAfterFinished: 300
+            activeDeadlineSeconds: 240
+            template:
+              spec:
+                restartPolicy: Never
+                nodeSelector: { kubernetes.io/arch: amd64 }
+                shareProcessNamespace: false
+                tolerations:
+                  - { key: node.shizuha/workstation, operator: Exists, effect: NoSchedule }
+                  - { key: shizuha.com/inference-paused, operator: Exists, effect: NoSchedule }
+                  - { key: operator, operator: Equal, value: unschedulable, effect: NoSchedule }
+                affinity:
+                  nodeAffinity:
+                    requiredDuringSchedulingIgnoredDuringExecution:
+                      nodeSelectorTerms:
+                      - matchExpressions:
+                        - { key: node-role.kubernetes.io/control-plane, operator: DoesNotExist }
+                        - { key: kubernetes.io/hostname, operator: NotIn, values: [i9-ws] }
+                containers:
+                  - name: frontend
+                    image: localhost:30500/shizuha-home-frontend:${FTAG}
+                    imagePullPolicy: Always
+                    command: ["/bin/sh","-c"]
+                    args:
+                      - |
+                        nginx -g 'daemon off;' &
+                        i=0
+                        while [ "\$i" -lt 180 ]; do
+                          if [ -f /shared/done ]; then
+                            kill %1 2>/dev/null || true
+                            exit 0
+                          fi
+                          i=\$((i+1))
+                          sleep 1
+                        done
+                        exit 1
+                    volumeMounts: [{ mountPath: /shared, name: shared }]
+                  - name: smoke
+                    image: mcr.microsoft.com/playwright:v1.58.2-noble
+                    command: ["/bin/bash","-lc"]
+                    args:
+                      - |
+                        set -euo pipefail
+                        echo "SMOKE_START preview=http://127.0.0.1"
+                        for i in \$(seq 1 60); do
+                          curl -fsS http://127.0.0.1/health >/dev/null && break
+                          sleep 1
+                        done
+                        curl -fsS http://127.0.0.1/health >/dev/null
+                        printf '%s' '${SMOKE_B64}' | base64 -d > /tmp/smoke.mjs
+                        cd /tmp
+                        npm i --no-fund --no-audit playwright-core@1.58.2
+                        PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+                          PUBLIC_BASE=http://127.0.0.1 \
+                          PUBLIC_PATHS='/, /dojo, /forge/, /research, /docs' \
+                          node /tmp/smoke.mjs
+                        touch /shared/done
+                    volumeMounts:
+                      - { mountPath: /shared, name: shared }
+                volumes:
+                  - { name: shared, emptyDir: {} }
+          YAML
+            local DEADLINE=$(( $(date +%s) + 240 ))
+            local OK=0
+            while true; do
+              local COMPLETE FAILED
+              COMPLETE="$(kubectl get job -n build "${NAME}" -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null || true)"
+              FAILED="$(kubectl get job -n build "${NAME}" -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null || true)"
+              if [ "${COMPLETE}" = "True" ]; then OK=1; break; fi
+              if [ "${FAILED}" = "True" ] || [ "$(date +%s)" -ge "${DEADLINE}" ]; then break; fi
+              sleep 5
+            done
+            kubectl logs -n build "job/${NAME}" --all-containers --tail=80 || true
+            if [ "${OK}" != "1" ]; then
+              echo "::error::preview pageerror smoke failed (${NAME})"
+              return 1
+            fi
+            return 0
+          }
 
           render_build_job() {  # $1=arch $2=attempt $3=cache-enabled
             local ARCH="$1"
@@ -425,8 +667,11 @@ jobs:
             echo "--- recent deployment events ---"
             kubectl -n shizuha get events --field-selector involvedObject.name=shizuha-home-frontend --sort-by=.lastTimestamp | tail -20 || true
           }
+          run_preview_pageerror_smoke
+
           for attempt in 1 2 3; do
             kubectl set image -n shizuha deploy/shizuha-home-frontend frontend="localhost:30500/shizuha-home-frontend:${FTAG}"
+            ROLLED=1
             if ! kubectl rollout status -n shizuha deploy/shizuha-home-frontend --timeout=300s; then
               echo "::error::kubectl rollout status failed (attempt ${attempt}) — expected ${FTAG}"
               dump_frontend_state
@@ -443,7 +688,6 @@ jobs:
             echo "Frontend image clobbered mid-rollout (likely concurrent backend helm apply) — re-asserting"
             sleep 10
           done
-          kubectl annotate -n shizuha deploy/shizuha-home-frontend shizuha.io/last-successful-sha="${{ github.sha }}" --overwrite
           kubectl get pods -n shizuha -l app.kubernetes.io/name=shizuha-home-frontend
 
           # FRG-34 live gate: nginx's directory canonicalization runs behind
@@ -475,3 +719,10 @@ jobs:
             echo "::error::/forge final HTTPS response was ${FINAL_RESULT[1]}"; exit 1;
           }
           echo "FRG-34 live redirect gate: ${REDIRECT_STATUS} ${REDIRECT_LOCATION} -> ${FINAL_RESULT[0]} (${FINAL_RESULT[1]})"
+
+          # Live public vantage (ingress/TLS/path). Preview already proved the
+          # bundle; this catches edge routing. Failure triggers cleanup trap
+          # rollback because ROLLED=1 and PROMOTED is still 0.
+          run_pageerror_smoke "https://shizuha.com" "ci-smoke-home-frontend-${SHORT}"
+          kubectl annotate -n shizuha deploy/shizuha-home-frontend shizuha.io/last-successful-sha="${{ github.sha }}" --overwrite
+          PROMOTED=1
