@@ -866,7 +866,22 @@ def pulse_upsert_ledger(
     # drive rollup). Branch telemetry stays branch-scoped: the CI run summary
     # (write_summary) carries it; the stable rollup is only ever written by
     # scans of the repo's default branch.
-    if (getattr(args, "ref", "") or "").strip().lower().rstrip("/") not in ("main", "master"):
+    # PLAT-8903 follow-up: GITHUB_REF arrives fully qualified on scheduled and
+    # push events ("refs/heads/master") and the workflow does not pass --ref,
+    # so args.ref falls back to that env default. Compare the SHORT branch
+    # name: the unqualified comparison classified every scheduled run as a
+    # branch scan and silently skipped the stable rollup forever (the ledger
+    # went stale with no error). Unknown/empty refs still fail closed to the
+    # branch-skip path.
+    normalized_ref = (
+        str(getattr(args, "ref", "") or "")
+        .strip()
+        .lower()
+        .rstrip("/")
+        .removeprefix("refs/heads/")
+        .removeprefix("refs/")
+    )
+    if normalized_ref not in ("main", "master"):
         print(
             f"ledger: ref {args.ref!r} is not the default branch — stable rollup "
             f"for {args.repo} NOT updated (branch posture stays branch-scoped, PLAT-8903)",
