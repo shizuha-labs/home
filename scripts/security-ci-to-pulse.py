@@ -636,20 +636,17 @@ def wiki_upsert_ledger(
         return WikiLedgerResult(ok=False, error=str(exc)[:500], action="write-failed")
 
 
-def pulse_find_existing(api_base: str, token: str, source_id: str) -> dict[str, Any] | None:
-    """Return the existing Pulse item for this finding's stable ``source_id``, if any.
+def pulse_find_existing_all(api_base: str, token: str, source_id: str) -> list[dict[str, Any]]:
+    """Return EVERY live Pulse item sharing this stable ``source_id`` (PLAT-8903).
 
-    PLAT-2688: constrain the query server-side with ``source_id=`` (index-backed
-    exact match on ``(source, source_id)``). ItemListSerializer does not expose
-    ``source_id``/``description``, so the match must not depend on per-row fields.
-
-    Do NOT AND ``search=`` with ``source_id=``. Ledger titles are
-    ``[security-ci] Findings ledger — <repo>`` and the description does not
-    contain the token ``security-ci:<repo>:ledger``. AND-combining those filters
-    returned zero rows on every weekly scan and minted a new ledger (live
-    2026-08-29: six open cortex ledgers sharing one source_id). Look up by
-    source_id first; fall back to search only when that filter returns nothing
-    (old Pulse builds without the PLAT-2688 query param).
+    Same server-side constraint as :func:`pulse_find_existing` (index-backed
+    exact match on ``(source, source_id)``, ``include_archived=true`` so a
+    repeated run does not refile a duplicate of an archived row), but returns
+    the full match list instead of silently electing one row. The ledger
+    upsert needs the full set to detect the two-live-rollups ambiguity instead
+    of silently writing one generation (PLAT-8903: the oldest-first election
+    upserted PLAT-4699 — created 2026-07-16 — over the wiki-documented current
+    rollup PLAT-6986 and wrote a fix-branch's stale 12-row posture into it).
     """
     q = urllib.parse.urlencode({
         "source": SECURITY_CI_SOURCE,
@@ -670,7 +667,7 @@ def pulse_find_existing(api_base: str, token: str, source_id: str) -> dict[str, 
             matched.append(row)
     if matched:
         matched.sort(key=lambda row: str(row.get("created_at") or row.get("id") or ""))
-        return matched[0]
+        return matched
     # Fallback for Pulse builds that ignore the source_id query param.
     q2 = urllib.parse.urlencode({
         "source": SECURITY_CI_SOURCE,
@@ -679,11 +676,40 @@ def pulse_find_existing(api_base: str, token: str, source_id: str) -> dict[str, 
     })
     data = pulse_request("GET", f"{api_base}/items/?{q2}", token)
     rows = data.get("results") if isinstance(data, dict) else data
+    fallback = []
     for row in rows or []:
         rid = row.get("source_id")
         if rid in (None, source_id) and (row.get("item_key") or row.get("id")):
-            return row
-    return None
+            fallback.append(row)
+    fallback.sort(key=lambda row: str(row.get("created_at") or row.get("id") or ""))
+    return fallback
+
+
+def pulse_find_existing(api_base: str, token: str, source_id: str) -> dict[str, Any] | None:
+    """Return the existing Pulse item for this finding's stable ``source_id``, if any.
+
+    PLAT-2688: constrain the query server-side with ``source_id=`` (index-backed
+    exact match on ``(source, source_id)``). ItemListSerializer does not expose
+    ``source_id``/``description``, so the match must not depend on per-row fields.
+
+    Do NOT AND ``search=`` with ``source_id=``. Ledger titles are
+    ``[security-ci] Findings ledger — <repo>`` and the description does not
+    contain the token ``security-ci:<repo>:ledger``. AND-combining those filters
+    returned zero rows on every weekly scan and minted a new ledger (live
+    2026-08-29: six open cortex ledgers sharing one source_id). Look up by
+    source_id first; fall back to search only when that filter returns nothing
+    (old Pulse builds without the PLAT-2688 query param).
+
+    PLAT-8903 root cause (documented): this single-row election sorted matches
+    by ``created_at`` ASCENDING and returned the OLDEST row — for the drive
+    ledger that elected the stale generation PLAT-4699 (2026-07-16) over the
+    wiki-documented current rollup PLAT-6986, and a fix-branch scan then wrote
+    its stale posture into it. The ledger path no longer uses this election:
+    :func:`pulse_upsert_ledger` consumes :func:`pulse_find_existing_all` and
+    fails loud on multi-generation ambiguity. The per-finding path keeps the
+    historical first-row behavior (unchanged scope).
+    """
+    return (pulse_find_existing_all(api_base, token, source_id) or [None])[0]
 
 
 def pulse_comment(api_base: str, token: str, item_ref: str, content: str) -> None:
@@ -833,6 +859,20 @@ def pulse_upsert_ledger(
     Set SECURITY_CI_PER_FINDING=1 to restore the legacy per-finding filing.
     """
     import hashlib
+    # PLAT-8903 (branch posture): a fix-branch scan is BEHIND main — its
+    # finding set is not the repo's stable posture. Writing it into the stable
+    # per-repo rollup advertised stale posture (live: run 5830 on
+    # `fix/security-ci-origin-checkout` wrote a 12-row stale set into the
+    # drive rollup). Branch telemetry stays branch-scoped: the CI run summary
+    # (write_summary) carries it; the stable rollup is only ever written by
+    # scans of the repo's default branch.
+    if (getattr(args, "ref", "") or "").strip().lower().rstrip("/") not in ("main", "master"):
+        print(
+            f"ledger: ref {args.ref!r} is not the default branch — stable rollup "
+            f"for {args.repo} NOT updated (branch posture stays branch-scoped, PLAT-8903)",
+            file=sys.stderr,
+        )
+        return f"ledger-skipped-branch:{args.ref}"
     source_id = f"security-ci:{args.repo}:ledger"
     wiki_ledger = wiki_ledger or WikiLedgerResult(
         ok=False, error="Wiki ledger upsert was not attempted", action="not-attempted"
@@ -889,7 +929,38 @@ def pulse_upsert_ledger(
         rows or "| — | — | — | (no findings at/above filing threshold) | — |",
     ])
     max_sev = max((f.severity for f in findings), key=lambda s: SEV_RANK.get(s, 0), default="low")
-    existing = pulse_find_existing(api_base, token, source_id)
+    matches = pulse_find_existing_all(api_base, token, source_id)
+    # PLAT-8903 (one stable rollup per repo): with multiple items sharing the
+    # ledger source_id, NO silent election is contract-safe — created_at
+    # ordering elected the stale generation (PLAT-4699 over PLAT-6986), and
+    # open-status ordering would have done the same here (the stale generation
+    # is the OPEN one; the wiki-current rollup is completed). The signals
+    # conflict, so ambiguity fails LOUD: no write, non-zero exit via
+    # RuntimeError — the workflow retry/notifier owns recovery and Security
+    # reconciles the pair (cancel the stale generation). Only an all-done-
+    # category match set (pure archived history) is unambiguous: keep updating
+    # the most recently created generation.
+    if len(matches) > 1:
+        done_rows = [m for m in matches if (m.get("status_category") or "") == "done"]
+        if len(done_rows) != len(matches):
+            detail = "; ".join(
+                f"{m.get('item_key') or m.get('id')} (status={m.get('status')}, "
+                f"category={m.get('status_category')}, created={m.get('created_at')})"
+                for m in matches
+            )
+            raise RuntimeError(
+                f"security-ci ledger ambiguity for {args.repo}: {len(matches)} live items "
+                f"share source_id `{source_id}` — the one-stable-per-repo-rollup contract "
+                f"(HIVE-694 / PLAT-4772) is violated and no silent election is safe "
+                f"(PLAT-8903). NO posture was written. Reconcile: cancel/park the "
+                f"stale-generation item(s) so exactly one rollup remains, then re-run. "
+                f"Matches: {detail}"
+            )
+        # All-done match set = pure archived history: unambiguous. Keep updating
+        # the MOST RECENTLY created generation (matches is created_at-ascending).
+        existing = matches[-1]
+    else:
+        existing = matches[0] if matches else None
     if existing:
         ref = str(existing.get("item_key") or existing.get("id"))
         labels = [l for l in (existing.get("labels") or []) if isinstance(l, str)]
