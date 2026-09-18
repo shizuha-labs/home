@@ -55,6 +55,11 @@ class Finding:
     # N-advisories-for-one-package flood into a single per-package task.
     package: str | None = None
     ecosystem: str | None = None
+    # PLAT-8988: fix thresholds from the advisory's affected ranges (SEMVER/
+    # ECOSYSTEM `fixed` events). Empty when the advisory has no fixed event or
+    # the parser could not extract one. Used by the requirements.txt
+    # unreachability guard — never by locked-manifest matching.
+    fixed_versions: tuple[str, ...] = ()
 
     @property
     def source_id(self) -> str:
@@ -160,6 +165,35 @@ def parse_bandit(data: Any) -> Iterable[Finding]:
         )
 
 
+def _fixed_versions_from_vuln(v: dict[str, Any], pkg_name: str) -> tuple[str, ...]:
+    """PLAT-8988: extract `fixed` thresholds for pkg_name from an OSV record.
+
+    Returns every `fixed` event across the affected entries whose package name
+    matches (OSV records can carry several packages). Ranges that end in
+    `last_affected` (or have no terminating event) contribute nothing, which
+    makes the caller's unreachability proof fail open — an advisory we cannot
+    fully bound is never dropped.
+    """
+    fixed: list[str] = []
+    for aff in v.get("affected", []) or []:
+        aff_pkg = (aff.get("package") or {}).get("name") or ""
+        if aff_pkg.lower() != pkg_name.lower():
+            continue
+        for rng in aff.get("ranges", []) or []:
+            events = rng.get("events", []) or []
+            has_fixed = False
+            for ev in events:
+                fx = (ev or {}).get("fixed")
+                if fx:
+                    fixed.append(str(fx))
+                    has_fixed = True
+            if not has_fixed:
+                # Unbounded/last_affected range: the affected set is not fully
+                # bounded above by a fix — refuse to prove unreachability.
+                return ()
+    return tuple(fixed)
+
+
 def parse_osv(data: Any) -> Iterable[Finding]:
     def vulns_from_package(pkg: dict[str, Any]):
         for v in pkg.get("vulnerabilities", []) or []:
@@ -184,6 +218,7 @@ def parse_osv(data: Any) -> Iterable[Finding]:
                     url=(v.get("references") or [{}])[0].get("url") if isinstance(v.get("references"), list) and v.get("references") else None,
                     package=str(name),
                     ecosystem=str(pkg_info.get("ecosystem") or "").strip() or None,
+                    fixed_versions=_fixed_versions_from_vuln(v, str(name)),
                 )
 
 
@@ -1073,6 +1108,167 @@ def write_summary(path: str, findings: list[Finding], suppressed: list[tuple[Fin
     Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _is_requirements_manifest(path: str) -> bool:
+    """PLAT-8988: requirements.txt-class manifests carry *requirement ranges*,
+    not locked versions. Locked manifests (uv.lock, package-lock.json,
+    Cargo.lock, poetry.lock, …) resolve exact versions and are NEVER eligible
+    for the unreachability guard."""
+    name = Path(str(path).replace("\\", "/")).name.lower()
+    return name == "requirements.txt" or name == "constraints.txt" or (
+        name.startswith("requirements-") and name.endswith(".txt")
+    )
+
+
+def _normalize_pkg_name(name: str) -> str:
+    # PEP 503 name normalization.
+    return re.sub(r"[-_.]+", "-", str(name).strip()).lower()
+
+
+def _parse_version(v: str) -> tuple[int, ...] | None:
+    """Conservative numeric-dotted version parse. Returns None (→ fail open)
+    for anything with pre-release/local/epoch segments we do not model."""
+    s = str(v).strip().lstrip("vV")
+    s = s.split("+", 1)[0]          # drop local segment
+    if "!" in s:                    # epoch — not modelled
+        return None
+    parts = s.split(".")
+    out: list[int] = []
+    for p in parts:
+        if not p.isdigit():
+            return None
+        out.append(int(p))
+    return tuple(out) if out else None
+
+
+def _version_le(a: str, b: str) -> bool | None:
+    """True iff a <= b. None when either side is not a plain numeric-dotted
+    version — callers must fail open on None."""
+    va, vb = _parse_version(a), _parse_version(b)
+    if va is None or vb is None:
+        return None
+    width = max(len(va), len(vb))
+    va += (0,) * (width - len(va))
+    vb += (0,) * (width - len(vb))
+    return va <= vb
+
+
+_REQ_LINE_RE = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*(\[[^\]]*\])?\s*(.*)$")
+_FLOOR_OPS = (">=", "==", "~=", ">")
+
+
+def _parse_requirement_floors(text: str) -> dict[str, str]:
+    """Extract a lower-bound version per package from requirements.txt-style
+    content. Only floor-bearing operators (>=, ==, ~=, >) and bare pins
+    contribute; a package with no floor is absent from the result (unbounded
+    requirements can never prove unreachability)."""
+    floors: dict[str, str] = {}
+    for raw_line in text.splitlines():
+        line = raw_line.split("#", 1)[0].split(";", 1)[0].strip()
+        if not line or line.startswith(("-", "--")):
+            continue  # options, -e/-r includes, per-requirement options
+        m = _REQ_LINE_RE.match(line)
+        if not m:
+            continue
+        name, _extras, spec = m.group(1), m.group(2) or "", m.group(3).strip()
+        if not spec:
+            continue
+        floor: str | None = None
+        for clause in spec.split(","):
+            clause = clause.strip()
+            if not clause:
+                continue
+            for op in _FLOOR_OPS:
+                if clause.startswith(op):
+                    cand = clause[len(op):].strip().rstrip(".*") or None
+                    if cand and (floor is None or (_version_le(floor, cand) is True)):
+                        floor = cand
+                    break
+            else:
+                if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", clause):
+                    # bare pin (no operator) — exact requirement
+                    cand = clause.rstrip(".*") or None
+                    if cand and (floor is None or (_version_le(floor, cand) is True)):
+                        floor = cand
+        if floor:
+            floors[_normalize_pkg_name(name)] = floor
+    return floors
+
+
+def drop_unreachable_requirement_findings(
+    findings: list[Finding],
+) -> tuple[list[Finding], list[tuple[Finding, str]]]:
+    """PLAT-8988: suppress osv advisories that cannot affect any version a
+    requirements.txt manifest can install.
+
+    osv-scanner (≤ v1.9.2) evaluates requirement *ranges* as unbounded
+    any-version sets, so an advisory is emitted whenever its affected range is
+    non-empty — even when the requirement's floor is at/above every `fixed`
+    threshold (real case: python-multipart>=0.0.32 emitted 5 HIGH advisories
+    whose highest fix is 0.0.30; PLAT-7086 was filed from that emission).
+
+    Unreachability proof: for a floor F, every installable version is >= F.
+    If every `fixed` threshold X of the advisory satisfies X <= F, no
+    installable version lies in the affected range [0, X) — the advisory is
+    unreachable and the emission is a scanner artifact.
+
+    Fail-open everywhere: missing/unreadable manifests, unparseable versions,
+    advisories without a complete set of `fixed` events, and non-requirements
+    manifests all keep the finding. Only a complete proof drops one, and every
+    drop is returned for loud logging.
+    """
+    kept: list[Finding] = []
+    dropped: list[tuple[Finding, str]] = []
+    floors_cache: dict[str, dict[str, str] | None] = {}
+
+    def floors_for(path: str) -> dict[str, str] | None:
+        if path in floors_cache:
+            return floors_cache[path]
+        floors: dict[str, str] | None = None
+        candidates = [path]
+        # CI source paths look like /workspace/<org>/<repo>/rest — the script
+        # runs from the repo root, so also try the post-repo relative form.
+        m = re.search(r"/workspace/[^/]+/[^/]+/(.+)$", path)
+        if m:
+            candidates.append(m.group(1))
+        for cand in candidates:
+            try:
+                if os.path.isfile(cand):
+                    with open(cand, "r", encoding="utf-8", errors="replace") as fh:
+                        floors = _parse_requirement_floors(fh.read())
+                    break
+            except OSError:
+                continue
+        floors_cache[path] = floors
+        return floors
+
+    for f in findings:
+        if f.tool != "osv" or not f.package or not f.fixed_versions:
+            kept.append(f)
+            continue
+        if not _is_requirements_manifest(f.path):
+            kept.append(f)
+            continue
+        floors = floors_for(f.path)
+        if not floors:
+            kept.append(f)  # manifest unreadable / no floors — fail open
+            continue
+        floor = floors.get(_normalize_pkg_name(f.package))
+        if not floor:
+            kept.append(f)  # unbounded requirement — cannot prove
+            continue
+        comparisons = [_version_le(fx, floor) for fx in f.fixed_versions]
+        if any(c is not True for c in comparisons):
+            kept.append(f)  # some fix > floor, or unparseable — fail open
+            continue
+        dropped.append((
+            f,
+            f"requirement floor {floor} >= every fix threshold "
+            f"({', '.join(f.fixed_versions)}) in {f.path} — no installable "
+            "version is affected (PLAT-8988)",
+        ))
+    return kept, dropped
+
+
 def consolidate_dependency_findings(findings: list[Finding], repo: str) -> list[Finding]:
     """PLAT-2893: collapse the one-task-per-CVE flood for dependency findings.
 
@@ -1190,6 +1386,24 @@ def main() -> int:
         by_id.values(),
         key=lambda f: (-SEV_RANK[f.severity], f.tool, f.path, f.line or 0),
     )
+
+    # PLAT-8988: osv-scanner (≤ v1.9.2) evaluates requirements.txt ranges as
+    # unbounded any-version sets, emitting advisories whose entire affected
+    # range lies below the requirement's floor (real case: python-multipart
+    # >=0.0.32 emitted 5 HIGH advisories capped at fixed 0.0.30 → PLAT-7086).
+    # Drop only advisories with a complete unreachability proof; log every
+    # drop loudly so the suppression is auditable in the run log.
+    raw_identities, dropped_unreachable = drop_unreachable_requirement_findings(raw_identities)
+    for f, reason in dropped_unreachable:
+        print(
+            f"security-ci: PLAT-8988 guard dropped {f.rule} [{f.severity}] "
+            f"for {f.package} — {reason}"
+        )
+    if dropped_unreachable:
+        print(
+            f"security-ci: PLAT-8988 guard dropped {len(dropped_unreachable)} "
+            "unreachable requirements.txt advisory/advisories (floor >= every fix threshold)"
+        )
 
     # PLAT-5289: suppressions must be evaluated against the same stable
     # identities that are filed/upserted. Dependency scanners mint per-advisory
