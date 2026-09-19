@@ -6,6 +6,15 @@ export const STT_INCOMPLETE_HANGOVER_MS = 4000
 export const STT_COMMIT_QUIET_MS = 1400
 /** After mute, commit a finished sentence soon — mute is not “throw this away”. */
 export const STT_MUTE_COMMIT_MS = 400
+/**
+ * PLAT-9385: client-side endpointing fallback. The upstream STT's own
+ * `speech_final` VAD can starve (observed live: 1 fire in 10 minutes across
+ * ~52 speech bursts with 3s silence gaps), which starves the whole agent
+ * turn — the call degrades to listen-only. When a text partial has arrived
+ * and the mic has been quiet this long WITHOUT a server speech_final, the
+ * client commits the turn itself from the stitched partial.
+ */
+export const STT_SILENCE_COMMIT_MS = 4600
 
 const INCOMPLETE_TAIL = /\b(a|an|and|at|but|check|for|if|in|of|on|or|so|the|to|with|my|your|this|that|these|those|first|second|third|want|see|look|tell|give|pull|open|about|task|personally|perhaps|maybe|just|please|then|also|there|here|like|into|login|log)$/i
 const NUMBER_WORDS = /\b(zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b/i
@@ -109,6 +118,7 @@ export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, 
   let firstPartialMs = null
   let lastLoudAt = 0
   let commitTimer = null
+  let silenceTimer = null
   const seedText = String(seed || '').trim()
   let pendingFinal = seedText ? { text: seedText, event: { type: 'seed', text: seedText } } : null
   let lastPartial = seedText
@@ -128,6 +138,32 @@ export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, 
     pendingFinal = null
   }
 
+  /** PLAT-9385: re-arm the silence watchdog after each text partial. Fires
+   * only when the server's speech_final never came — the normal hangover
+   * path (armCommit) owns the commit whenever pendingFinal exists. If it
+   * fires while the mic is still loud, re-arm (the turn commits once the
+   * speaker actually pauses). */
+  const armSilenceWatchdog = () => {
+    if (silenceTimer != null) window.clearTimeout(silenceTimer)
+    silenceTimer = window.setTimeout(() => {
+      silenceTimer = null
+      if (finalDelivered || cancelled || captureEnded) return
+      if (pendingFinal || commitTimer != null) return
+      const text = (lastPartial || '').trim()
+      if (!text) return
+      if (stillLoud()) {
+        armSilenceWatchdog()
+        return
+      }
+      armCommit(text, { type: 'transcript.partial', text, speech_final: true })
+    }, STT_SILENCE_COMMIT_MS)
+  }
+
+  const clearSilenceWatchdog = () => {
+    if (silenceTimer != null) window.clearTimeout(silenceTimer)
+    silenceTimer = null
+  }
+
   const stopResources = () => {
     try { source?.disconnect() } catch { /* already disconnected */ }
     try { processor?.disconnect() } catch { /* already disconnected */ }
@@ -145,6 +181,7 @@ export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, 
     cancelled = true
     captureEnded = true
     clearCommit()
+    clearSilenceWatchdog()
     if (closeTimer) window.clearTimeout(closeTimer)
     closeTimer = null
     stopResources()
@@ -183,6 +220,7 @@ export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, 
     if (!clean || finalDelivered) return
     finalDelivered = true
     clearCommit()
+    clearSilenceWatchdog()
     onFinal?.(clean, event)
   }
 
@@ -342,6 +380,10 @@ export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, 
         const stitched = pendingFinal ? stitchHeard(pendingFinal.text, text) : text
         lastPartial = stitched
         onPartial?.(stitched, timedEvent)
+        // PLAT-9385: every text partial re-arms the silence watchdog — if the
+        // server's speech_final never arrives, the client commits the turn
+        // after STT_SILENCE_COMMIT_MS of mic quiet (endpointing fallback).
+        armSilenceWatchdog()
         if (event.speech_final) {
           // Do not tear the mic down on the first VAD silence. Grok's
           // speech_final can fire mid-clause; hangover + Smart Turn wait

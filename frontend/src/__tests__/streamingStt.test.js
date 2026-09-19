@@ -10,6 +10,7 @@ import {
   STT_COMPLETE_HANGOVER_MS,
   STT_COMMIT_QUIET_MS,
   STT_MUTE_COMMIT_MS,
+  STT_SILENCE_COMMIT_MS,
 } from '../utils/streamingStt'
 
 const deferred = () => {
@@ -386,5 +387,126 @@ describe('stitchHeard', () => {
     expect(
       stitchHeard('I want you to check Whether you can', 'Whether you can SSH into s1'),
     ).toBe('I want you to check Whether you can SSH into s1')
+  })
+})
+
+describe('PLAT-9385 silence endpointing fallback', () => {
+  let processor
+  let sockets
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    sockets = []
+    processor = { connect: vi.fn(), disconnect: vi.fn(), onaudioprocess: null }
+    class FakeWebSocket {
+      static OPEN = 1
+      static CONNECTING = 0
+      constructor() {
+        this.readyState = FakeWebSocket.OPEN
+        this.close = vi.fn()
+        this.send = vi.fn()
+        sockets.push(this)
+      }
+    }
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const context = {
+      sampleRate: 16000,
+      resume: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+      createMediaStreamSource: vi.fn(() => ({ connect: vi.fn(), disconnect: vi.fn() })),
+      createScriptProcessor: vi.fn(() => processor),
+      createGain: vi.fn(() => ({ connect: vi.fn(), disconnect: vi.fn(), gain: { value: 1 } })),
+      destination: {},
+    }
+    vi.stubGlobal('AudioContext', class { constructor() { return context } })
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: vi.fn().mockResolvedValue({
+        getTracks: () => [{ stop: vi.fn(), enabled: true }],
+        getAudioTracks: () => [{ stop: vi.fn(), enabled: true }],
+      }) },
+    })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
+
+  const open = async (onFinal, onPartial) => {
+    startStreamingStt({ token: 'token', onFinal, onPartial })
+    for (let i = 0; i < 8; i += 1) await Promise.resolve()
+    const ws = sockets[0]
+    expect(ws).toBeTruthy()
+    ws.onmessage({ data: JSON.stringify({ type: 'transcript.created' }) })
+    return ws
+  }
+
+  it('commits the turn from the partial when the server speech_final never fires', async () => {
+    const onFinal = vi.fn()
+    const ws = await open(onFinal)
+    // Live signature: text partials arrive, speech_final starves (1 per 10min).
+    ws.onmessage({
+      data: JSON.stringify({
+        type: 'transcript.partial',
+        text: 'Hello, this is a voice call quality test.',
+        speech_final: false,
+        is_final: false,
+      }),
+    })
+    expect(onFinal).not.toHaveBeenCalled()
+    // Watchdog arms at STT_SILENCE_COMMIT_MS, then the hangover commit runs.
+    await vi.advanceTimersByTimeAsync(STT_SILENCE_COMMIT_MS - 200)
+    expect(onFinal).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(STT_COMPLETE_HANGOVER_MS + STT_COMMIT_QUIET_MS + 400)
+    expect(onFinal).toHaveBeenCalledWith('Hello, this is a voice call quality test.', expect.any(Object))
+  })
+
+  it('does not commit while the mic is still loud', async () => {
+    const onFinal = vi.fn()
+    const ws = await open(onFinal)
+    ws.onmessage({
+      data: JSON.stringify({
+        type: 'transcript.partial',
+        text: 'I want you to check the second task',
+        speech_final: false,
+        is_final: false,
+      }),
+    })
+    // Loud audio just before the watchdog window elapses — the watchdog
+    // re-arms instead of committing (the speaker is still talking).
+    await vi.advanceTimersByTimeAsync(STT_SILENCE_COMMIT_MS - 300)
+    const loud = new Float32Array(2048).fill(0.2)
+    processor.onaudioprocess({ inputBuffer: { getChannelData: () => loud } })
+    await vi.advanceTimersByTimeAsync(STT_SILENCE_COMMIT_MS + STT_INCOMPLETE_HANGOVER_MS)
+    expect(onFinal).not.toHaveBeenCalled()
+    // Quiet now — the re-armed watchdog commits once the pause is real.
+    await vi.advanceTimersByTimeAsync(STT_SILENCE_COMMIT_MS + STT_INCOMPLETE_HANGOVER_MS + 400)
+    expect(onFinal).toHaveBeenCalledWith('I want you to check the second task', expect.any(Object))
+  })
+
+  it('never double-commits when the server speech_final arrives late', async () => {
+    const onFinal = vi.fn()
+    const ws = await open(onFinal)
+    ws.onmessage({
+      data: JSON.stringify({
+        type: 'transcript.partial',
+        text: 'What is the status?',
+        speech_final: false,
+        is_final: false,
+      }),
+    })
+    // Server speech_final arrives before the watchdog window elapses.
+    ws.onmessage({
+      data: JSON.stringify({
+        type: 'transcript.partial',
+        text: 'What is the status?',
+        speech_final: true,
+        is_final: true,
+      }),
+    })
+    await vi.advanceTimersByTimeAsync(STT_SILENCE_COMMIT_MS + STT_COMPLETE_HANGOVER_MS + STT_COMMIT_QUIET_MS + 1000)
+    expect(onFinal).toHaveBeenCalledTimes(1)
+    expect(onFinal.mock.calls[0][0]).toBe('What is the status?')
   })
 })
