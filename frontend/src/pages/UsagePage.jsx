@@ -101,7 +101,11 @@ export default function UsagePage() {
     setError(null)
     try {
       const res = await fetch('/api/usage/summary', { credentials: 'include' })
-      if (!res.ok) {
+      // Guard the content type: a routing regression (the path falling through
+      // to the SPA history fallback) yields 200 text/html — parsing that as
+      // JSON would surface a raw SyntaxError instead of a usable message.
+      const ctype = res.headers.get('content-type') || ''
+      if (!res.ok || !ctype.includes('application/json')) {
         const detail = res.status === 401
           ? 'Your session has expired — sign in again to view usage.'
           : 'The usage service is temporarily unavailable. Try again shortly.'
