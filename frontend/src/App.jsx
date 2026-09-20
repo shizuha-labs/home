@@ -21,6 +21,7 @@ import BooksCompliancePage from './pages/BooksCompliancePage'
 import BooksCompliancePricingPage from './pages/BooksCompliancePricingPage'
 import BooksComplianceConfirmationPage from './pages/BooksComplianceConfirmationPage'
 import LiveTracePage from './pages/LiveTracePage'
+import UsagePage from './pages/UsagePage'
 import { TermsPage, PrivacyPage } from './pages/LegalPage'
 
 const FORGE_STUDIO_URL = 'https://cortex.shizuha.com/studio'
@@ -97,6 +98,8 @@ export default function App() {
       <Route path="/books/compliance/pricing" element={<BooksCompliancePricingPage />} />
       <Route path="/books/compliance/confirmation" element={<BooksComplianceConfirmationPage />} />
       <Route path="/live-trace" element={<LiveTracePage />} />
+      {/* PLAT-9402: unified per-account usage dashboard (Metering Core neutral plane). */}
+      <Route path="/usage" element={<UsagePage />} />
       {/* DOJO-87: published legal pages (HIVE-323). /legal is a legacy alias. */}
       <Route path="/terms" element={<TermsPage />} />
       <Route path="/privacy" element={<PrivacyPage />} />

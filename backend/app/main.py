@@ -41,6 +41,7 @@ from .clients import (
     fetch_talk_agents,
     fetch_financial_snapshot, fetch_live_feed, fetch_org_map, fetch_org_progress,
     fetch_org_refs, fetch_recent_conversations, fetch_task_peek, fetch_tasks_by_status,
+    fetch_usage_summary,
 )
 from .audit_leads import AuditLeadRequest, AuditLeadResponse, persist_audit_lead
 from .books_compliance import (
@@ -77,7 +78,7 @@ from .redis_client import block_read, block_read_multi, read_recent, read_recent
 from .schema import (
     ActivityRecentResponse, HomeActivityEventV1, HomeSummaryV1, HomeActivityV1,
     LiveTraceIngestResponse, LiveTraceIngestV1, LiveTraceTimelineV1,
-    SUMMARY_VERSION, Widget,
+    SUMMARY_VERSION, Widget, WidgetStatus,
 )
 
 # PLAT-5298: total budget (seconds) for the /api/home/activity poll, read from
@@ -457,6 +458,28 @@ async def home_talk_agents(
         "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "results": results,
     }
+
+
+@app.get("/api/usage/summary")
+async def usage_summary(caller: Caller = Depends(verify_caller)):
+    """PLAT-9402 Slice B: the caller's per-account usage meters.
+
+    Proxies the Metering Core's ID-subject read — the account is derived
+    server-side from the forwarded Shizuha-ID subject (the caller never names
+    an account, HLD §2/§2.1), so two-account isolation is structural at the
+    core boundary. The payload carries the usage_watermark the UI renders as
+    "as of" (consumption is eventually consistent) and decimal-string
+    quantities that are rendered verbatim.
+    """
+    async with httpx.AsyncClient() as client:
+        widget = await fetch_usage_summary(client, caller.bearer)
+    if widget.status == WidgetStatus.UNAUTHORIZED:
+        raise HTTPException(status_code=401, detail="usage_summary_unauthorized")
+    if widget.status != WidgetStatus.OK:
+        # Degraded/empty: the core read failed — surface 502 so the UI shows
+        # its degraded state instead of fabricating an empty dashboard.
+        raise HTTPException(status_code=502, detail="usage_summary_unavailable")
+    return widget.data
 
 
 @app.get("/api/home/agent")
