@@ -795,3 +795,36 @@ async def fetch_task_peek(client: httpx.AsyncClient, bearer: str,
     except (httpx.TimeoutException, httpx.TransportError, ValueError):
         pass  # drawer degrades to the item header alone
     return Widget.ok_(data={"item": item, "activity": activity, "comments": comments})
+
+
+async def fetch_usage_summary(client: httpx.AsyncClient, bearer: str) -> Widget:
+    """PLAT-9402 Slice B: the caller's Metering-Core usage summary.
+
+    Proxies the Hive core's ID-subject read (``GET /api/v1/usage/summary``):
+    the BillingAccount is derived SERVER-SIDE from the forwarded Shizuha-ID
+    subject — the caller never names an account (HLD §2/§2.1), so per-account
+    isolation is structural at the core boundary. Consumption is eventually
+    consistent; the payload carries the ``usage_watermark`` the UI renders as
+    "as of". Quantities are decimal strings — rendered verbatim, no float math.
+    """
+    try:
+        resp = await client.get(
+            f"{settings.HIVE_API_URL}/api/v1/usage/summary",
+            headers=_auth_headers(bearer),
+            timeout=settings.SOURCE_TIMEOUT_SECONDS,
+        )
+    except (httpx.TimeoutException, httpx.TransportError) as exc:
+        logger.warning("usage_summary source failed: %s", type(exc).__name__)
+        return Widget.degraded_(data=None)
+    if resp.status_code in (401, 403):
+        return Widget.unauthorized_()
+    if resp.status_code >= 400:
+        logger.warning("usage_summary source HTTP %s", resp.status_code)
+        return Widget.degraded_(data=None)
+    try:
+        payload = resp.json()
+    except ValueError:
+        return Widget.degraded_(data=None)
+    if not isinstance(payload, dict):
+        return Widget.degraded_(data=None)
+    return Widget.ok_(data=payload)
