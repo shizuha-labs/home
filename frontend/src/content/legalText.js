@@ -165,7 +165,7 @@ export const TERMS_SECTIONS = [
     blocks: [
       { p: '14.1 These Terms are governed by the laws of India.' },
       { p: '14.2 Courts: Subject to §14.3, disputes are subject to the exclusive jurisdiction of the courts of Bengaluru, Karnataka, India.' },
-      { p: '14.3 Arbitration: Disputes exceeding ₹5,00,000 shall be resolved by arbitration in Bengaluru in accordance with the Arbitration and Conciliation Act, 1996, by a sole arbitrator appointed by Shizuha. The arbitration award shall be final and binding.' },
+      { p: '14.3 Arbitration: Disputes exceeding ₹5,00,000 shall be finally resolved by arbitration seated in Bengaluru in accordance with the Arbitration and Conciliation Act, 1996. The sole arbitrator shall be appointed by the competent court under section 11 of the said Act, on the application of either party. The arbitral award shall be final and binding on the parties. The language of the arbitration shall be English.' },
     ],
   },
   {
