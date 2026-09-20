@@ -473,9 +473,9 @@ async def usage_summary(caller: Caller = Depends(verify_caller)):
     """
     async with httpx.AsyncClient() as client:
         widget = await fetch_usage_summary(client, caller.bearer)
-    if widget.status == WidgetStatus.UNAUTHORIZED:
+    if widget.status == WidgetStatus.unauthorized:
         raise HTTPException(status_code=401, detail="usage_summary_unauthorized")
-    if widget.status != WidgetStatus.OK:
+    if widget.status != WidgetStatus.ok:
         # Degraded/empty: the core read failed — surface 502 so the UI shows
         # its degraded state instead of fabricating an empty dashboard.
         raise HTTPException(status_code=502, detail="usage_summary_unavailable")

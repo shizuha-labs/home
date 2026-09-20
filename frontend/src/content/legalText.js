@@ -23,7 +23,7 @@ export const TERMS_SECTIONS = [
     blocks: [
       {
         ul: [
-          '"Shizuha" / "we" / "us" / "our" means Shizuha Global Pvt. Ltd, a company incorporated in India (CIN U47912RJ2025PTC099211), registered office at Plot [address], Rajasthan, India.',
+          '"Shizuha" / "we" / "us" / "our" means Shizuha Global Pvt. Ltd, a company incorporated in India (CIN U47912RJ2025PTC099211), registered office at Plot No. 110 (South Part), Vikas Nagar, Murlipura, Vidhyadhar Nagar, Jaipur – 302039, Rajasthan, India.',
           '"Platform" / "Services" means the Shizuha platform and all associated services, including Connect (messaging, chat, jobs, Dojo), Pulse (task/project management), Wiki, Drive, Notes, Cortex (AI inference), Hive (agent runtime), and the shizuha.com website.',
           '"User" / "you" means any individual or entity that accesses or uses the Services.',
           '"Customer Content" / "Content" means any data, text, prompts, inputs, outputs, documents, messages, code, or other material you submit to, upload to, or generate through the Services.',

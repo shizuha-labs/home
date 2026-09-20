@@ -182,7 +182,7 @@ export const PRIVACY_SECTIONS = [
     id: 'contact',
     heading: '16. Contact',
     blocks: [
-      { p: 'Shizuha Global Pvt. Ltd, [registered address], India. Email: privacy@shizuha.com.' },
+      { p: 'Shizuha Global Pvt. Ltd, Plot No. 110 (South Part), Vikas Nagar, Murlipura, Vidhyadhar Nagar, Jaipur – 302039, Rajasthan, India. Email: privacy@shizuha.com.' },
     ],
   },
 ]
