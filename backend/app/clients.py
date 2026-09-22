@@ -808,8 +808,16 @@ async def fetch_usage_summary(client: httpx.AsyncClient, bearer: str) -> Widget:
     "as of". Quantities are decimal strings — rendered verbatim, no float math.
     """
     try:
+        # PLAT-9402 (usage-plane prefix fix): HIVE_API_URL rides the fleet-plane
+        # base ("…/hive/api"), but the Hive core's usage plane is mounted at the
+        # single path "/api/v1/*" — appending the usage path to the fleet base
+        # composes the nonexistent doubled route "/hive/api/api/v1/usage/summary"
+        # (observed 404 from a running seat, 09-22). Strip the fleet prefix at
+        # this call boundary only — the fleet legs above ride the base as-is.
+        fleet_prefix = "/hive/api"
+        base = settings.HIVE_API_URL.removesuffix(fleet_prefix) if settings.HIVE_API_URL.endswith(fleet_prefix) else settings.HIVE_API_URL
         resp = await client.get(
-            f"{settings.HIVE_API_URL}/api/v1/usage/summary",
+            f"{base}/api/v1/usage/summary",
             headers=_auth_headers(bearer),
             timeout=settings.SOURCE_TIMEOUT_SECONDS,
         )
