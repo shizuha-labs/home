@@ -22,9 +22,13 @@ fi
 
 repo_root=$(git rev-parse --show-toplevel)
 gate="$repo_root/.ci-local-gate.sh"
-if [ ! -x "$gate" ]; then
+if [ ! -f "$gate" ]; then
   echo "pre-push: no .ci-local-gate.sh in this repo — allowing push (add one to gate it)." >&2
   exit 0
+fi
+if [ ! -x "$gate" ]; then
+  echo "pre-push: .ci-local-gate.sh exists but is not executable — refusing to skip the gate." >&2
+  exit 1
 fi
 echo ">>> local CI gate: running $(basename "$gate") before primary-branch push..." >&2
 if ! "$gate"; then
