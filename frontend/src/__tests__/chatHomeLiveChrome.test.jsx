@@ -180,9 +180,10 @@ vi.mock('@shizuha/chat', () => {
   }
 })
 
-vi.mock('@shizuha/ui', () => ({
+// Use the real shared hook: its contract is an array or null, not an object.
+vi.mock('@shizuha/ui', async () => ({
+  ...await import('@shizuha/ui/hooks/useEnabledServices'),
   SHIZUHA_APPS: [],
-  useEnabledServices: () => ({ enabledServices: null }),
 }))
 
 import ChatHome from '../pages/ChatHome'
@@ -235,6 +236,12 @@ describe('ChatHome Live chrome', () => {
     chat.isConnected = true
     chat.sendMessage.mockClear()
     localStorage.clear()
+  })
+
+  it.each([undefined, ['hive', 'pulse']])('renders signed-in Home with real enabled_services claim %s', (enabled_services) => {
+    localStorage.setItem('shizuha_access_token', `e30.${btoa(JSON.stringify({ user_id: 1, enabled_services }))}.test`)
+    renderAt('/')
+    expect(screen.getByTestId('home-live-button')).toBeInTheDocument()
   })
 
   it('sends on the open /c/:id thread even when the socket is reconnecting', () => {

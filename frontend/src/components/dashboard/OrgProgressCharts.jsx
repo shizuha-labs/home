@@ -213,12 +213,12 @@ export default function OrgProgressCharts({ orgs, orgId, onOrgChange, range, onR
           <TrendingUp className="w-4 h-4 text-brand-500" />
           <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Org progress</h3>
         </div>
-        <div className="flex items-center gap-2 ml-auto">
+        <div className="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2 ml-auto">
           {Array.isArray(orgs) && orgs.length > 1 && (
             <select
               value={orgId ?? ''}
               onChange={(e) => onOrgChange?.(Number(e.target.value))}
-              className="text-xs rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 px-2 py-1"
+              className="min-w-0 max-w-full text-xs rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 px-2 py-1"
             >
               {orgs.map((o) => (
                 <option key={o.id} value={o.id}>{o.name || `Organization ${o.id}`}</option>

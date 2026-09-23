@@ -34,10 +34,10 @@ export default function GlobalNavBar() {
   return (
     <nav className="fixed top-0 left-0 right-0 z-[var(--z-navbar)] bg-white/80 dark:bg-gray-950/80 backdrop-blur-lg border-b border-gray-200 dark:border-gray-800">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-14">
+        <div className="flex min-w-0 items-center justify-between gap-2 h-14">
           {/* Logo + Nav Items */}
-          <div className="flex items-center gap-1">
-            <div className="mr-2">
+          <div className="flex min-w-0 shrink-0 items-center gap-1">
+            <div className="sm:mr-2">
               <AppSwitcher
                 currentAppId={currentSurface}
                 variant="compact"
@@ -52,7 +52,7 @@ export default function GlobalNavBar() {
                 }}
               />
             </div>
-            <Link to="/" className="flex items-center gap-2 mr-4">
+            <Link to="/" className="flex shrink-0 items-center gap-2 sm:mr-4">
               <div className="w-7 h-7 rounded-lg bg-brand-600 flex items-center justify-center">
                 <span className="text-white font-bold text-xs">S</span>
               </div>
@@ -62,7 +62,7 @@ export default function GlobalNavBar() {
             </Link>
 
             {/* Desktop Nav Items */}
-            <div className="hidden md:flex items-center gap-0.5">
+            <div className="hidden lg:flex items-center gap-0.5">
               {NAV_ITEMS.map(item => {
                 const isActive = item.surface === currentSurface
                 const className = `
@@ -96,16 +96,16 @@ export default function GlobalNavBar() {
           </div>
 
           {/* Right Side */}
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-1 sm:gap-2">
             <button
               onClick={() => setIsSearchOpen(!isSearchOpen)}
-              className="p-2 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-white dark:hover:bg-gray-800 transition-colors"
+              className="shrink-0 p-2 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-white dark:hover:bg-gray-800 transition-colors"
               title="Search (Ctrl+K)"
             >
               <Search className="h-4 w-4" />
             </button>
 
-            <ThemeToggle />
+            <ThemeToggle className="shrink-0" />
             {isAuthenticated && <HaneChip />}
 
             {/* Desktop User Menu */}
@@ -124,7 +124,7 @@ export default function GlobalNavBar() {
                   </div>
                   <button
                     onClick={handleLogout}
-                    className="p-2 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-white dark:hover:bg-gray-800 transition-colors"
+                    className="shrink-0 p-2 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-white dark:hover:bg-gray-800 transition-colors"
                     title="Sign out"
                   >
                     <LogOut className="h-4 w-4" />
@@ -143,7 +143,7 @@ export default function GlobalNavBar() {
             </div>
 
             {/* Mobile Menu Button */}
-            <div className="flex md:hidden items-center">
+            <div className="flex shrink-0 lg:hidden items-center">
               <button
                 onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
                 className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
@@ -162,7 +162,7 @@ export default function GlobalNavBar() {
 
       {/* Mobile Menu */}
       {isMobileMenuOpen && (
-        <div className="md:hidden bg-white dark:bg-gray-950 border-t border-gray-200 dark:border-gray-800 animate-fade-in">
+        <div className="lg:hidden bg-white dark:bg-gray-950 border-t border-gray-200 dark:border-gray-800 animate-fade-in">
           <div className="px-4 py-3 space-y-1">
             {NAV_ITEMS.map(item => {
               const isActive = item.surface === currentSurface

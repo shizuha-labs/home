@@ -211,11 +211,11 @@ export default function CommandCenterDashboard({ orgId, onPeekOrg, summary: summ
         </div>
       </div>
       {(alerts.status !== 'empty' && alertItems.length > 0) && (
-        <div className="mt-3 flex justify-center">
-          <div className="flex items-center gap-2 rounded-xl bg-amber-50 px-3 py-1.5 text-xs text-amber-700 ring-1 ring-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:ring-amber-900">
-            <Bell className="h-3.5 w-3.5" />
+        <div className="mt-3 flex min-w-0 justify-center">
+          <div className="flex min-w-0 max-w-full items-center gap-2 rounded-xl bg-amber-50 px-3 py-1.5 text-xs text-amber-700 ring-1 ring-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:ring-amber-900">
+            <Bell className="h-3.5 w-3.5 shrink-0" />
             {alertItems.slice(0, 2).map((a, i) => (
-              <span key={i} className="truncate">{a.summary}</span>
+              <span key={i} className="min-w-0 truncate" title={a.summary}>{a.summary}</span>
             ))}
           </div>
         </div>

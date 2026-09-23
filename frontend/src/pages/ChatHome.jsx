@@ -56,7 +56,7 @@ function getGreeting() {
 }
 
 function AppsDrawer({ isOpen, onClose }) {
-  const { enabledServices } = useEnabledServices()
+  const enabledServices = useEnabledServices()
   const apps = SHIZUHA_APPS.filter(app => {
     if (!enabledServices) return true
     return enabledServices.includes(app.id) || app.id === 'admin' || app.id === 'id'
@@ -1003,7 +1003,7 @@ function ChatHomeInner() {
             inset-0 child it only covered the first viewport, so scrolling
             revealed the bare page background (black in dark mode) below it
             (operator 2026-07-10). Decorative orbs stay as top-area accents. */}
-        <div className="absolute top-20 left-10 w-72 h-72 bg-brand-400/20 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute top-20 left-10 w-52 h-52 sm:w-72 sm:h-72 bg-brand-400/20 rounded-full blur-3xl pointer-events-none" />
         <div className="absolute top-[520px] right-10 w-96 h-96 bg-purple-400/20 rounded-full blur-3xl pointer-events-none" />
 
         <div className="relative z-10 w-full max-w-3xl px-6 pt-12 pb-20">
