@@ -5,11 +5,11 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 docker volume create home-gate-pipcache >/dev/null
-docker run --rm -v "$PWD":/src -v home-gate-pipcache:/root/.cache/pip -w /src python:3.12-bookworm sh -c '
-python -m pip install --quiet \
-  --index-url "${PIP_INDEX_URL:-http://192.168.0.136:30511/simple/}" \
-  --trusted-host 192.168.0.136 \
-  uv==0.11.26
+# Honour an explicitly configured package mirror; otherwise pip uses PyPI.
+# The former workstation IP is no longer a reachable package service.
+docker run --rm -v "$PWD":/src -v home-gate-pipcache:/root/.cache/pip \
+  -e PIP_INDEX_URL -e PIP_TRUSTED_HOST -w /src python:3.12-bookworm sh -ec '
+python -m pip install --quiet uv==0.11.26
 cd backend
 env -u UV_INDEX_URL -u UV_DEFAULT_INDEX -u UV_INSECURE_HOST uv lock --check
 env -u UV_INDEX_URL -u UV_DEFAULT_INDEX -u UV_INSECURE_HOST uv sync --locked --extra dev
