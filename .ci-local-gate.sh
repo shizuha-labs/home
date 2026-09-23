@@ -4,10 +4,22 @@
 # as CI does. PLAT-5821: no more pip -r requirements.txt — uv sync --locked.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
+# The locked wheel URLs use cluster DNS. A host-side Docker gate does not
+# inherit CoreDNS, so resolve the current Service instead of pinning a node IP.
+home_gate_cache_host=pip-cache.registry.svc.cluster.local
+home_gate_cache_ip=${SHIZUHA_PIP_CACHE_IP:-}
+if [ -z "$home_gate_cache_ip" ]; then
+  home_gate_cache_ip=$(getent ahostsv4 "$home_gate_cache_host" | awk 'NR == 1 { print $1 }' || true)
+fi
+if [ -z "$home_gate_cache_ip" ]; then
+  home_gate_cache_ip=$(kubectl --request-timeout=10s -n registry get service pip-cache -o jsonpath='{.spec.clusterIP}')
+fi
+[ -n "$home_gate_cache_ip" ] || { echo 'gate: cannot resolve the locked package cache service' >&2; exit 1; }
 docker volume create home-gate-pipcache >/dev/null
 # Honour an explicitly configured package mirror; otherwise pip uses PyPI.
 # The former workstation IP is no longer a reachable package service.
 docker run --rm -v "$PWD":/src -v home-gate-pipcache:/root/.cache/pip \
+  --add-host "$home_gate_cache_host:$home_gate_cache_ip" \
   -e PIP_INDEX_URL -e PIP_TRUSTED_HOST -w /src python:3.12-bookworm sh -ec '
 python -m pip install --quiet uv==0.11.26
 cd backend
