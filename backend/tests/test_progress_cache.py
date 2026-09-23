@@ -6,6 +6,7 @@ import socket
 import subprocess
 import time
 import uuid
+from types import SimpleNamespace
 
 import httpx
 import jwt
@@ -206,6 +207,61 @@ async def test_cache_outage_uses_local_singleflight_and_preserves_success(monkey
     await finish(cache)
     widget, pending = await cache.get_or_refresh('caller', fetch)
     assert widget.data == {'count': 4} and not pending
+
+
+@pytest.mark.asyncio
+async def test_token_refresh_releases_unused_local_snapshots(monkeypatch):
+    # Keep asyncio's own clock real while aging this cache's observations.
+    clock = [time.time()]
+    monkeypatch.setattr('app.cache.time', SimpleNamespace(
+        time=lambda: clock[0], monotonic=lambda: clock[0]))
+    async def unavailable():
+        raise ConnectionError('test cache unavailable')
+    monkeypatch.setattr('app.redis_client.get_redis', unavailable)
+    cache = WidgetCache()
+    async def fetch():
+        return Widget.ok_({'count': 4})
+    await cache.get_or_refresh('caller:old-token', fetch)
+    await finish(cache)
+    assert 'caller:old-token' in cache._snapshots
+    clock[0] += settings.STALE_TTL_SECONDS + 1
+    await cache.get_or_refresh('caller:new-token', fetch)
+    await finish(cache)
+    assert set(cache._snapshots) == {'caller:new-token'}
+    assert set(cache._snapshot_versions) == {'caller:new-token'}
+    widget, pending = await cache.get_or_refresh('caller:new-token', fetch)
+    assert widget.data == {'count': 4} and not pending
+
+
+@pytest.mark.asyncio
+async def test_old_expiry_cannot_evict_a_refreshed_snapshot(monkeypatch):
+    clock = [time.time()]
+    monkeypatch.setattr('app.cache.time', SimpleNamespace(
+        time=lambda: clock[0], monotonic=lambda: clock[0]))
+    async def unavailable():
+        raise ConnectionError('test cache unavailable')
+    monkeypatch.setattr('app.redis_client.get_redis', unavailable)
+    cache = WidgetCache()
+    calls = []
+    async def fetch():
+        calls.append(1)
+        return Widget.ok_({'revision': len(calls)})
+    await cache.get_or_refresh('caller', fetch)
+    await finish(cache)
+    first_observed = clock[0]
+    clock[0] += settings.CACHE_TTL_SECONDS + 1
+    await cache.get_or_refresh('caller', fetch)
+    await finish(cache)
+    clock[0] = first_observed + settings.STALE_TTL_SECONDS + 1
+    widget, pending = await cache.get_or_refresh('caller', fetch)
+    assert widget.data == {'revision': 2} and pending
+    await finish(cache)
+    widget, pending = await cache.get_or_refresh('caller', fetch)
+    assert widget.data == {'revision': 3} and not pending
+    clock[0] += settings.STALE_TTL_SECONDS + 1
+    await cache.get_or_refresh('another-caller', fetch)
+    await finish(cache)
+    assert set(cache._snapshots) == {'another-caller'}
 
 
 @pytest.mark.asyncio

@@ -7,6 +7,7 @@ serve a recently-good widget as `stale` instead of flashing empty/degraded state
 from __future__ import annotations
 
 import hashlib
+import heapq
 import json
 import time
 import asyncio
@@ -31,13 +32,39 @@ class WidgetCache:
         self._store: dict[str, _Entry] = {}
         self._snapshots: dict[str, dict] = {}
         self._refresh_tasks: dict[str, asyncio.Task] = {}
+        self._snapshot_expiry = []
+        self._snapshot_versions = {}
+        self._snapshot_serial = 0
 
     def clear(self):
         self._store.clear()
         self._snapshots.clear()
+        self._snapshot_expiry.clear()
+        self._snapshot_versions.clear()
         for task in self._refresh_tasks.values():
             task.cancel()
         self._refresh_tasks.clear()
+
+    def _expire_snapshots(self):
+        # Token refreshes create new authorization keys. Expire unused keys as
+        # well as the one being read, without scanning every user's snapshots.
+        now = time.monotonic()
+        while self._snapshot_expiry and self._snapshot_expiry[0][0] <= now:
+            _, version, key = heapq.heappop(self._snapshot_expiry)
+            if self._snapshot_versions.get(key) == version:
+                self._snapshot_versions.pop(key, None)
+                self._snapshots.pop(key, None)
+
+    def _remember_snapshot(self, key, entry):
+        self._expire_snapshots()
+        self._snapshot_serial += 1
+        version = self._snapshot_serial
+        self._snapshots[key] = entry
+        self._snapshot_versions[key] = version
+        # Match Redis retention. A superseded heap entry cannot evict a newer
+        # observation, and old tokens release their memory without a sweeper.
+        heapq.heappush(self._snapshot_expiry,
+                       (time.monotonic() + settings.STALE_TTL_SECONDS, version, key))
 
     async def get_or_refresh(self, key, fetch, *, fetch_budget=None):
         """Return local state immediately; shared cache and source I/O are async.
@@ -47,6 +74,7 @@ class WidgetCache:
         crashed worker's expiring token cannot publish or unlock its successor.
         """
         from .redis_client import get_redis
+        self._expire_snapshots()
         budget = settings.SOURCE_TIMEOUT_SECONDS if fetch_budget is None else fetch_budget
         rkey = 'home:widgets:v1:' + hashlib.sha256(key.encode()).hexdigest()
         entry = self._snapshots.get(key)
@@ -71,7 +99,7 @@ class WidgetCache:
                         float(decoded['checked_at'])
                         float(decoded['observed_at'])
                         previous = decoded
-                        self._snapshots[key] = decoded
+                        self._remember_snapshot(key, decoded)
                         if time.time() - decoded['checked_at'] <= settings.CACHE_TTL_SECONDS:
                             return
                     # Only the shared owner may fetch/publish. Lease covers the
@@ -120,7 +148,7 @@ class WidgetCache:
                         published = True
                     if not published:
                         return
-                self._snapshots[key] = result
+                self._remember_snapshot(key, result)
             finally:
                 if rr is not None:
                     try:
