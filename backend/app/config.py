@@ -43,6 +43,17 @@ class Settings:
         "HIVE_API_URL",
         "http://hive.shizuha-hive.svc.cluster.local:8030/hive/api",
     ).rstrip("/")
+    # PLAT-9402: the Metering Core read plane is mounted at the hive HOST ROOT
+    # (hive_project/urls.py line 50: 'api/v1/usage/summary'), NOT under the
+    # /hive/api prefix HIVE_API_URL carries. The fleet/analytics clients append
+    # /v1/... to HIVE_API_URL (-> /hive/api/v1/...), which is why their routes
+    # resolve; the usage-summary client must use the host root or it 404s
+    # (live-verified 2026-09-23: /api/v1/usage/summary 200,
+    # /hive/api/api/v1/usage/summary 404 -> BFF degraded 502).
+    HIVE_METERING_URL: str = os.environ.get(
+        "HIVE_METERING_URL",
+        "http://hive.shizuha-hive.svc.cluster.local:8030",
+    ).rstrip("/")
     BOOKS_API_URL: str = os.environ.get("BOOKS_API_URL", "http://shizuha-books:8000/api").rstrip("/")
     CONNECT_API_URL: str = os.environ.get("CONNECT_API_URL", "http://shizuha-connect:8000/api").rstrip("/")
 

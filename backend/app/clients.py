@@ -809,7 +809,7 @@ async def fetch_usage_summary(client: httpx.AsyncClient, bearer: str) -> Widget:
     """
     try:
         resp = await client.get(
-            f"{settings.HIVE_API_URL}/api/v1/usage/summary",
+            f"{settings.HIVE_METERING_URL}/api/v1/usage/summary",
             headers=_auth_headers(bearer),
             timeout=settings.SOURCE_TIMEOUT_SECONDS,
         )
