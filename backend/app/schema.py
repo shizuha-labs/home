@@ -16,6 +16,7 @@ LIVE_TRACE_VERSION = 1
 
 
 class WidgetStatus(str, Enum):
+    loading = "loading"       # first background snapshot is still being built
     ok = "ok"
     degraded = "degraded"      # partial data (some sub-source failed)
     stale = "stale"            # served from cache after a source timeout/failure
@@ -62,6 +63,8 @@ class HomeSummaryV1(BaseModel):
     org_id: Optional[int] = None
     orgs: list[OrgRef] = Field(default_factory=list)
     widgets: dict[str, Widget] = Field(default_factory=dict)
+    refreshing: bool = False
+    retry_after_seconds: Optional[int] = None
 
 
 class HomeActivityV1(BaseModel):

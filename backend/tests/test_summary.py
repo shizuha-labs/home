@@ -214,8 +214,8 @@ def test_tasks_widget_counts_by_status():
         assert request.headers.get("Authorization") == "Bearer caller-tok"
         assert request.url.params.get("organization") == "7"
         assert "org_id" not in request.url.params
-        return httpx.Response(200, json={"results": [
-            {"status": "open"}, {"status": "open"}, {"status": "in_review"}, {"status": "done"},
+        return httpx.Response(200, json={"counts": [
+            {"count": 1, "status": "open"}, {"count": 1, "status": "open"}, {"count": 1, "status": "in_review"}, {"count": 1, "status": "done"},
         ]})
     async def go():
         async with _mock_client(handler) as c:
@@ -253,17 +253,18 @@ def test_tasks_widget_buckets_on_status_category_not_raw_slug():
         assert "assignee_email" not in request.url.params
         assert request.url.params.get("is_active") == "true"
         assert request.url.params.get("mode") == "task"
-        # Pulse-meltdown guard: never re-introduce the 200-row full list /
-        # permission-hint double COUNT that saturated Postgres.
-        assert request.url.params.get("limit") == "50"
-        assert request.url.params.get("permission_hint") == "false"
-        return httpx.Response(200, json={"results": [
-            {"status": "pending", "status_category": "todo"},
-            {"status": "shaping", "status_category": "todo"},
-            {"status": "implementing", "status_category": "in_progress"},
-            {"status": "review", "status_category": "in_progress"},
-            {"status": "blocked", "status_category": "in_progress"},
-            {"status": "awaiting_merge", "status_category": "in_progress"},
+        # Counts must use the grouped projection, never a truncated item page.
+        assert request.url.path == "/api/items/statistics/"
+        assert request.url.params.get("projection") == "status_counts"
+        assert "limit" not in request.url.params
+        assert "permission_hint" not in request.url.params
+        return httpx.Response(200, json={"counts": [
+            {"count": 1, "status": "pending", "status_category": "todo"},
+            {"count": 1, "status": "shaping", "status_category": "todo"},
+            {"count": 1, "status": "implementing", "status_category": "in_progress"},
+            {"count": 1, "status": "review", "status_category": "in_progress"},
+            {"count": 1, "status": "blocked", "status_category": "in_progress"},
+            {"count": 1, "status": "awaiting_merge", "status_category": "in_progress"},
         ]})
     async def go():
         async with _mock_client(handler) as c:
@@ -278,8 +279,8 @@ def test_tasks_widget_aggregates_across_member_orgs_when_unscoped():
     seen = []
     def handler(request):
         seen.append(request.url.params.get("organization"))
-        return httpx.Response(200, json={"results": [
-            {"status": "pending", "status_category": "todo"},
+        return httpx.Response(200, json={"counts": [
+            {"count": 1, "status": "pending", "status_category": "todo"},
         ]})
     async def go():
         async with _mock_client(handler) as c:
@@ -295,8 +296,8 @@ def test_tasks_widget_skips_forbidden_org_and_counts_the_rest():
     def handler(request):
         if request.url.params.get("organization") == "1":
             return httpx.Response(403, json={"detail": "forbidden"})
-        return httpx.Response(200, json={"results": [
-            {"status": "pending", "status_category": "todo"},
+        return httpx.Response(200, json={"counts": [
+            {"count": 1, "status": "pending", "status_category": "todo"},
         ]})
     async def go():
         async with _mock_client(handler) as c:
@@ -648,3 +649,32 @@ def test_jwks_url_honors_documented_aliases():
         assert cfg.settings.JWKS_URL == "https://oauth.example/jwks.json"
     finally:
         _restore()
+
+
+def test_tasks_widget_complete_counts_over_page_limit_and_parallel_scopes():
+    entered = set()
+    ready = asyncio.Event()
+    async def handler(request):
+        scope = request.url.params.get('organization')
+        entered.add(scope)
+        if len(entered) == 2:
+            ready.set()
+        await asyncio.wait_for(ready.wait(), 1)
+        return httpx.Response(200, json={'counts': [
+            {'status': 'shaping', 'status_category': 'todo',
+             'count': 125 if scope == '1' else 82},
+            {'status': 'completed', 'status_category': 'done', 'count': 91},
+        ]})
+    async def go():
+        async with _mock_client(handler) as c:
+            return await clients.fetch_tasks_by_status(c, 'caller', None, org_ids=[1, 2])
+    w = _run(go())
+    assert w.status == 'ok' and w.data['open'] == 207
+    assert sum(w.data.values()) == 207
+
+
+def test_tasks_widget_malformed_projection_does_not_report_empty():
+    async def go():
+        async with _mock_client(lambda _: httpx.Response(200, json={'results': []})) as c:
+            return await clients.fetch_tasks_by_status(c, 'caller', None, 1)
+    assert _run(go()).status == 'degraded'

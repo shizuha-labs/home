@@ -72,3 +72,29 @@ post-deploy gate and must be refreshed within 30 days.
 4. Cortex widget + PLAT-1322 probe registration once deployed.
 5. Redis-backed cache if cross-replica stale sharing becomes necessary (current cache is safe best-effort per process).
 Deploy wiring: nginx `/api/home/*` now proxies to the sibling backend service; chart/backend image rollout remains the deployment slice.
+
+### Summary and organization progress refresh
+
+`GET /api/home/progress` verifies the caller and selected organization before
+reading a widget snapshot. The cache key binds user, signed membership/role,
+window and a hash of the caller bearer; credentials never enter Redis. Shared
+Redis snapshots and a token-fenced refresh lease coalesce replicas. A cold read
+returns `loading`, `refreshing: true` and `retry_after_seconds: 1`; a stale read
+retains the original data and `as_of` while the refresh runs. The frontend follows
+only this pending hint, then resumes its normal refresh cadence.
+
+A failed source read keeps the last good snapshot only within the existing stale
+budget. A source authorization refusal clears that data. An expired refresh
+owner cannot publish over or unlock its successor; Redis failure degrades to
+process-local single-flight. No result is represented as zero merely because a
+source is unavailable. Regression checks use the real HTTP route, a disposable
+Redis instance, caller/window isolation, failed refresh/re-arm and ownership loss.
+Keep source aggregation bounded: page-path metrics must not hydrate each item's
+entire activity history or make one database query per item.
+
+The Home UI opts into `summary?background=1`; org labels and nonfinancial
+widgets hydrate independently. `/api/home/financial` remains an independent
+Books-authorized read on every request, including for an unchanged JWT. Task
+counts use Pulse's scoped `statistics?projection=status_counts` grouped read;
+never sum the first page of items as if it were the organization total. Deploy
+the Pulse projection before the matching Home consumer.

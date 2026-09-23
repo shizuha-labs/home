@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { getAccessToken, handleUnauthorized } from '../utils/auth'
+import { useCallback, useMemo } from 'react'
+import { useHomeWidgetFeed } from './useHomeWidgetFeed'
 
 /**
  * HIVE-376 / HIVE-375: fetch the command-center `HomeSummaryV1` from the home
@@ -41,68 +41,18 @@ export const WIDGET_KEYS = [
  *   refresh: () => void }}
  */
 export function useHomeSummary({ orgId, refreshMs = 30000, enabled = true } = {}) {
-  const [summary, setSummary] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const abortRef = useRef(null)
-
-  const load = useCallback(async () => {
-    abortRef.current?.abort()
-    const controller = new AbortController()
-    abortRef.current = controller
-    setLoading(true)
-    try {
-      const qs = orgId ? `?org_id=${encodeURIComponent(orgId)}` : ''
-      const resp = await fetch(SUMMARY_ENDPOINT + qs, {
-        headers: { Authorization: `Bearer ${getAccessToken()}` },
-        signal: controller.signal,
-      })
-      if (handleUnauthorized(resp)) return
-      if (!resp.ok) {
-        // Backend not deployed yet / transient failure — degrade, don't crash.
-        throw new Error(`home summary ${resp.status}`)
-      }
-      const json = await resp.json()
-      setSummary(json)
-      setError(null)
-    } catch (e) {
-      if (e.name === 'AbortError') return
-      setError(e)
-    } finally {
-      setLoading(false)
-    }
-  }, [orgId])
-
-  useEffect(() => {
-    if (!enabled) return undefined
-    load()
-    if (!refreshMs) return () => abortRef.current?.abort()
-    const t = setInterval(load, refreshMs)
-    return () => {
-      clearInterval(t)
-      abortRef.current?.abort()
-    }
-  }, [enabled, load, refreshMs])
-
-  // widget(key): resolve a widget's envelope, defaulting to a safe status so the
-  // UI always has something to render (skeleton while loading, degraded on error).
-  const widget = useCallback(
-    (key) => {
-      const w = summary?.widgets?.[key]
-      if (w && typeof w.status === 'string') {
-        // Keep locally useful data on a failed poll, but never present a prior
-        // success/empty snapshot as current. Recovery clears `error` and the
-        // next render returns the server's fresh status again.
-        if (error && (w.status === 'ok' || w.status === 'empty')) {
-          return { ...w, status: 'stale' }
-        }
-        return w
-      }
-      if (loading) return { status: 'loading' }
-      return { status: 'degraded' }
-    },
-    [summary, loading, error],
-  )
-
-  return { summary, loading, error, widget, refresh: load }
+  const feed = useHomeWidgetFeed({ endpoint: `${SUMMARY_ENDPOINT}?background=1`, orgId, refreshMs, enabled })
+  // Books authorization is checked afresh for every financial read. This
+  // independent source must not hold the nonfinancial summary or reuse finance
+  // across visits, failed refreshes, or changed authorization.
+  const finance = useHomeWidgetFeed({ endpoint: '/api/home/financial', orgId, refreshMs, enabled, widgetName: 'financial_snapshot', retain: false })
+  const financialWidget = finance.widget('financial_snapshot')
+  const summary = useMemo(() => feed.payload ? {
+    ...feed.payload, widgets: { ...feed.payload.widgets, financial_snapshot: financialWidget },
+  } : null, [feed.payload, financialWidget])
+  const { widget: feedWidget, refresh: refreshFeed } = feed
+  const { refresh: refreshFinance } = finance
+  const widget = useCallback((name) => name === 'financial_snapshot' ? financialWidget : feedWidget(name), [financialWidget, feedWidget])
+  const refresh = useCallback(() => Promise.all([refreshFeed(), refreshFinance()]), [refreshFeed, refreshFinance])
+  return { summary, loading: feed.loading, error: feed.error, widget, refresh }
 }

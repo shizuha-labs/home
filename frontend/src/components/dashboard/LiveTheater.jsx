@@ -1,3 +1,4 @@
+import WidgetFreshness from './WidgetFreshness'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowRight, CheckCircle2, GitPullRequest, MessageSquare,
@@ -110,7 +111,7 @@ function LiveBadge() {
   )
 }
 
-function Ticker({ events, now, onPeekTask }) {
+function Ticker({ events, now, onPeekTask, widget }) {
   const [idx, setIdx] = useState(0)
   const pool = events.slice(0, 8)
   useEffect(() => {
@@ -122,7 +123,7 @@ function Ticker({ events, now, onPeekTask }) {
   if (!ev) return null
   return (
     <div className="mb-3 flex items-center justify-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-      <LiveBadge />
+      {widget?.status === 'stale' ? <WidgetFreshness widget={widget} /> : <LiveBadge />}
       <span key={eventKey(ev)} className="animate-feed-in truncate">
         <span className="font-semibold text-gray-700 dark:text-gray-200">{actorName(ev.actor_email)}</span>{' '}
         {verbFor(ev)}{' '}
@@ -327,7 +328,8 @@ export default function LiveTheater({ feed, agents, onPeekAgent, onPeekTask }) {
 
   return (
     <div className="mt-6 text-left">
-      <Ticker events={events} now={now} onPeekTask={onPeekTask} />
+      <Ticker events={events} now={now} onPeekTask={onPeekTask} widget={feed} />
+      <WidgetFreshness widget={agents} />
       <AgentHoverCard hover={hover} />
 
       {/* Band 1 — the spotlight: only agents with a LIVE recent event earn a
@@ -387,7 +389,10 @@ export default function LiveTheater({ feed, agents, onPeekAgent, onPeekTask }) {
           ) : (
             <div className="flex h-24 items-center justify-center gap-2 text-xs text-gray-400 dark:text-gray-500">
               <span className="h-2 w-2 animate-pulse rounded-full bg-brand-400" />
-              Tuning in — the first events land in seconds…
+              {feed?.status === 'unauthorized' ? 'You do not have access to this activity.'
+                : feed?.status === 'degraded' ? 'Activity is temporarily unavailable.'
+                  : feed?.status === 'empty' ? 'No recent activity.'
+                    : 'Tuning in — the first events land in seconds…'}
             </div>
           )}
         </div>

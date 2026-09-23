@@ -168,49 +168,50 @@ async def fetch_tasks_by_status(client: httpx.AsyncClient, bearer: str,
     if not scopes:
         scopes = [None]  # org-less caller: personal member-visible items
 
+    async def read(scope):
+        return await client.get(
+            f"{settings.PULSE_API_URL}/api/items/statistics/",
+            headers=headers,
+            params={"projection": "status_counts", "mode": "task",
+                    "is_active": "true", **_scope_params(scope)},
+            timeout=settings.SOURCE_TIMEOUT_SECONDS,
+        )
+
+    # Independent organization reads share one source budget rather than
+    # accumulating one timeout per membership. Pulse still enforces each scope.
+    try:
+        responses = await asyncio.gather(*(read(scope) for scope in scopes))
+    except (httpx.TimeoutException, httpx.TransportError) as exc:
+        logger.warning("tasks_by_status source failed: %s", type(exc).__name__)
+        return Widget.degraded_(data={b: None for b in _TASK_BUCKETS})
     counts = {b: 0 for b in _TASK_BUCKETS}
     total = 0
     any_ok = False
     any_forbidden = False
-    for scope in scopes:
-        # PLAT pulse-meltdown 2026-07-26: limit=200 + permission_hint default
-        # pulled full DISTINCT task rows + a second unscoped COUNT, each 30–100s
-        # under load, and Home's 2.5s client timeout left zombie queries running
-        # on Pulse. Widget only needs status/status_category for bucketing —
-        # keep the page small and skip the diagnostic second COUNT.
-        params = {
-            "limit": "50",
-            "mode": "task",
-            "is_active": "true",
-            "permission_hint": "false",
-            **_scope_params(scope),
-        }
-        try:
-            resp = await client.get(
-                f"{settings.PULSE_API_URL}/api/items/",
-                headers=headers, params=params,
-                timeout=settings.SOURCE_TIMEOUT_SECONDS,
-            )
-        except (httpx.TimeoutException, httpx.TransportError) as exc:
-            logger.warning("tasks_by_status source failed: %s", type(exc).__name__)
-            return Widget.degraded_(data={b: None for b in _TASK_BUCKETS})
+    for resp in responses:
         if resp.status_code == 403:
             any_forbidden = True
-            continue  # skip orgs the token can't read; count the rest
+            continue
         if resp.status_code >= 400:
             logger.warning("tasks_by_status source HTTP %s", resp.status_code)
             return Widget.degraded_(data={b: None for b in _TASK_BUCKETS})
         try:
             payload = resp.json()
-        except ValueError:
+            rows = payload['counts']
+            if not isinstance(rows, list) or any(
+                not isinstance(row, dict) or not isinstance(row.get('status'), str)
+                or type(row.get('count')) is not int or row['count'] < 0
+                for row in rows
+            ):
+                raise ValueError('invalid grouped counts')
+        except (ValueError, KeyError, TypeError):
             return Widget.degraded_()
-        items = payload.get("results", payload) if isinstance(payload, dict) else payload
         any_ok = True
-        for it in items or []:
-            bucket = _task_bucket(it)
+        for row in rows:
+            bucket = _task_bucket(row)
             if bucket:
-                counts[bucket] += 1
-            total += 1
+                counts[bucket] += row['count']
+            total += row['count']
     if not any_ok:
         return Widget.unauthorized_() if any_forbidden else Widget.degraded_()
     if total == 0:

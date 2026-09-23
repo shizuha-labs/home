@@ -20,6 +20,7 @@ import asyncio
 import base64
 import datetime
 import hmac
+import hashlib
 import json
 import logging
 import os
@@ -78,7 +79,7 @@ from .redis_client import block_read, block_read_multi, read_recent, read_recent
 from .schema import (
     ActivityRecentResponse, HomeActivityEventV1, HomeSummaryV1, HomeActivityV1,
     LiveTraceIngestResponse, LiveTraceIngestV1, LiveTraceTimelineV1,
-    SUMMARY_VERSION, Widget, WidgetStatus,
+    SUMMARY_VERSION, OrgRef, Widget, WidgetStatus,
 )
 
 # PLAT-5298: total budget (seconds) for the /api/home/activity poll, read from
@@ -301,13 +302,91 @@ def _first_org(caller: Caller) -> Optional[int]:
         return None
 
 
+async def _background_summary(caller: Caller, scope_org: Optional[int]) -> HomeSummaryV1:
+    """Read independent snapshots; no downstream can hold up org discovery.
+
+    Each refresh owns its HTTP client after this response has returned. Money
+    is deliberately read through /financial, which checks Books permissions on
+    every request instead of trusting a previously authorized cached snapshot.
+    """
+    principal = hashlib.sha256(caller.bearer.encode()).hexdigest()
+
+    async def snapshot(name, fetch):
+        key = cache_key(name, caller.user_id, scope_org, caller.memberships)
+        async def load():
+            async with httpx.AsyncClient() as client:
+                return await fetch(client)
+        return await widget_cache.get_or_refresh(key + ':principal=' + principal, load)
+
+    async def org_refs(client):
+        refs = await fetch_org_refs(client, caller.bearer, caller.user_id,
+                                    caller.email, caller.memberships)
+        return Widget.ok_([ref.model_dump() for ref in refs])
+
+    sources = {
+        'org_refs': org_refs,
+        'tasks_by_status': lambda client: fetch_tasks_by_status(
+            client, caller.bearer, caller.email, scope_org,
+            org_ids=sorted(caller.memberships)),
+        'agent_activity': lambda client: fetch_agent_activity(client, caller.bearer, scope_org),
+        'alerts': lambda client: fetch_alerts(client, caller.bearer, scope_org),
+        'recent_conversations': lambda client: fetch_recent_conversations(client, caller.bearer, scope_org),
+    }
+    results = await asyncio.gather(*(snapshot(name, fetch) for name, fetch in sources.items()))
+    widgets = {name: result[0] for name, result in zip(sources, results)}
+    org_widget = widgets.pop('org_refs')
+    # Membership is already verified. Labels can hydrate later without making
+    # the org selector or its progress request wait for Admin to respond.
+    orgs = org_widget.data if org_widget.status in {WidgetStatus.ok, WidgetStatus.stale} else None
+    if orgs is None:
+        orgs = [OrgRef(id=oid, role=role, name=f'Organization {oid}')
+                for oid, role in sorted(caller.memberships.items())]
+    finance_org = scope_org if scope_org is not None else _first_org(caller)
+    widgets['financial_snapshot'] = (Widget(status=WidgetStatus.loading)
+                                     if finance_org is not None else Widget.empty_())
+    refreshing = any(result[1] for result in results)
+    return HomeSummaryV1(
+        generated_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        org_id=scope_org, orgs=orgs, widgets=widgets,
+        refreshing=refreshing, retry_after_seconds=1 if refreshing else None,
+    )
+
+
+@app.get('/api/home/financial')
+async def home_financial(
+    caller: Caller = Depends(verify_caller),
+    org_id: Optional[int] = Query(default=None),
+):
+    scope_org = resolve_scope_org(caller, org_id)
+    finance_org = scope_org if scope_org is not None else _first_org(caller)
+    # This read stays independent of summary. Do not cache authorized money
+    # across reads: Books may revoke access while the same JWT remains valid.
+    async with httpx.AsyncClient() as client:
+        try:
+            widget = await asyncio.wait_for(
+                fetch_financial_snapshot(client, caller.bearer, finance_org),
+                settings.SOURCE_TIMEOUT_SECONDS,
+            )
+        except (asyncio.TimeoutError, httpx.TransportError):
+            widget = Widget.degraded_()
+    observed = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    if widget.status in {WidgetStatus.ok, WidgetStatus.empty}:
+        widget = widget.model_copy(update={'as_of': widget.as_of or observed})
+    if isinstance(widget.data, dict):
+        widget = widget.model_copy(update={'data': {**widget.data, 'org_id': finance_org}})
+    return {'generated_at': observed, 'org_id': finance_org, 'widget': widget}
+
+
 @app.get("/api/home/summary", response_model=HomeSummaryV1)
 async def home_summary(
     caller: Caller = Depends(verify_caller),
     org_id: Optional[int] = Query(default=None),
+    background: bool = Query(default=False),
 ) -> HomeSummaryV1:
     # 403 if the caller asked for an org they don't belong to.
     scope_org = resolve_scope_org(caller, org_id)
+    if background:
+        return await _background_summary(caller, scope_org)
 
     # Fan out to downstreams concurrently, forwarding the caller's Bearer. Each
     # client is fail-soft, so a slow/down source degrades only its widget.
@@ -522,12 +601,23 @@ async def home_progress(
     status distribution, and per-team bottleneck dwell — org-scoped via pulse
     (forwarded Bearer; 403 for a non-member org). Feeds the home charts panel."""
     scope_org = resolve_scope_org(caller, org_id)
-    async with httpx.AsyncClient() as client:
-        widget = await fetch_org_progress(
-            client, caller.bearer, org_id=scope_org,
-            hours=hours, buckets=buckets, days=days)
+    key = cache_key(f'progress:{hours}:{buckets}:{days}', caller.user_id,
+                    scope_org, caller.memberships)
+    # A refreshed/restricted bearer must not reuse the previous token's data.
+    key += ':principal=' + hashlib.sha256(caller.bearer.encode()).hexdigest()
+
+    async def fetch():
+        # The background task owns the client lifetime after this GET returns.
+        async with httpx.AsyncClient() as client:
+            return await fetch_org_progress(
+                client, caller.bearer, org_id=scope_org,
+                hours=hours, buckets=buckets, days=days)
+
+    widget, refreshing = await widget_cache.get_or_refresh(
+        key, fetch, fetch_budget=settings.PROGRESS_TIMEOUT_SECONDS)
     return {"generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            "org_id": scope_org, "widget": widget}
+            "org_id": scope_org, "widget": widget, "refreshing": refreshing,
+            "retry_after_seconds": 1 if refreshing else None}
 
 
 @app.get("/api/home/task")

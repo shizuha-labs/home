@@ -3,6 +3,7 @@ import {
   Bell, Plus,
 } from 'lucide-react'
 import { useHomeSummary } from '../../hooks/useHomeSummary'
+import WidgetFreshness from './WidgetFreshness'
 
 /**
  * HIVE-376: the command-center dashboard — a concise, live, access-scoped picture
@@ -112,7 +113,7 @@ export default function CommandCenterDashboard({ orgId, onPeekOrg, summary: summ
                 )}
               </p>
               <p className="truncate text-[10px] font-semibold uppercase tracking-widest text-gray-400 group-hover:text-brand-500 dark:text-gray-500">
-                Agent activity{agents.status === 'stale' ? ' · cached' : ''}
+                Agent activity<WidgetFreshness widget={agents} compact />
               </p>
             </button>
           ) : agents.status === 'empty' ? (
@@ -144,7 +145,7 @@ export default function CommandCenterDashboard({ orgId, onPeekOrg, summary: summ
                 )}
               </p>
               <p className="truncate text-[10px] font-semibold uppercase tracking-widest text-gray-400 group-hover:text-brand-500 dark:text-gray-500">
-                Work queue{tasks.status === 'stale' ? ' · cached' : ''}
+                Work queue<WidgetFreshness widget={tasks} compact />
               </p>
             </button>
           ) : tasks.status === 'empty' || (tasks.status === 'ok' && hasTaskSnapshot) ? (
@@ -174,7 +175,7 @@ export default function CommandCenterDashboard({ orgId, onPeekOrg, summary: summ
                 )}
               </p>
               <p className="truncate text-[10px] font-semibold uppercase tracking-widest text-gray-400 group-hover:text-brand-500 dark:text-gray-500">
-                {finOrg?.name || 'Books'}{money.status === 'stale' ? ' · cached' : ''}
+                {finOrg?.name || 'Books'}<WidgetFreshness widget={money} compact />
               </p>
             </button>
           )}
@@ -188,7 +189,7 @@ export default function CommandCenterDashboard({ orgId, onPeekOrg, summary: summ
                 {alertItems.length ? `${alertItems.length} active` : 'All clear'}
               </p>
               <p className="truncate text-[10px] font-semibold uppercase tracking-widest text-gray-400 group-hover:text-brand-500 dark:text-gray-500">
-                Attention{alerts.status === 'stale' ? ' · cached' : ''}
+                Attention<WidgetFreshness widget={alerts} compact />
               </p>
             </button>
           ) : alerts.status === 'empty' ? (

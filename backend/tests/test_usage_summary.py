@@ -68,10 +68,12 @@ def _stub_core(monkeypatch):
     The handler builds `httpx.AsyncClient()` directly (app.main namespace),
     so patch the module attribute the handler actually resolves.
     """
+    original_client = httpx.AsyncClient
+
     def _install(handler):
         class _Factory:
             def __init__(self, *args, **kwargs):
-                self._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+                self._client = original_client(transport=httpx.MockTransport(handler))
 
             async def __aenter__(self):
                 return self._client
@@ -85,34 +87,35 @@ def _stub_core(monkeypatch):
     return _install
 
 
-def test_usage_summary_core_200_returns_payload():
+def test_usage_summary_core_200_returns_payload(_stub_core):
+    token = _token()
     def handler(request):
-        assert request.headers.get("Authorization") == "Bearer " + _token()
+        assert request.headers.get("Authorization") == "Bearer " + token
         return httpx.Response(200, json={"accounts": [], "usage_watermark": None})
-    _stub_core()(handler)
-    resp = client.get("/api/usage/summary", headers=_auth(_token()))
+    _stub_core(handler)
+    resp = client.get("/api/usage/summary", headers=_auth(token))
     assert resp.status_code == 200, resp.text
     assert resp.headers["content-type"].startswith("application/json")
     assert resp.json() == {"accounts": [], "usage_watermark": None}
 
 
-def test_usage_summary_core_404_surfaces_502_json_never_500():
+def test_usage_summary_core_404_surfaces_502_json_never_500(_stub_core):
     """The live-caught class: a stale core (read plane absent -> 404) must
     surface the typed degraded 502 JSON so the UI shows its degraded state —
     not an unhandled AttributeError 500 text/plain."""
     def handler(request):
         return httpx.Response(404, text="Not Found")
-    _stub_core()(handler)
+    _stub_core(handler)
     resp = client.get("/api/usage/summary", headers=_auth(_token()))
     assert resp.status_code == 502, resp.text
     assert resp.headers["content-type"].startswith("application/json")
     assert resp.json() == {"detail": "usage_summary_unavailable"}
 
 
-def test_usage_summary_core_401_surfaces_401_json():
+def test_usage_summary_core_401_surfaces_401_json(_stub_core):
     def handler(request):
         return httpx.Response(401, json={"detail": "nope"})
-    _stub_core()(handler)
+    _stub_core(handler)
     resp = client.get("/api/usage/summary", headers=_auth(_token()))
     assert resp.status_code == 401, resp.text
     assert resp.headers["content-type"].startswith("application/json")

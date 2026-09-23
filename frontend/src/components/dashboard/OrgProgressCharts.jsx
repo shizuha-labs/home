@@ -173,7 +173,7 @@ function Card({ children, className = '' }) {
 
 export default function OrgProgressCharts({ orgs, orgId, onOrgChange, range, onRangeChange }) {
   const [, hours, buckets] = RANGES.find((r) => r[0] === range) || RANGES[0]
-  const { data, status, loading, refresh } = useOrgProgress({ orgId, hours, buckets, days: 7 })
+  const { data, status, loading, refresh, widget } = useOrgProgress({ orgId, hours, buckets, days: 7 })
 
   const ts = data?.timeseries
   const points = ts?.points || []
@@ -245,16 +245,24 @@ export default function OrgProgressCharts({ orgs, orgId, onOrgChange, range, onR
 
       {status === 'unauthorized' ? (
         <Card><div className="text-sm text-gray-500 dark:text-gray-400">You don't have access to this org's progress.</div></Card>
-      ) : status === 'degraded' ? (
+      ) : status === 'degraded' && !data ? (
         <Card><div className="flex items-center gap-2 text-sm text-amber-600 dark:text-amber-400">
           <AlertTriangle className="w-4 h-4" /> Progress metrics are temporarily unavailable.
         </div></Card>
       ) : status === 'empty' ? (
         <Card><div className="text-sm text-gray-500 dark:text-gray-400">No task activity in this window yet.</div></Card>
-      ) : loading && !data ? (
-        <Card><div className="h-40 animate-pulse rounded-lg bg-gray-100 dark:bg-gray-800" /></Card>
+      ) : !data ? (
+        <Card><div role="status" aria-label="Loading progress metrics" className="h-40 animate-pulse rounded-lg bg-gray-100 dark:bg-gray-800" /></Card>
       ) : (
         <>
+          {(status === 'stale' || loading) && (
+            <div role="status" className="text-xs text-gray-500 dark:text-gray-400">
+              {loading ? 'Updating progress…' : 'Showing the last available progress.'}
+              {widget?.as_of && Number.isFinite(Date.parse(widget.as_of)) && (
+                <> As of <time dateTime={widget.as_of}>{new Date(widget.as_of).toLocaleString()}</time>.</>
+              )}
+            </div>
+          )}
           {/* Health banner */}
           <div className={`flex items-center gap-2 rounded-xl border px-4 py-2.5 ${HEALTH_STYLE[health.level]}`}>
             <HealthIcon className="w-4 h-4 shrink-0" />

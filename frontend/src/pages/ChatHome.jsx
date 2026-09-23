@@ -1,3 +1,4 @@
+import WidgetFreshness from '../components/dashboard/WidgetFreshness'
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
@@ -1036,7 +1037,11 @@ function ChatHomeInner() {
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
               </span>
-              Your organization is working — {liveAgents.length} agents on the job right now.
+              {agentsWidget.status === 'stale' ? (
+                <span>{liveAgents.length} agents in the last snapshot. <WidgetFreshness widget={agentsWidget} /></span>
+              ) : (
+                <>Your organization is working — {liveAgents.length} agents on the job right now.</>
+              )}
             </p>
           )}
 
