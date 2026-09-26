@@ -26,13 +26,27 @@ from typing import Any, Iterable
 
 SECURITY_CI_SOURCE = "security-ci"
 SEV_RANK = {"info": 0, "low": 1, "medium": 2, "moderate": 2, "high": 3, "critical": 4}
+# Terminal ledger/finding dispositions. A terminal item is a durable Security
+# disposition record — producers must never write into it (PLAT-10007).
+TERMINAL_ITEM_STATUSES = frozenset({
+    "done", "closed", "completed", "cancelled", "canceled", "deferred",
+    "rejected", "duplicate", "wont_fix", "failed", "expired",
+})
 PRIORITY = {"info": "low", "low": "low", "medium": "normal", "moderate": "normal", "high": "high", "critical": "urgent"}
+
 # Pulse `Item.SEVERITY_CHOICES` only accepts info/warning/error/critical — our
 # internal scanner vocabulary (low/medium/high) is NOT valid there, so POSTing
 # `severity: "high"` was rejected with HTTP 400 "high is not a valid choice",
 # which broke ALL finding filing (the security-ci gate failure). Map the internal
 # rank name to the Pulse enum on the wire; the granular value survives in labels.
 PULSE_SEVERITY = {"info": "info", "low": "info", "medium": "warning", "moderate": "warning", "high": "error", "critical": "critical"}
+
+
+def _is_terminal_item(row: dict[str, Any]) -> bool:
+    status = str(row.get("status") or "").strip().lower()
+    return row.get("status_category") == "done" or status in TERMINAL_ITEM_STATUSES
+
+
 SECURITY_WIKI_SPACE_KEY = "SEC"
 SECURITY_WIKI_INDEX_PAGE_ID = "9f584f5b-46a6-4274-bbe3-1e3684e8beb6"
 WIKI_PROJECTION_START = "<!-- security-ci:projection:start -->"
@@ -827,6 +841,103 @@ def pulse_find_existing(api_base: str, token: str, source_id: str) -> dict[str, 
     return (pulse_find_existing_all(api_base, token, source_id) or [None])[0]
 
 
+def pulse_resolve_ledger_target(api_base: str, token: str, source_id: str) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+    """PLAT-10007: resolve which ledger generation a scan may upsert.
+
+    Returns ``(target, stale_generations)``. Terminal rows (rejected/
+    completed/closed superseded generations) are NEVER targets: they are
+    Security's durable disposition records, and writing into one is the
+    stale-gen replay (live 2026-09-26: the home weekly scan replayed
+    July-head run-18970 rows onto the rejected PLAT-5745 while the
+    canonical PLAT-6278 sat terminal). Among non-terminal generations the
+    most recent wins, so an active canonical beats an older open carrier.
+    """
+    matched = pulse_find_existing_all(api_base, token, source_id)
+    active: list[dict[str, Any]] = []
+    stale: list[dict[str, Any]] = []
+    for row in matched:
+        if _is_terminal_item(row):
+            stale.append(row)
+        else:
+            active.append(row)
+
+    def _created_key(row: dict[str, Any]) -> str:
+        return str(row.get("created_at") or row.get("id") or "")
+
+    if len(active) > 1:
+        # PLAT-8903 composed (nagi re-anchor): among LIVE generations no silent
+        # election is contract-safe (proven twice) — fail loud exactly as
+        # pulse_upsert_ledger's original ambiguity guard did. Only the
+        # terminal-vs-active slice is resolved by PLAT-10007 partitioning.
+        detail = "; ".join(
+            f"{m.get('item_key') or m.get('id')} (status={m.get('status')}, "
+            f"category={m.get('status_category')}, created={m.get('created_at')})"
+            for m in active
+        )
+        raise RuntimeError(
+            f"security-ci ledger ambiguity: {len(active)} ACTIVE generations "
+            f"share source_id `{source_id}` — no silent election is safe "
+            f"(PLAT-8903). NO posture was written. Reconcile so exactly one "
+            f"active rollup remains, then re-run. Matches: {detail}"
+        )
+    active.sort(key=_created_key, reverse=True)
+    if active and stale:
+        # PLAT-8903 composed (nagi re-anchor): elect the active generation only
+        # when it is NEWER than every terminal row — i.e. the terminal
+        # generations are all superseded by a younger live one (sara's
+        # canonical case). If a terminal generation is YOUNGER than the lone
+        # active row, the active row is a zombie leftover already superseded
+        # by a completed disposition — status alone cannot make it canonical,
+        # so fail loud exactly like the multi-active case (the live 09-26
+        # ambiguity: stale open PLAT-4699 vs wiki-current completed PLAT-6986).
+        newest_terminal = max(_created_key(row) for row in stale)
+        if _created_key(active[0]) < newest_terminal:
+            terminal_detail = "; ".join(
+                f"{row.get('item_key') or row.get('id')} "
+                f"(status={row.get('status')}, created {_created_key(row)})"
+                for row in stale
+            )
+            raise RuntimeError(
+                "security-ci ledger generation conflict for `"
+                f"{source_id}`: active generation "
+                f"{active[0].get('item_key') or active[0].get('id')} "
+                f"(created {_created_key(active[0])}) is OLDER than terminal "
+                f"generation(s) [{terminal_detail}] it cannot supersede — the "
+                "active row is a superseded leftover and no silent election "
+                "is safe (PLAT-8903). NO posture was written. Reconcile: "
+                "cancel/park the stale active generation so exactly one "
+                "rollup remains."
+            )
+    return (active[0] if active else None), stale
+
+
+def _stale_gen_skip_log(args: argparse.Namespace, stale_rows: list[dict[str, Any]], active_row: dict[str, Any] | None) -> None:
+    """PLAT-10007 actor-attribution line: name the producer run and every
+    skipped stale-gen replay target, fail-loud on stderr."""
+    targets = ", ".join(sorted(
+        "{key}({status})".format(
+            key=str(row.get("item_key") or row.get("id") or "?"),
+            status=str(row.get("status") or row.get("status_category") or "unknown"),
+        )
+        for row in stale_rows
+    ))
+    producer = f"{args.repo} run {args.run_url or 'unknown-run'} @ {args.sha or 'unknown-sha'}"
+    if active_row is not None:
+        print(
+            f"SKIP stale-gen ledger carrier(s) (PLAT-10007): producer {producer} "
+            f"will not replay onto {targets}; upserting active generation "
+            f"{active_row.get('item_key') or active_row.get('id')} instead.",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            f"SKIP stale-gen ledger replay (PLAT-10007): producer {producer} "
+            f"matched only terminal/superseded generation(s) {targets}; upsert "
+            "skipped and re-mint refused — Security owns the next generation.",
+            file=sys.stderr,
+        )
+
+
 def pulse_comment(api_base: str, token: str, item_ref: str, content: str) -> None:
     pulse_request("POST", f"{api_base}/comments/", token, {"item": item_ref, "content": content})
 
@@ -876,8 +987,7 @@ def pulse_create_or_update_finding(api_base: str, token: str, finding: Finding, 
         # noise. ItemListSerializer exposes status_category, so this needs no
         # extra fetch. Non-terminal matches get a lightweight "observed again"
         # comment instead of a duplicate task.
-        terminal_statuses = {"done", "closed", "completed", "cancelled", "canceled", "deferred", "rejected", "duplicate", "wont_fix", "failed", "expired"}
-        if existing.get("status_category") == "done" or str(existing.get("status") or "").strip() in terminal_statuses:
+        if _is_terminal_item(existing):
             return f"skipped-terminal:{ref}"
         # HIVE-694 (operator 2026-07-12): do NOT re-comment "observed again" on
         # every CI run. With ~20 open findings per repo and CI firing per push,
@@ -1059,38 +1169,20 @@ def pulse_upsert_ledger(
         rows or "| — | — | — | (no findings at/above filing threshold) | — |",
     ])
     max_sev = max((f.severity for f in findings), key=lambda s: SEV_RANK.get(s, 0), default="low")
-    matches = pulse_find_existing_all(api_base, token, source_id)
-    # PLAT-8903 (one stable rollup per repo): with multiple items sharing the
-    # ledger source_id, NO silent election is contract-safe — created_at
-    # ordering elected the stale generation (PLAT-4699 over PLAT-6986), and
-    # open-status ordering would have done the same here (the stale generation
-    # is the OPEN one; the wiki-current rollup is completed). The signals
-    # conflict, so ambiguity fails LOUD: no write, non-zero exit via
-    # RuntimeError — the workflow retry/notifier owns recovery and Security
-    # reconciles the pair (cancel the stale generation). Only an all-done-
-    # category match set (pure archived history) is unambiguous: keep updating
-    # the most recently created generation.
-    if len(matches) > 1:
-        done_rows = [m for m in matches if (m.get("status_category") or "") == "done"]
-        if len(done_rows) != len(matches):
-            detail = "; ".join(
-                f"{m.get('item_key') or m.get('id')} (status={m.get('status')}, "
-                f"category={m.get('status_category')}, created={m.get('created_at')})"
-                for m in matches
-            )
-            raise RuntimeError(
-                f"security-ci ledger ambiguity for {args.repo}: {len(matches)} live items "
-                f"share source_id `{source_id}` — the one-stable-per-repo-rollup contract "
-                f"(HIVE-694 / PLAT-4772) is violated and no silent election is safe "
-                f"(PLAT-8903). NO posture was written. Reconcile: cancel/park the "
-                f"stale-generation item(s) so exactly one rollup remains, then re-run. "
-                f"Matches: {detail}"
-            )
-        # All-done match set = pure archived history: unambiguous. Keep updating
-        # the MOST RECENTLY created generation (matches is created_at-ascending).
-        existing = matches[-1]
-    else:
-        existing = matches[0] if matches else None
+    # PLAT-10007: resolve the ledger GENERATION before any write. Terminal
+    # carriers are Security's durable dispositions — never write targets.
+    existing, stale_generations = pulse_resolve_ledger_target(api_base, token, source_id)
+    if stale_generations:
+        _stale_gen_skip_log(args, stale_generations, existing)
+    if not existing and stale_generations:
+        # Only terminal/superseded generations exist for this ledger: the scan
+        # is a stale-gen replay (e.g. a July-head rerun). Skip the upsert and
+        # refuse to re-mint — minting a fresh ledger here would fork a second
+        # live per-repo rollup (the PLAT-8903 violation). The skip log above is
+        # the fail-loud notification path; Security owns the next generation.
+        return "ledger-skipped-stale-gen:" + ",".join(sorted(
+            str(row.get("item_key") or row.get("id") or "?") for row in stale_generations
+        ))
     if existing:
         ref = str(existing.get("item_key") or existing.get("id"))
         labels = [l for l in (existing.get("labels") or []) if isinstance(l, str)]
