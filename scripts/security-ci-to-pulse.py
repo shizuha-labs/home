@@ -672,16 +672,39 @@ def wiki_upsert_ledger(
 
 
 def pulse_find_existing_all(api_base: str, token: str, source_id: str) -> list[dict[str, Any]]:
-    """Return EVERY live Pulse item sharing this stable ``source_id`` (PLAT-8903).
+    """Return every live Pulse item POSITIVELY confirmed to share ``source_id``.
 
-    Same server-side constraint as :func:`pulse_find_existing` (index-backed
-    exact match on ``(source, source_id)``, ``include_archived=true`` so a
-    repeated run does not refile a duplicate of an archived row), but returns
-    the full match list instead of silently electing one row. The ledger
-    upsert needs the full set to detect the two-live-rollups ambiguity instead
-    of silently writing one generation (PLAT-8903: the oldest-first election
-    upserted PLAT-4699 — created 2026-07-16 — over the wiki-documented current
-    rollup PLAT-6986 and wrote a fix-branch's stale 12-row posture into it).
+    PLAT-2688: query server-side with the index-backed exact
+    ``(source, source_id)`` match and never AND a fuzzy ``search=`` term with
+    it (on builds where ``search=`` does not index ``source_id`` the AND-term
+    filtered out the genuine item and every scan minted a duplicate — live
+    2026-08-29: six open cortex ledgers sharing one source_id).
+
+    PLAT-5442 (fail-closed confirmation; supersedes trust-the-filter):
+    ItemListSerializer omits ``source_id`` from rows, so every candidate is
+    positively confirmed with a detail fetch (``GET /items/<id>/`` — which
+    DOES expose ``source_id``) before it may be returned for a write:
+      - candidates exist but none confirms -> FAIL CLOSED (RuntimeError):
+        an unconfirmed PATCH could overwrite an unrelated task and a create
+        would mint an unreconcilable duplicate; neither may happen silently.
+      - zero rows on a ``:ledger`` key -> bounded probe for the ledger's
+        distinctive title token; a positively-confirmed ledger existing
+        anyway proves the exact filter is silently ignored/over-constrained
+        -> FAIL CLOSED before a second ledger is minted.
+      - zero rows otherwise -> authoritative absence (the exact filter is
+        proven honored live).
+    The legacy ``search=`` fallback is deliberately ABSENT (PLAT-5442 AC2):
+    dedupe must not depend on a fuzzy search path at all — a build that
+    ignored ``source_id=`` would serve arbitrary unrelated rows here. The
+    exact filter is proven honored on the live build (migration 0005,
+    index-backed), and the ``:ledger`` absence probe catches a filter that
+    silently breaks later.
+
+    PLAT-8903 (ambiguity, unchanged): the FULL confirmed match list is
+    returned (created_at-ascending) so :func:`pulse_upsert_ledger` can fail
+    loud on multi-generation ambiguity instead of silently electing a
+    generation; the per-finding path (:func:`pulse_find_existing`) keeps the
+    historical first-row election over the confirmed set.
     """
     q = urllib.parse.urlencode({
         "source": SECURITY_CI_SOURCE,
@@ -692,57 +715,90 @@ def pulse_find_existing_all(api_base: str, token: str, source_id: str) -> list[d
     })
     data = pulse_request("GET", f"{api_base}/items/?{q}", token)
     rows = data.get("results") if isinstance(data, dict) else data
-    matched = []
-    for row in rows or []:
-        # When the payload exposes source_id, require an exact match; when it does
-        # not (the list serializer), the server-side source_id constraint already
-        # guarantees the row is this identity — trust it.
-        rid = row.get("source_id")
-        if rid in (None, source_id) and (row.get("item_key") or row.get("id")):
-            matched.append(row)
-    if matched:
-        matched.sort(key=lambda row: str(row.get("created_at") or row.get("id") or ""))
-        return matched
-    # Fallback for Pulse builds that ignore the source_id query param.
-    q2 = urllib.parse.urlencode({
-        "source": SECURITY_CI_SOURCE,
-        "search": source_id,
-        "include_archived": "true",
-    })
-    data = pulse_request("GET", f"{api_base}/items/?{q2}", token)
-    rows = data.get("results") if isinstance(data, dict) else data
-    fallback = []
-    for row in rows or []:
-        rid = row.get("source_id")
-        if rid in (None, source_id) and (row.get("item_key") or row.get("id")):
-            fallback.append(row)
-    fallback.sort(key=lambda row: str(row.get("created_at") or row.get("id") or ""))
-    return fallback
+    candidates = [r for r in (rows or []) if r.get("item_key") or r.get("id")]
+
+    confirmed: list[dict[str, Any]] = []
+    for row in candidates:
+        rid = str(row.get("id") or row.get("item_key"))
+        rid_val = row.get("source_id")
+        if rid_val is not None:
+            # The list payload exposes source_id: confirm from the row itself.
+            if rid_val == source_id:
+                confirmed.append(row)
+            else:
+                print(
+                    f"WARN: list candidate {rid} carries foreign source_id "
+                    f"{rid_val!r}; ignored.",
+                    file=sys.stderr,
+                )
+            continue
+        try:
+            detail = pulse_request("GET", f"{api_base}/items/{rid}/", token)
+        except Exception as exc:
+            print(
+                f"WARN: could not positively confirm source_id={source_id!r} for "
+                f"{rid}: {exc}",
+                file=sys.stderr,
+            )
+            continue
+        if isinstance(detail, dict) and detail.get("source_id") == source_id:
+            confirmed.append(detail if (detail.get("item_key") or detail.get("id")) else row)
+        else:
+            print(
+                f"WARN: list candidate {rid} did NOT positively confirm "
+                f"source_id={source_id!r} on detail fetch; ignored.",
+                file=sys.stderr,
+            )
+
+    if not confirmed and candidates:
+        raise RuntimeError(
+            f"PLAT-5442 fail-closed: {len(candidates)} candidate row(s) for "
+            f"source_id={source_id!r} but none positively confirmed the "
+            f"source_id; refusing to create or PATCH (an unconfirmed PATCH "
+            f"could overwrite an unrelated task and a create would mint an "
+            f"unreconcilable duplicate)."
+        )
+    if confirmed:
+        confirmed.sort(key=lambda r: str(r.get("created_at") or r.get("id") or ""))
+        return confirmed
+
+    # Zero candidates. For the rolling ledger, absence must be PROVEN — a
+    # silently-ignored source_id= filter must not mint a second ledger.
+    if source_id.endswith(":ledger"):
+        parts = source_id.split(":")
+        repo = parts[1] if len(parts) >= 3 else source_id
+        slug = str(repo).split("/")[-1]
+        probe_q = urllib.parse.urlencode({
+            "source": SECURITY_CI_SOURCE,
+            "search": f"Findings ledger — {slug}",
+            "include_archived": "true",
+            "limit": "20",
+        })
+        probe = pulse_request("GET", f"{api_base}/items/?{probe_q}", token)
+        for row in (probe.get("results") if isinstance(probe, dict) else probe) or []:
+            rid = row.get("id") or row.get("item_key")
+            if not rid:
+                continue
+            detail = pulse_request("GET", f"{api_base}/items/{rid}/", token)
+            if isinstance(detail, dict) and detail.get("source_id") == source_id:
+                raise RuntimeError(
+                    f"PLAT-5442 fail-closed: a ledger for {repo!r} EXISTS "
+                    f"({detail.get('item_key') or rid}) but the exact source_id= "
+                    f"query returned no rows — the filter is silently ignored or "
+                    f"over-constrained; refusing to mint a second ledger."
+                )
+    return []
 
 
 def pulse_find_existing(api_base: str, token: str, source_id: str) -> dict[str, Any] | None:
     """Return the existing Pulse item for this finding's stable ``source_id``, if any.
 
-    PLAT-2688: constrain the query server-side with ``source_id=`` (index-backed
-    exact match on ``(source, source_id)``). ItemListSerializer does not expose
-    ``source_id``/``description``, so the match must not depend on per-row fields.
-
-    Do NOT AND ``search=`` with ``source_id=``. Ledger titles are
-    ``[security-ci] Findings ledger — <repo>`` and the description does not
-    contain the token ``security-ci:<repo>:ledger``. AND-combining those filters
-    returned zero rows on every weekly scan and minted a new ledger (live
-    2026-08-29: six open cortex ledgers sharing one source_id). Look up by
-    source_id first; fall back to search only when that filter returns nothing
-    (old Pulse builds without the PLAT-2688 query param).
-
-    PLAT-8903 root cause (documented): this single-row election sorted matches
-    by ``created_at`` ASCENDING and returned the OLDEST row — for the drive
-    ledger that elected the stale generation PLAT-4699 (2026-07-16) over the
-    wiki-documented current rollup PLAT-6986, and a fix-branch scan then wrote
-    its stale posture into it. The ledger path no longer uses this election:
-    :func:`pulse_upsert_ledger` consumes :func:`pulse_find_existing_all` and
-    fails loud on multi-generation ambiguity. The per-finding path keeps the
-    historical first-row behavior (unchanged scope).
+    First row of the positively-confirmed match set
+    (:func:`pulse_find_existing_all`, created_at-ascending) — the historical
+    per-finding election, now over confirmed rows only (PLAT-5442). The
+    ledger path does NOT use this election: :func:`pulse_upsert_ledger`
+    consumes the full match list and fails loud on multi-generation
+    ambiguity (PLAT-8903).
     """
     return (pulse_find_existing_all(api_base, token, source_id) or [None])[0]
 
