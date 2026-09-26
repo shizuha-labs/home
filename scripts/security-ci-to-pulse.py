@@ -775,11 +775,27 @@ def pulse_find_existing_all(api_base: str, token: str, source_id: str) -> list[d
             "limit": "20",
         })
         probe = pulse_request("GET", f"{api_base}/items/?{probe_q}", token)
+        unfetchable = 0
         for row in (probe.get("results") if isinstance(probe, dict) else probe) or []:
             rid = row.get("id") or row.get("item_key")
             if not rid:
                 continue
-            detail = pulse_request("GET", f"{api_base}/items/{rid}/", token)
+            # PLAT-5442 tidy (line-level review cmt 875272): the probe loop's
+            # detail fetch was the one unguarded pulse_request. Guard it like
+            # the confirmation loop — but a probe row that cannot be fetched
+            # proves nothing EITHER WAY, so skipping it must not silently
+            # upgrade absence to proven: unfetchable rows leave absence
+            # unproven and the mint stays fail-closed below.
+            try:
+                detail = pulse_request("GET", f"{api_base}/items/{rid}/", token)
+            except Exception as exc:
+                unfetchable += 1
+                print(
+                    f"WARN: ledger-absence probe could not fetch detail for "
+                    f"{rid}; the row proves nothing either way: {exc}",
+                    file=sys.stderr,
+                )
+                continue
             if isinstance(detail, dict) and detail.get("source_id") == source_id:
                 raise RuntimeError(
                     f"PLAT-5442 fail-closed: a ledger for {repo!r} EXISTS "
@@ -787,6 +803,14 @@ def pulse_find_existing_all(api_base: str, token: str, source_id: str) -> list[d
                     f"query returned no rows — the filter is silently ignored or "
                     f"over-constrained; refusing to mint a second ledger."
                 )
+        if unfetchable:
+            raise RuntimeError(
+                f"PLAT-5442 fail-closed: ledger-absence probe for {repo!r} could "
+                f"not fetch {unfetchable} title-probe row(s) — absence of the "
+                f"ledger is UNPROVEN; refusing to mint a second ledger (an "
+                f"unproven mint is exactly the duplicate this probe exists to "
+                f"prevent)."
+            )
     return []
 
 
