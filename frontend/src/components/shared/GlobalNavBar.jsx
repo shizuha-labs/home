@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Cpu, ListChecks, Shield, Search, Menu, X, LogOut } from 'lucide-react'
+import { LayoutDashboard, Cpu, ListChecks, Shield, Package, Search, Menu, X, LogOut } from 'lucide-react'
 import ThemeToggle from '../ThemeToggle'
 import HaneChip from './HaneChip'
 import { AppSwitcher } from '@shizuha/ui'
@@ -13,6 +13,7 @@ const NAV_ITEMS = [
   // landing (operator 2026-07-10) — deep-link straight to the fleet list.
   { label: 'Agents', href: '/hive/agents', icon: Cpu, surface: 'hive', match: '/hive' },
   { label: 'Work', href: '/pulse', icon: ListChecks, surface: 'pulse' },
+  { label: 'Apps', href: '/apps/', icon: Package, surface: 'apps', match: '/apps' },
   { label: 'Admin', href: '/admin', icon: Shield, surface: 'admin' },
 ]
 
