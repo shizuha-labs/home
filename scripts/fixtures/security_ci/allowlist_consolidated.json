@@ -1,0 +1,15 @@
+{
+ "_comment": "PLAT-10007 sync test fixture \u2014 consolidated dependency suppression (PLAT-5289) extracted from the pulse org allowlist so the sync test is host-repo-independent.",
+ "allowlist": [
+  {
+   "tool": "deps",
+   "rule": "pkg:shizuha-labs/shizuha-tasks:PyPI:python-multipart",
+   "path_contains": "deps/PyPI/python-multipart",
+   "source_id": "security-ci:2f8620abde3158ee5d453ee5",
+   "owner": "security@shizuha.com",
+   "reason": "Accepted false positive (adjudicated PLAT-3069, 2026-07-04, security-lead; recurs as PLAT-4551). python-multipart is NOT pinned in any manifest - it is a transitive dependency of `mcp` only; mcp-server/requirements.txt and pyproject.toml declare no python-multipart line, and dependency resolution installs a patched release (0.0.32+, above every listed fixed floor 0.0.18-0.0.31). No direct parser import/use in-repo. Re-remediate only if security-ci reports a concrete manifest pin below the fixed floor.",
+   "disposition": "accepted-false-positive",
+   "expires": "2099-12-31"
+  }
+ ]
+}
