@@ -25,6 +25,19 @@ function attribution() {
   return document.referrer ? 'other' : 'direct'
 }
 
+// VEN-264: aggregate-only first-party count — no token, no identifiers, no
+// third-party script. Fires even while the public intake gate is off.
+async function recordAggregateView(event, source, referrer) {
+  try {
+    await fetch('/api/books/compliance/view', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event, source, referrer }),
+      keepalive: true,
+    })
+  } catch { /* telemetry must never break the page */ }
+}
+
 async function api(path, body) {
   const response = await fetch(`/api/books/compliance/${path}`, {
     method: 'POST',
@@ -105,14 +118,33 @@ function IntakePanel({ funnel }) {
   const [form, setForm] = useState({ name: '', email: '', company: '', phone: '', use_cases: [], org_size: '1-10', consent: false })
   const [state, setState] = useState('idle')
   const [error, setError] = useState('')
+  const [startSignaled, setStartSignaled] = useState(false)
   const enabled = funnel.gate.enabled
 
-  const toggleUseCase = (value) => setForm((current) => ({
+  // VEN-264: intake starts — one count per funnel session, on the first
+  // real form interaction (never on page load).
+  const signalIntakeStart = () => {
+    if (startSignaled) return
+    setStartSignaled(true)
+    const source = attribution()
+    if (funnel.token) {
+      api('beacon', { token: funnel.token, event: 'intake_start', source, referrer: source }).catch(() => {})
+    } else {
+      recordAggregateView('intake_start', source, source)
+    }
+  }
+
+  const updateForm = (patch) => {
+    signalIntakeStart()
+    setForm((current) => ({ ...current, ...patch }))
+  }
+
+  const toggleUseCase = (value) => { signalIntakeStart(); setForm((current) => ({
     ...current,
     use_cases: current.use_cases.includes(value)
       ? current.use_cases.filter((item) => item !== value)
       : current.use_cases.length < 3 ? [...current.use_cases, value] : current.use_cases,
-  }))
+  })) }
 
   const submit = async (event) => {
     event.preventDefault()
@@ -172,7 +204,7 @@ function IntakePanel({ funnel }) {
         {[['name','Full name','text',100],['email','Email address','email',254],['company','Company','text',200],['phone','Phone · optional','tel',20]].map(([name,label,type,maxLength]) => (
           <label key={name} className={name === 'company' ? 'sm:col-span-2' : ''}>
             <span className="text-sm font-medium text-slate-200">{label}</span>
-            <input name={name} type={type} required={name !== 'phone'} maxLength={maxLength} value={form[name]} onChange={(e) => setForm({...form,[name]:e.target.value})} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/70 px-4 py-3 text-white placeholder:text-slate-600 focus:border-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-400/25" />
+            <input name={name} type={type} required={name !== 'phone'} maxLength={maxLength} value={form[name]} onChange={(e) => updateForm({[name]:e.target.value})} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/70 px-4 py-3 text-white placeholder:text-slate-600 focus:border-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-400/25" />
           </label>
         ))}
       </div>
@@ -182,12 +214,12 @@ function IntakePanel({ funnel }) {
       </fieldset>
       <label className="mt-6 block">
         <span className="text-sm font-medium text-slate-200">Organization size</span>
-        <select value={form.org_size} onChange={(e) => setForm({...form,org_size:e.target.value})} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/70 px-4 py-3 text-white focus:border-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-400/25">
+        <select value={form.org_size} onChange={(e) => updateForm({org_size:e.target.value})} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/70 px-4 py-3 text-white focus:border-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-400/25">
           {['1-10','11-50','51-200','201-1000','1000+'].map((value) => <option key={value}>{value}</option>)}
         </select>
       </label>
       <label className="mt-6 flex items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm leading-6 text-slate-300">
-        <input type="checkbox" required checked={form.consent} onChange={(e) => setForm({...form,consent:e.target.checked})} className="mt-1 h-4 w-4 accent-cyan-400" />
+        <input type="checkbox" required checked={form.consent} onChange={(e) => updateForm({consent:e.target.checked})} className="mt-1 h-4 w-4 accent-cyan-400" />
         <span>By ticking this box, you ask Shizuha to send a confirmation message about Books Compliance Cockpit access. Contact is permitted only after you confirm the channel. You may withdraw or request access/erasure via privacy@shizuha.com. Notice {NOTICE_VERSION}. <a className="text-cyan-300 underline" href="/privacy">Privacy policy</a>.</span>
       </label>
       {error && <p role="alert" className="mt-4 rounded-xl border border-rose-400/20 bg-rose-400/10 p-3 text-sm text-rose-200">{error}</p>}
@@ -198,6 +230,10 @@ function IntakePanel({ funnel }) {
 
 export default function BooksCompliancePage() {
   const funnel = useComplianceFunnel('landing_view')
+  useEffect(() => {
+    const source = attribution()
+    recordAggregateView('landing_view', source, source)
+  }, [])
   useEffect(() => setPageMeta({ title: 'Books Compliance Cockpit — GST readiness workflow', description: 'India-hosted Books compliance readiness for GST tracking, reconciliation, evidence and reports. Request-access validation only; no payment or tax advice.' }), [])
   const proof = useMemo(() => [
     [FileCheck2, 'Built on Books data', 'Readiness signals from the records already inside your governed Books workspace—no public uploads.'],

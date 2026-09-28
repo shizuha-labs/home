@@ -38,7 +38,16 @@ GENERIC_RIGHTS = "If a lead exists for this contact, your request will be proces
 ALLOWED_ATTRIBUTION = {"direct", "google", "linkedin", "twitter", "facebook", "instagram", "other"}
 ALLOWED_USE_CASES = {"gst_tracking", "pan_verify", "report_auto", "invoice_matching", "other"}
 ALLOWED_ORG_SIZES = {"1-10", "11-50", "51-200", "201-1000", "1000+", "other"}
-ALLOWED_VIEW_EVENTS = {"landing_view": "landing_seen", "pricing_view": "pricing_seen"}
+ALLOWED_VIEW_EVENTS = {"landing_view": "landing_seen", "pricing_view": "pricing_seen", "intake_start": "intake_start_seen"}
+# VEN-264: aggregate-only events that accrue without a funnel token — page
+# views work with the public intake gate off; guide_call_start is the sink the
+# S3 voice-first-intake scout wires into. Strictly first-party counts only.
+AGGREGATE_VIEW_COUNTS = {
+    "landing_view": "landing_page_view_count",
+    "pricing_view": "pricing_page_view_count",
+    "intake_start": "intake_start_count",
+    "guide_call_start": "guide_call_start_count",
+}
 PHONE_RE = re.compile(r"^[+0-9-]{7,20}$")
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
@@ -121,7 +130,7 @@ class TokenRequest(StrictModel):
 
 class BeaconRequest(StrictModel):
     token: str = Field(min_length=20, max_length=128)
-    event: Literal["landing_view", "pricing_view"]
+    event: Literal["landing_view", "pricing_view", "intake_start"]
     source: str = "other"
     referrer: str = "other"
 
@@ -323,6 +332,75 @@ def record_beacon(payload: BeaconRequest) -> dict[str, str]:
     return {"status": "accepted" if row else "terminal"}
 
 
+class AggregateViewRequest(StrictModel):
+    # VEN-264: token-less, identifier-free aggregate view event. Only the
+    # bounded enums are accepted; unknown values fail validation before any
+    # persistence (drop-before-persist, same contract as the token beacon).
+    event: Literal["landing_view", "pricing_view", "intake_start", "guide_call_start"]
+    source: Literal[*ALLOWED_ATTRIBUTION] = "direct"  # type: ignore[misc]
+    referrer: Literal[*ALLOWED_ATTRIBUTION] = "other"  # type: ignore[misc]
+
+
+def record_aggregate_view(payload: AggregateViewRequest, request: Request) -> dict[str, str]:
+    """VEN-264: accrue an aggregate-only funnel count with no token and no
+    identifiers. Works with the public intake gate off (that is the point —
+    landing views must produce data before Gate 3). Same abuse controls as
+    the token beacon; nothing per-visitor is stored."""
+    column = AGGREGATE_VIEW_COUNTS[payload.event]
+    with db() as conn:
+        rate_limit(conn, request, "aggregate_view", 240)
+        conn.execute(
+            f"""INSERT INTO books_compliance_funnel_aggregate
+                (aggregate_date,source,referrer,{column})
+                VALUES (current_date,%s,%s,1)
+                ON CONFLICT (aggregate_date,source,referrer) DO UPDATE SET
+                  {column}=books_compliance_funnel_aggregate.{column}+1""",
+            (payload.source, payload.referrer),
+        )
+    return {"status": "accepted"}
+
+
+def funnel_weekly() -> dict[str, Any]:
+    """VEN-264: identifier-free weekly rollup — this week vs last week
+    counts plus the trend deltas. Aggregate columns only."""
+    with db() as conn:
+        rows = conn.execute(
+            """SELECT (aggregate_date >= date_trunc('week', current_date)) AS in_current_week,
+                      coalesce(sum(landing_page_view_count),0) AS landing_page_views,
+                      coalesce(sum(pricing_page_view_count),0) AS pricing_page_views,
+                      coalesce(sum(landing_count),0) AS engaged_landings,
+                      coalesce(sum(pricing_count),0) AS engaged_pricings,
+                      coalesce(sum(intake_start_count),0) AS intake_starts,
+                      coalesce(sum(submit_count),0) AS intake_submits,
+                      coalesce(sum(guide_call_start_count),0) AS guide_call_starts
+               FROM books_compliance_funnel_aggregate
+               WHERE aggregate_date >= date_trunc('week', current_date) - interval '1 week'
+               GROUP BY 1"""
+        ).fetchall()
+    current = next((r for r in rows if r["in_current_week"]), None)
+    previous = next((r for r in rows if not r["in_current_week"]), None)
+
+    def shape(row: Any) -> dict[str, int]:
+        row = row or {}
+        return {
+            "landing_page_views": int(row.get("landing_page_views") or 0),
+            "pricing_page_views": int(row.get("pricing_page_views") or 0),
+            "engaged_landings": int(row.get("engaged_landings") or 0),
+            "engaged_pricings": int(row.get("engaged_pricings") or 0),
+            "intake_starts": int(row.get("intake_starts") or 0),
+            "intake_submits": int(row.get("intake_submits") or 0),
+            "guide_call_starts": int(row.get("guide_call_starts") or 0),
+        }
+
+    now, last = shape(current), shape(previous)
+    return {
+        "week_start": _now().date().isoformat(),
+        "this_week": now,
+        "last_week": last,
+        "trend": {key: now[key] - last[key] for key in now},
+    }
+
+
 def _finalize_locked(conn: psycopg.Connection, digest: bytes, cause: Literal["submit", "expiry"], *, crash: str | None = None) -> dict[str, Any] | None:
     row = conn.execute(
         "SELECT * FROM books_compliance_funnel_token WHERE token_digest=%s FOR UPDATE",
@@ -336,14 +414,16 @@ def _finalize_locked(conn: psycopg.Connection, digest: bytes, cause: Literal["su
     expiry = 1 if cause == "expiry" else 0
     conn.execute(
         """INSERT INTO books_compliance_funnel_aggregate
-           (aggregate_date,source,referrer,landing_count,pricing_count,submit_count,expiry_count)
-           VALUES (current_date,%s,%s,%s,%s,%s,%s)
+           (aggregate_date,source,referrer,landing_count,pricing_count,submit_count,expiry_count,intake_start_count)
+           VALUES (current_date,%s,%s,%s,%s,%s,%s,%s)
            ON CONFLICT (aggregate_date,source,referrer) DO UPDATE SET
              landing_count=books_compliance_funnel_aggregate.landing_count+EXCLUDED.landing_count,
              pricing_count=books_compliance_funnel_aggregate.pricing_count+EXCLUDED.pricing_count,
              submit_count=books_compliance_funnel_aggregate.submit_count+EXCLUDED.submit_count,
-             expiry_count=books_compliance_funnel_aggregate.expiry_count+EXCLUDED.expiry_count""",
-        (row["source"], row["referrer"], int(row["landing_seen"]), int(row["pricing_seen"]), submit, expiry),
+             expiry_count=books_compliance_funnel_aggregate.expiry_count+EXCLUDED.expiry_count,
+             intake_start_count=books_compliance_funnel_aggregate.intake_start_count+EXCLUDED.intake_start_count""",
+        (row["source"], row["referrer"], int(row["landing_seen"]), int(row["pricing_seen"]), submit, expiry,
+         int(row["intake_start_seen"] or False)),
     )
     if crash == "before_delete":
         raise RuntimeError("VEN-194 crash-window fixture before delete")

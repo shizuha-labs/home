@@ -314,3 +314,76 @@ def test_intake_schema_has_no_role_token_entitlement_or_payment_authority():
             ).fetchall()
         }
     assert not columns.intersection({"role", "token", "entitlement", "payment", "plan", "price", "subscription"})
+
+
+# --- VEN-264: aggregate-only funnel telemetry -------------------------------
+
+def test_aggregate_view_accrues_without_token_or_intake_gate(monkeypatch):
+    # The public intake gate is OFF in production: landing views must still
+    # produce data (VEN-264's whole point). No token, no per-visitor state.
+    monkeypatch.setenv("BOOKS_COMPLIANCE_PUBLIC_INTAKE_ENABLED", "false")
+    client = TestClient(app)
+    for _ in range(2):
+        response = client.post(
+            "/api/books/compliance/view",
+            json={"event": "landing_view", "source": "google", "referrer": "google"},
+            headers={"Origin": "http://testserver"},
+        )
+        assert response.status_code == 202
+        assert response.json() == {"status": "accepted"}
+    response = client.post(
+        "/api/books/compliance/view",
+        json={"event": "guide_call_start"},
+        headers={"Origin": "http://testserver"},
+    )
+    assert response.status_code == 202
+    with db() as conn:
+        row = conn.execute(
+            "SELECT landing_page_view_count,guide_call_start_count,source,referrer FROM books_compliance_funnel_aggregate"
+        ).fetchall()
+    landing = next(r for r in row if r["source"] == "google")
+    guide = next(r for r in row if r["source"] == "direct")
+    assert landing["landing_page_view_count"] == 2 and landing["referrer"] == "google"
+    assert guide["guide_call_start_count"] == 1
+
+
+def test_aggregate_view_rejects_unknown_event_before_persistence():
+    # Drop-before-persist: unknown event names never reach the store (v23 §6.3).
+    client = TestClient(app)
+    response = client.post(
+        "/api/books/compliance/view",
+        json={"event": "raw_campaign_ping"},
+        headers={"Origin": "http://testserver"},
+    )
+    assert response.status_code == 422
+    with db() as conn:
+        assert conn.execute("SELECT count(*) n FROM books_compliance_funnel_aggregate").fetchone()["n"] == 0
+
+
+def test_funnel_weekly_returns_identifier_free_week_totals_and_trend():
+    client = TestClient(app)
+    for _ in range(3):
+        client.post("/api/books/compliance/view", json={"event": "landing_view"}, headers={"Origin": "http://testserver"})
+    client.post("/api/books/compliance/view", json={"event": "intake_start"}, headers={"Origin": "http://testserver"})
+    report = client.get("/api/books/compliance/funnel-weekly").json()
+    assert set(report) == {"week_start", "this_week", "last_week", "trend"}
+    assert report["this_week"]["landing_page_views"] == 3
+    assert report["this_week"]["intake_starts"] == 1
+    assert report["last_week"] == {key: 0 for key in report["this_week"]}
+    assert report["trend"]["landing_page_views"] == 3
+    body = __import__("json").dumps(report)
+    assert "@" not in body and "pan" not in body.lower()
+
+
+def test_token_funnel_intake_start_beacon_finalizes_into_aggregate():
+    client = TestClient(app)
+    token = client.post("/api/books/compliance/token", json={}, headers={"Origin": "http://testserver"}).json()["token"]
+    assert client.post("/api/books/compliance/beacon", json={"token": token, "event": "landing_view"}, headers={"Origin": "http://testserver"}).status_code == 202
+    assert client.post("/api/books/compliance/beacon", json={"token": token, "event": "intake_start"}, headers={"Origin": "http://testserver"}).status_code == 202
+    # Force expiry finalization: the aggregate must carry the intake start.
+    with db() as conn:
+        conn.execute("UPDATE books_compliance_funnel_token SET expires_at=now()-interval '1 minute'")
+    sweep_expired()
+    with db() as conn:
+        row = conn.execute("SELECT landing_count,intake_start_count FROM books_compliance_funnel_aggregate").fetchone()
+    assert row["landing_count"] == 1 and row["intake_start_count"] == 1

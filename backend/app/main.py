@@ -47,6 +47,7 @@ from .clients import (
 from .audit_leads import AuditLeadRequest, AuditLeadResponse, persist_audit_lead
 from .books_compliance import (
     CATALOG,
+    AggregateViewRequest,
     BeaconRequest,
     ChallengeConsumeRequest,
     IntakeRequest,
@@ -57,8 +58,10 @@ from .books_compliance import (
     consume_recovery,
     create_rights_request,
     database_url,
+    funnel_weekly,
     intake_enabled,
     issue_token,
+    record_aggregate_view,
     record_beacon,
     request_recovery,
     require_json,
@@ -190,6 +193,21 @@ def books_compliance_token(payload: TokenRequest, request: Request):
 def books_compliance_beacon(payload: BeaconRequest, request: Request):
     require_json(request, 4096)
     return record_beacon(payload)
+
+
+# VEN-264: aggregate-only, identifier-free first-party funnel counts. Works
+# with the public intake gate off (landing views must produce data before
+# Gate 3); guide_call_start is the sink the S3 voice-first-intake scout wires
+# into. No tokens, no per-visitor state, bounded enums only.
+@app.post("/api/books/compliance/view", status_code=202)
+def books_compliance_aggregate_view(payload: AggregateViewRequest, request: Request):
+    require_json(request, 1024)
+    return record_aggregate_view(payload, request)
+
+
+@app.get("/api/books/compliance/funnel-weekly")
+async def books_compliance_funnel_weekly():
+    return funnel_weekly()
 
 
 @app.post("/api/books/compliance/intake", status_code=202)

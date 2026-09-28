@@ -21,11 +21,38 @@ const features = [
   ['Gap alerts', false, true],
 ]
 
+function attribution() {
+  const params = new URLSearchParams(window.location.search)
+  const campaign = params.get('utm_source')?.toLowerCase()
+  const allowed = new Set(['google', 'linkedin', 'twitter', 'facebook', 'instagram'])
+  if (allowed.has(campaign)) return campaign
+  try {
+    const hostname = new URL(document.referrer).hostname.toLowerCase()
+    for (const value of allowed) if (hostname === value + '.com' || hostname.endsWith('.' + value + '.com')) return value
+  } catch { /* raw referrer never leaves this browser */ }
+  return document.referrer ? 'other' : 'direct'
+}
+
+// VEN-264: aggregate-only first-party count — no token, no identifiers, no
+// third-party script. Fires even while the public intake gate is off.
+async function recordAggregateView(event, source, referrer) {
+  try {
+    await fetch('/api/books/compliance/view', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event, source, referrer }),
+      keepalive: true,
+    })
+  } catch { /* telemetry must never break the page */ }
+}
+
 export default function BooksCompliancePricingPage() {
   const [catalog, setCatalog] = useState(FALLBACK)
   useEffect(() => {
     setPageMeta({ title: 'Books Compliance Cockpit Pricing — validation only', description: '₹0 demo and ₹499/month validation hypothesis for Books Compliance readiness. Subject to change; request-access only, no payment.' })
     fetch('/api/books/compliance/catalog', { cache: 'no-store' }).then((r) => r.ok ? r.json() : null).then((data) => data && setCatalog(data)).catch(() => {})
+    const source = attribution()
+    recordAggregateView('pricing_view', source, source)
   }, [])
 
   return (
