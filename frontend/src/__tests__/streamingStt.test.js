@@ -436,75 +436,93 @@ describe('PLAT-9385 silence endpointing fallback', () => {
   const open = async (onFinal, onPartial) => {
     startStreamingStt({ token: 'token', onFinal, onPartial })
     for (let i = 0; i < 8; i += 1) await Promise.resolve()
-    const ws = sockets[0]
+    const ws = sockets[sockets.length - 1]
     expect(ws).toBeTruthy()
     ws.onmessage({ data: JSON.stringify({ type: 'transcript.created' }) })
     return ws
   }
 
-  it('commits the turn from the partial when the server speech_final never fires', async () => {
+  const LOUD = () => new Float32Array(2048).fill(0.2)
+  const QUIET = () => new Float32Array(2048).fill(0.0001)
+  const drive = (ws, buf) => processor.onaudioprocess({ inputBuffer: { getChannelData: () => buf } })
+  const partial = (ws, text, speechFinal = false) => ws.onmessage({
+    data: JSON.stringify({ type: 'transcript.partial', text, speech_final: speechFinal, is_final: speechFinal }),
+  })
+
+  it('commits the turn after STT_SILENCE_COMMIT_MS of real audio quiet when the server speech_final never fires', async () => {
     const onFinal = vi.fn()
     const ws = await open(onFinal)
+    // Move the fake clock off t=0: lastLoudAt=0 is the module's "never loud"
+    // sentinel, so the audio path needs a nonzero clock to arm from.
+    await vi.advanceTimersByTimeAsync(1000)
     // Live signature: text partials arrive, speech_final starves (1 per 10min).
-    ws.onmessage({
-      data: JSON.stringify({
-        type: 'transcript.partial',
-        text: 'Hello, this is a voice call quality test.',
-        speech_final: false,
-        is_final: false,
-      }),
-    })
+    partial(ws, 'Hello, this is a voice call quality test.')
     expect(onFinal).not.toHaveBeenCalled()
-    // Watchdog arms at STT_SILENCE_COMMIT_MS, then the hangover commit runs.
+    // The AUDIO clock arms the fallback: one loud sample, then quiet buffers.
+    drive(ws, LOUD())
+    drive(ws, QUIET())
     await vi.advanceTimersByTimeAsync(STT_SILENCE_COMMIT_MS - 200)
     expect(onFinal).not.toHaveBeenCalled()
-    await vi.advanceTimersByTimeAsync(STT_COMPLETE_HANGOVER_MS + STT_COMMIT_QUIET_MS + 400)
+    await vi.advanceTimersByTimeAsync(400)
+    // Direct commit at lastLoudAt + STT_SILENCE_COMMIT_MS — the silence
+    // already elapsed, so NO extra hangover is added on this path.
+    expect(onFinal).toHaveBeenCalledTimes(1)
     expect(onFinal).toHaveBeenCalledWith('Hello, this is a voice call quality test.', expect.any(Object))
   })
 
   it('does not commit while the mic is still loud', async () => {
     const onFinal = vi.fn()
     const ws = await open(onFinal)
-    ws.onmessage({
-      data: JSON.stringify({
-        type: 'transcript.partial',
-        text: 'I want you to check the second task',
-        speech_final: false,
-        is_final: false,
-      }),
-    })
-    // Loud audio just before the watchdog window elapses — the watchdog
-    // re-arms instead of committing (the speaker is still talking).
+    // Move the fake clock off t=0 (lastLoudAt=0 is the "never loud" sentinel).
+    await vi.advanceTimersByTimeAsync(1000)
+    partial(ws, 'I want you to check the second task')
+    drive(ws, LOUD())
+    drive(ws, QUIET())
+    // Loud audio just before the silence window elapses — the watchdog
+    // re-arms from the new lastLoudAt instead of committing.
     await vi.advanceTimersByTimeAsync(STT_SILENCE_COMMIT_MS - 300)
-    const loud = new Float32Array(2048).fill(0.2)
-    processor.onaudioprocess({ inputBuffer: { getChannelData: () => loud } })
-    await vi.advanceTimersByTimeAsync(STT_SILENCE_COMMIT_MS + STT_INCOMPLETE_HANGOVER_MS)
+    drive(ws, LOUD())
+    drive(ws, QUIET())
+    await vi.advanceTimersByTimeAsync(STT_SILENCE_COMMIT_MS - 100)
     expect(onFinal).not.toHaveBeenCalled()
-    // Quiet now — the re-armed watchdog commits once the pause is real.
-    await vi.advanceTimersByTimeAsync(STT_SILENCE_COMMIT_MS + STT_INCOMPLETE_HANGOVER_MS + 400)
+    // Quiet now — the re-armed watchdog commits 2600ms after the LAST loud
+    // sample (no hangover added on the fallback path).
+    await vi.advanceTimersByTimeAsync(200)
     expect(onFinal).toHaveBeenCalledWith('I want you to check the second task', expect.any(Object))
+  })
+
+  it('terminates repeated 3s-gap bursts — the live starvation signature (52-burst replay)', async () => {
+    // rei's reproduction against home#47 HEAD: 52 bursts of 4s loud PCM with
+    // partials every 500ms, each followed by a 3s silence gap, yielded ZERO
+    // finals (the partial-reset watchdog never fired, and the hangover
+    // double-counted when it did). The audio-measured fallback must commit
+    // each burst's turn 2600ms into its gap.
+    const onFinal = vi.fn()
+    for (let burst = 0; burst < 52; burst += 1) {
+      const ws = await open(onFinal)
+      const text = `Burst ${burst} of the repeated-gap sequence.`
+      for (let t = 0; t < 4000; t += 500) {
+        drive(ws, LOUD())
+        if (t % 500 === 0) partial(ws, text)
+        await vi.advanceTimersByTimeAsync(500)
+      }
+      drive(ws, LOUD())
+      // 3s silence gap: quiet buffers keep flowing (the audio graph runs).
+      for (let g = 0; g < 3000; g += 250) {
+        drive(ws, QUIET())
+        await vi.advanceTimersByTimeAsync(250)
+      }
+      expect(onFinal).toHaveBeenCalledWith(text, expect.any(Object))
+    }
+    expect(onFinal).toHaveBeenCalledTimes(52)
   })
 
   it('never double-commits when the server speech_final arrives late', async () => {
     const onFinal = vi.fn()
     const ws = await open(onFinal)
-    ws.onmessage({
-      data: JSON.stringify({
-        type: 'transcript.partial',
-        text: 'What is the status?',
-        speech_final: false,
-        is_final: false,
-      }),
-    })
+    partial(ws, 'What is the status?')
     // Server speech_final arrives before the watchdog window elapses.
-    ws.onmessage({
-      data: JSON.stringify({
-        type: 'transcript.partial',
-        text: 'What is the status?',
-        speech_final: true,
-        is_final: true,
-      }),
-    })
+    partial(ws, 'What is the status?', true)
     await vi.advanceTimersByTimeAsync(STT_SILENCE_COMMIT_MS + STT_COMPLETE_HANGOVER_MS + STT_COMMIT_QUIET_MS + 1000)
     expect(onFinal).toHaveBeenCalledTimes(1)
     expect(onFinal.mock.calls[0][0]).toBe('What is the status?')
