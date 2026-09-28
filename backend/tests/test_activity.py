@@ -191,6 +191,29 @@ def _talk_roster():
             "status": "hibernated",
             "identity_user_id": 8101,
             "user_id": 8101,
+            "owner_id": 101,
+        },
+        {
+            "name": "GLM Flash",
+            "username": "raunak-glm",
+            "email": "raunak-glm@agents.shizuha.io",
+            "role": "Shizuha CLI",
+            "teams": [],
+            "status": "hibernated",
+            "identity_user_id": 1102,
+            "user_id": 1102,
+            "owner_id": 279,
+        },
+        {
+            "name": "Other Codex",
+            "username": "other-codex",
+            "email": "other-codex@agents.shizuha.io",
+            "role": "Codex",
+            "teams": [],
+            "status": "hibernated",
+            "identity_user_id": 1103,
+            "user_id": 1103,
+            "owner_id": 101,
         },
     ])
 
@@ -246,7 +269,7 @@ def test_talk_agents_hides_org_yuna_from_customers(monkeypatch):
     own = client.get("/api/home/talk-agents?q=shizuha", headers=mihir)
     assert own.status_code == 200
     rows = own.json()["results"]
-    assert [row["username"] for row in rows] == ["shizuha-279"]
+    assert [row["username"] for row in rows] == ["shizuha-279", "raunak-glm"]
     assert rows[0]["displayName"] == "Shizuha"
     assert rows[0]["userId"] == 752
     other = client.get(
@@ -254,6 +277,42 @@ def test_talk_agents_hides_org_yuna_from_customers(monkeypatch):
         headers=mihir,
     )
     assert other.json()["results"] == []
+
+
+def test_talk_agents_customer_sees_owned_seats_not_org_or_other_owners(monkeypatch):
+    widget_cache.clear()
+
+    async def _fake_agents(_client, _bearer, _org_id=None):
+        return _talk_roster()
+
+    monkeypatch.setattr("app.clients.fetch_agents_live", _fake_agents)
+    mihir = _auth(_token(user_id=279, email="mihirgates@hotmail.com"))
+    roster = client.get("/api/home/talk-agents", headers=mihir)
+    assert roster.status_code == 200
+    assert {row["username"] for row in roster.json()["results"]} == {"shizuha-279", "raunak-glm"}
+    glm = client.get("/api/home/talk-agents?q=glm", headers=mihir)
+    rows = glm.json()["results"]
+    assert [row["username"] for row in rows] == ["raunak-glm"]
+    assert rows[0]["displayName"] == "GLM Flash"
+    assert rows[0]["userId"] == 1102
+    other = client.get("/api/home/talk-agents?q=other-codex", headers=mihir)
+    assert other.json()["results"] == []
+    yuna = client.get("/api/home/talk-agents?q=yuna", headers=mihir)
+    assert yuna.json()["results"] == []
+
+
+def test_caller_may_talk_owner_does_not_override_org_seats():
+    from types import SimpleNamespace
+    from app.clients import caller_may_talk_to_agent
+
+    caller = SimpleNamespace(email="mihirgates@hotmail.com", user_id=279)
+    assert caller_may_talk_to_agent(caller, "yuna", owner_id=279) is False
+    assert caller_may_talk_to_agent(caller, "raunak-glm", owner_id=279) is True
+    assert caller_may_talk_to_agent(caller, "raunak-glm", owner_id=101) is False
+    assert caller_may_talk_to_agent(caller, "nami") is False
+    assert caller_may_talk_to_agent(caller, "shizuha-279") is True
+    ceo = SimpleNamespace(email="hritik@shizuha.com", user_id=3)
+    assert caller_may_talk_to_agent(ceo, "nami") is True
 
 
 def test_agents_live_maps_identity_user_id():

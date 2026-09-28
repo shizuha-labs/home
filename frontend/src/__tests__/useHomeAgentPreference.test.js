@@ -52,6 +52,12 @@ describe('home agent preference', () => {
     expect(isForbiddenHomeAgentUsername('yuna', mihir)).toBe(true)
     expect(isForbiddenHomeAgentUsername('shizuha-115', mihir)).toBe(true)
     expect(isForbiddenHomeAgentUsername('shizuha-279', mihir)).toBe(false)
+    const allowed = new Set(['shizuha-279', 'raunak-glm'])
+    expect(resolveHomeAgentUsername('raunak-glm', mihir, { allowed })).toBe('raunak-glm')
+    expect(resolveHomeAgentUsername('yuna', mihir, { allowed })).toBe('shizuha-279')
+    expect(resolveHomeAgentUsername('nami', mihir, { allowed })).toBe('shizuha-279')
+    expect(resolveHomeAgentUsername('raunak-glm', mihir, { pending: true })).toBe('raunak-glm')
+    expect(resolveHomeAgentUsername('yuna', mihir, { pending: true })).toBe('shizuha-279')
   })
 
   it('does not keep a retired Aya pick as the live default', () => {

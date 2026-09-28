@@ -80,13 +80,27 @@ export function isForbiddenHomeAgentUsername(username, user) {
   return false
 }
 
-/** Prefer stored pick only when it is this caller's agent. Customers stay on Shizuha. */
-export function resolveHomeAgentUsername(preferred, user) {
+/** Prefer a stored pick when it is this caller's own seat.
+
+`options.allowed` is the set of usernames home already loaded for this caller
+(personal seat plus Hive rows they own). `options.pending` keeps a stored
+owned pick while that list is still loading, instead of snapping back to the
+personal seat and wiping it. Org seats and another person's shizuha-N never
+stick. Callers that omit options keep the personal-seat default.
+*/
+export function resolveHomeAgentUsername(preferred, user, options) {
   const suggested = suggestedHomeAgentUsername(user)
-  if (!isCeoHomeUser(user)) return suggested
   const raw = String(preferred || '').trim().toLowerCase()
-  if (raw && !RETIRED_HOME_AGENTS.has(raw)) return raw
-  return suggested || DEFAULT_HOME_AGENT
+  if (isCeoHomeUser(user)) {
+    if (raw && !RETIRED_HOME_AGENTS.has(raw)) return raw
+    return suggested || DEFAULT_HOME_AGENT
+  }
+  if (!raw || isForbiddenHomeAgentUsername(raw, user)) return suggested
+  if (raw === suggested) return raw
+  if (options?.pending) return raw
+  const allowed = options?.allowed
+  if (allowed && (allowed instanceof Set ? allowed : new Set(allowed)).has(raw)) return raw
+  return suggested
 }
 
 export function participantMatchesAgent(participant, username) {

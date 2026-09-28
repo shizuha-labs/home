@@ -219,35 +219,45 @@ function ChatHomeInner() {
 
   const [personalSeat, setPersonalSeat] = useState(null)
   const [roster, setRoster] = useState([])
+  const [rosterReady, setRosterReady] = useState(false)
   const ceoHome = isCeoHomeUser(user)
   const pickerOptions = useMemo(() => {
     const prior = agentConversations(conversations, currentUserId, user)
     if (ceoHome) return mergeAgentSearchHits(prior, roster)
-    const username = personalHomeAgentUsername(user)
-    if (!username) return []
-    const existing = prior.find(
-      (row) => String(row.username || '').toLowerCase() === username,
-    )
-    if (existing) {
-      return [{ ...existing, displayName: homeAgentDisplayName(username, existing.displayName) }]
+    const personal = personalHomeAgentUsername(user)
+    const owned = mergeAgentSearchHits(prior, roster)
+      .filter((row) => !isForbiddenHomeAgentUsername(row.username, user))
+      .map((row) => ({
+        ...row,
+        displayName: homeAgentDisplayName(row.username, row.displayName),
+      }))
+    if (personal && !owned.some((row) => String(row.username).toLowerCase() === personal)) {
+      owned.unshift({
+        username: personal,
+        displayName: 'Shizuha',
+        userId: personalSeat?.identity_user_id || personalSeat?.identityUserId || null,
+        conversationId: null,
+      })
     }
-    return [{
-      username,
-      displayName: homeAgentDisplayName(username, personalSeat?.display_name),
-      userId: personalSeat?.identity_user_id || personalSeat?.identityUserId || null,
-      conversationId: null,
-    }]
+    return owned
   }, [ceoHome, conversations, currentUserId, personalSeat, roster, user])
-  const effectiveHomeAgent = resolveHomeAgentUsername(homeAgent, user)
+  const allowedHomeAgents = useMemo(() => new Set(
+    pickerOptions.map((row) => String(row.username || '').trim().toLowerCase()).filter(Boolean),
+  ), [pickerOptions])
+  const homeAgentResolve = useMemo(() => ({
+    allowed: allowedHomeAgents,
+    pending: !ceoHome && !rosterReady,
+  }), [allowedHomeAgents, ceoHome, rosterReady])
+  const effectiveHomeAgent = resolveHomeAgentUsername(homeAgent, user, homeAgentResolve)
   useEffect(() => {
     if (!user) return
-    const next = resolveHomeAgentUsername(homeAgent, user)
+    const next = resolveHomeAgentUsername(homeAgent, user, homeAgentResolve)
     const raw = String(homeAgent || '').trim().toLowerCase()
     if (next && next !== raw) {
       writeHomeAgentPref(next)
       setHomeAgent(next)
     }
-  }, [homeAgent, user])
+  }, [homeAgent, homeAgentResolve, user])
   useEffect(() => {
     if (!currentUserId || ceoHome) return undefined
     let cancelled = false
@@ -260,7 +270,11 @@ function ChatHomeInner() {
         if (cancelled || !data?.agent_username) return
         setPersonalSeat(data)
         const username = String(data.agent_username || '').trim().toLowerCase()
-        if (username) {
+        const stored = String(readHomeAgentPref() || '').trim().toLowerCase()
+        const keepStored = stored
+          && stored !== username
+          && !isForbiddenHomeAgentUsername(stored, user)
+        if (username && !keepStored) {
           writeHomeAgentPref(username)
           setHomeAgent(username)
         }
@@ -293,14 +307,14 @@ function ChatHomeInner() {
   const chooseHomeAgent = useCallback((row) => {
     const picked = String(row?.username || '').trim()
     const username = writeHomeAgentPref(
-      isCeoHomeUser(user) ? picked : resolveHomeAgentUsername(picked, user),
+      resolveHomeAgentUsername(picked, user, homeAgentResolve),
     )
     setHomeAgent(username)
     if (row?.conversationId) {
       setMiniConvId(row.conversationId)
       setActiveConversation(row.conversationId)
     }
-  }, [setActiveConversation, user])
+  }, [homeAgentResolve, setActiveConversation, user])
 
   const searchHomeAgents = useCallback(async (q) => {
     const token = getAuthToken()
@@ -376,7 +390,10 @@ function ChatHomeInner() {
   useEffect(() => {
     let cancelled = false
     searchHomeAgents('').then((rows) => {
-      if (!cancelled) setRoster(Array.isArray(rows) ? rows : [])
+      if (!cancelled) {
+        setRoster(Array.isArray(rows) ? rows : [])
+        setRosterReady(true)
+      }
     })
     return () => { cancelled = true }
   }, [searchHomeAgents])
@@ -393,8 +410,8 @@ function ChatHomeInner() {
 
   const sendToShizuha = useCallback(async (message) => {
     if (!message.trim() || isSending) return
-    emitLiveTrace('chat.send', { via: 'compose', text: message, agent: resolveHomeAgentUsername(homeAgent, user) })
-    const targetUsername = resolveHomeAgentUsername(homeAgent, user)
+    emitLiveTrace('chat.send', { via: 'compose', text: message, agent: resolveHomeAgentUsername(homeAgent, user, homeAgentResolve) })
+    const targetUsername = resolveHomeAgentUsername(homeAgent, user, homeAgentResolve)
     if (!targetUsername) {
       setSendError('Choose an agent above, then ask.')
       return
@@ -443,7 +460,7 @@ function ChatHomeInner() {
     } finally {
       setIsSending(false)
     }
-  }, [activeConversationId, conversations, createDirectConversation, homeAgent, isSending, personalSeat, searchHomeAgents, sendMessage, setActiveConversation, user])
+  }, [activeConversationId, conversations, createDirectConversation, homeAgent, homeAgentResolve, isSending, personalSeat, searchHomeAgents, sendMessage, setActiveConversation, user])
 
   const closeMiniChat = useCallback(() => {
     setMiniConvId(null)
@@ -784,7 +801,7 @@ function ChatHomeInner() {
 
   const startAgentFromSearch = useCallback(async (row) => {
     if (!row) return
-    const username = resolveHomeAgentUsername(row.username, user)
+    const username = resolveHomeAgentUsername(row.username, user, homeAgentResolve)
     writeHomeAgentPref(username)
     setHomeAgent(username)
     if (row.conversationId) {
@@ -801,7 +818,7 @@ function ChatHomeInner() {
       setMiniConvId(dest.id)
       setActiveConversation(dest.id)
     }
-  }, [createDirectConversation, setActiveConversation, user])
+  }, [createDirectConversation, homeAgentResolve, setActiveConversation, user])
 
   const firstName = user?.first_name || user?.username || ''
   const threadOpen = Boolean(activeConversationId && urlConversationId)
@@ -1029,7 +1046,7 @@ function ChatHomeInner() {
             options={pickerOptions}
             onSelect={chooseHomeAgent}
             onSearch={searchHomeAgents}
-            locked={!ceoHome && Boolean(effectiveHomeAgent)}
+            locked={!ceoHome && pickerOptions.length < 2}
           />
           {liveAgents.length > 0 && (
             <p className="flex items-center justify-center gap-2 text-sm text-gray-500 dark:text-gray-400 mb-6">

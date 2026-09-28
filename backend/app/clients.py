@@ -392,10 +392,18 @@ async def fetch_agents_live(client: httpx.AsyncClient, bearer: str,
         status = _widget_count_status(a)
         username = a.get("agent_username") or ""
         identity_user_id = a.get("identity_user_id")
+        owner_id = a.get("owner_id")
+        email = a.get("email") or ""
+        if not email and username:
+            email = (
+                f"{username}@agents.shizuha.io"
+                if owner_id not in (None, "")
+                else f"{username}@shizuha.com"
+            )
         agents.append({
             "name": a.get("display_name") or username or "",
             "username": username,
-            "email": a.get("email") or (f"{username}@shizuha.com" if username else ""),
+            "email": email,
             "role": a.get("role") or a.get("display_title") or "",
             "teams": a.get("team_names") or [],
             "model": a.get("effective_model") or a.get("model") or "",
@@ -405,6 +413,7 @@ async def fetch_agents_live(client: httpx.AsyncClient, bearer: str,
             "last_active_at": a.get("last_active_at"),
             "identity_user_id": identity_user_id,
             "user_id": identity_user_id,
+            "owner_id": owner_id,
         })
     if not agents:
         return Widget.empty_()
@@ -428,8 +437,13 @@ def personal_home_agent_username(user_id) -> str:
     return f"shizuha-{uid}"
 
 
-def caller_may_talk_to_agent(caller, username: str) -> bool:
-    """Customers may only talk to their own personal Shizuha from home."""
+def caller_may_talk_to_agent(caller, username: str, owner_id=None) -> bool:
+    """Customers talk to their own seats. CEO Office agents stay CEO-only.
+
+    A row is theirs when it is the canonical ``shizuha-<id>`` seat or Hive
+    says ``owner_id`` is this caller. Matching on "present in the fleet
+    list" is not enough: a fleet-read grant can see the whole org roster.
+    """
     raw = str(username or "").strip().lower()
     if not raw:
         return False
@@ -437,14 +451,21 @@ def caller_may_talk_to_agent(caller, username: str) -> bool:
     if email in CEO_HOME_EMAILS:
         return True
     try:
-        if int(getattr(caller, "user_id", 0) or 0) in CEO_HOME_USER_IDS:
-            return True
+        caller_id = int(getattr(caller, "user_id", 0) or 0)
     except (TypeError, ValueError):
-        pass
+        caller_id = 0
+    if caller_id in CEO_HOME_USER_IDS:
+        return True
     if raw in ORG_TALK_AGENT_USERNAMES:
         return False
-    personal = personal_home_agent_username(getattr(caller, "user_id", None) if caller is not None else None)
-    return bool(personal) and raw == personal
+    personal = personal_home_agent_username(caller_id)
+    if personal and raw == personal:
+        return True
+    try:
+        owned_by = int(owner_id)
+    except (TypeError, ValueError):
+        return False
+    return caller_id > 0 and owned_by == caller_id
 
 
 async def fetch_talk_agents(client: httpx.AsyncClient, bearer: str,
@@ -455,8 +476,9 @@ async def fetch_talk_agents(client: httpx.AsyncClient, bearer: str,
 
     Returns username + identity_user_id so the composer can open a Connect DM
     with an agent who has never been messaged (Hina was invisible here).
-    Non-CEO callers are locked to their personal ``shizuha-<id>`` seat so the
-    homepage cannot surface CEO Office Yuna/Hina/Ena (HIVE-2131).
+    Non-CEO callers see their personal ``shizuha-<id>`` seat and any other
+    Hive agent they own. CEO Office Yuna/Hina/Ena/Aya stay off customer home
+    even if a row is mis-tagged with their owner id (HIVE-2131).
     """
     widget = await fetch_agents_live(client, bearer, org_id)
     rows = widget.data if widget.status in ("ok", "stale", "degraded") and isinstance(widget.data, list) else []
@@ -468,7 +490,7 @@ async def fetch_talk_agents(client: httpx.AsyncClient, bearer: str,
         username = str(row.get("username") or "").strip()
         if not username:
             continue
-        if not caller_may_talk_to_agent(caller, username):
+        if not caller_may_talk_to_agent(caller, username, row.get("owner_id")):
             continue
         blob = " ".join([
             str(row.get("name") or ""),
