@@ -21,6 +21,20 @@ vi.mock('../components/Footer', () => ({
   default: () => null,
 }))
 
+// The anonymous Home route renders LandingPage; the gate never asserts it.
+// Mocking it also keeps the shared @shizuha/ui graph (AppGrid) out of the
+// test import — CI's /packages volume does not plant the peer deps, and this
+// gate is about the Books Compliance routes, not the landing grid.
+vi.mock('../pages/LandingPage', () => ({
+  default: () => null,
+}))
+
+// Same reason: ChatHome pulls the @shizuha/chat shared graph (peer deps not
+// planted in CI's /packages volume); the gate only mounts the Books routes.
+vi.mock('../pages/ChatHome', () => ({
+  default: () => null,
+}))
+
 import App from '../App'
 
 beforeEach(() => {
