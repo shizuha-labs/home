@@ -560,6 +560,23 @@ function ChatHomeInner() {
   // Active = mid-call only. 'error' is a terminal surface with guidance/retry, not "on call".
   const hudCallState = awaitingVoicePath && (callState === 'idle' || !callState) ? 'connecting' : callState
   const callActive = awaitingVoicePath || (callState !== 'idle' && callState !== 'error')
+  // PLAT-9385 acceptance 4: a Live call whose responder seat is known-stopped
+  // (e.g. the account's default Hive agent) must SAY so instead of sitting in
+  // 'listening' for the whole call. Unknown/absent status stays silent — the
+  // roster may simply not know the seat.
+  const liveResponderUnavailable = Boolean(
+    callActive
+    && liveTarget.username
+    && liveTarget.agent_status
+    && liveTarget.agent_status !== 'running',
+  )
+  useEffect(() => {
+    if (!liveResponderUnavailable) return
+    emitLiveTrace('live.responder_unavailable', {
+      agent: liveTarget.username,
+      status: liveTarget.agent_status,
+    })
+  }, [liveResponderUnavailable, liveTarget.username, liveTarget.agent_status])
   // Cascade still types STT into compose (it may send from there). S2S
   // history is the SoT — do not leave a draft that looks like an unsent turn.
   useEffect(() => {
@@ -898,7 +915,15 @@ function ChatHomeInner() {
             </button>
             <Avatar name={activeName} size="sm" />
             <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{activeName}</h3>
-            {callActive && (
+            {callActive && (liveResponderUnavailable ? (
+              <span
+                data-testid="live-responder-unavailable"
+                className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-amber-600 dark:text-amber-400"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                No responder — {voiceAgentLabel} is {liveTarget.agent_status}
+              </span>
+            ) : (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-emerald-600 dark:text-emerald-400">
                 <span className="relative flex h-1.5 w-1.5">
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
@@ -906,7 +931,7 @@ function ChatHomeInner() {
                 </span>
                 {muted ? 'Muted' : (callState === 'speaking' ? 'Speaking' : callState === 'thinking' ? 'Thinking' : 'Live')}
               </span>
-            )}
+            ))}
             <div className="ml-auto flex items-center gap-1.5">
               {!isConnected && (
                 <span className="flex items-center gap-1 text-xs text-amber-500">

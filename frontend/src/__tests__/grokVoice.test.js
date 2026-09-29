@@ -129,6 +129,31 @@ describe('resolveLiveVoiceTarget', () => {
     expect(target).toMatchObject({ username: 'yuna', model: '', s2s: false })
   })
 
+  it('surfaces the responder seat status (PLAT-9385 acceptance 4)', () => {
+    const stopped = [
+      { username: 'openclaw', model: 'cortex/grok-4.6', status: 'stopped' },
+      { username: 'ena', model: 'cortex/grok-4.6', status: 'running' },
+    ]
+    // Known-stopped seat: the caller can see the responder cannot answer.
+    expect(resolveLiveVoiceTarget({
+      agents: stopped,
+      pickerUsername: 'openclaw',
+      currentUserId: 1,
+    }).agent_status).toBe('stopped')
+    // Running seat passes through untouched.
+    expect(resolveLiveVoiceTarget({
+      agents: stopped,
+      pickerUsername: 'ena',
+      currentUserId: 1,
+    }).agent_status).toBe('running')
+    // Seat unknown to the roster: null — no false unavailable alarms.
+    expect(resolveLiveVoiceTarget({
+      agents: [],
+      pickerUsername: 'ghost',
+      currentUserId: 1,
+    }).agent_status).toBeNull()
+  })
+
   it('uses native Voice for a personal Shizuha before the roster hydrates', () => {
     const target = resolveLiveVoiceTarget({
       agents: [],

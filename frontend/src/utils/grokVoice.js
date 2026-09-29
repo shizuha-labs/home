@@ -91,6 +91,11 @@ export function resolveLiveVoiceTarget({
     username: resolvedUsername,
     model,
     s2s,
+    // PLAT-9385 acceptance 4: the caller must be able to see when the
+    // resolved responder seat cannot answer (e.g. a stopped default Hive
+    // agent) instead of sitting in 'listening' forever. Null when the seat
+    // is unknown to the roster (no false alarms).
+    agent_status: agent?.status ?? null,
   }
 }
 
