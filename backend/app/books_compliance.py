@@ -123,7 +123,9 @@ class TokenRequest(StrictModel):
 
 class BeaconRequest(StrictModel):
     token: str = Field(min_length=20, max_length=128)
-    event: Literal["landing_view", "pricing_view"]
+    # VEN-264: intake_start joins the beacon family — must stay in lockstep
+    # with ALLOWED_VIEW_EVENTS (the event->column map), else 422 at the route.
+    event: Literal["landing_view", "pricing_view", "intake_start"]
     source: str = "other"
     referrer: str = "other"
 
