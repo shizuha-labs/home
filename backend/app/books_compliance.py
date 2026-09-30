@@ -226,9 +226,13 @@ def ensure_schema() -> None:
     with _migration_lock:
         if dsn in _migrated_dsn:
             return
-        migration = Path(__file__).parents[1] / "migrations" / "0001_books_compliance.sql"
+        migrations_dir = Path(__file__).parents[1] / "migrations"
         with psycopg.connect(dsn) as conn:
-            conn.execute(migration.read_text())
+            # Applied in filename order; every migration file must be additive
+            # and idempotent (IF NOT EXISTS everywhere) so re-running on an
+            # already-migrated database is a no-op.
+            for path in sorted(migrations_dir.glob("*.sql")):
+                conn.execute(path.read_text())
         _migrated_dsn.add(dsn)
 
 
