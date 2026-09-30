@@ -319,12 +319,15 @@ def record_beacon(payload: BeaconRequest) -> dict[str, str]:
     require_enabled()
     field = ALLOWED_VIEW_EVENTS[payload.event]
     with db() as conn:
+        # Once-only family contract (matches the lead-event endpoint): the
+        # UPDATE fires only while the flag is still false — a replayed beacon
+        # matches no row and reports terminal, never re-banked.
         row = conn.execute(
             f"""UPDATE books_compliance_funnel_token
                 SET {field}=true,
                     source=CASE WHEN source='other' THEN %s ELSE source END,
                     referrer=CASE WHEN referrer='other' THEN %s ELSE referrer END
-                WHERE token_digest=%s AND expires_at>now()
+                WHERE token_digest=%s AND expires_at>now() AND {field}=false
                 RETURNING token_digest""",
             (payload.source, payload.referrer, _digest(payload.token)),
         ).fetchone()
