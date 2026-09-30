@@ -33,6 +33,7 @@ from app.books_compliance import (  # noqa: E402
     database_url,
     db,
     ensure_schema,
+    funnel_weekly_rollup,
     request_recovery,
     safe_csv,
     safe_html,
@@ -409,3 +410,55 @@ def test_guide_call_start_gate_disabled_is_503(monkeypatch):
     monkeypatch.setenv("BOOKS_COMPLIANCE_PUBLIC_INTAKE_ENABLED", "false")
     client = TestClient(app)
     assert client.post("/api/books/compliance/guide-call-start", json={}, headers={"Origin": "http://testserver"}).status_code == 503
+
+
+# --- VEN-264 weekly rollup beat (aggregate-only) ---
+
+def test_weekly_rollup_sums_iso_weeks_and_computes_wow():
+    """Rollup buckets the aggregate table by ISO week (Mon-start): seeded rows
+    in the current and previous week sum per counter; WoW delta is the
+    difference; a row two weeks back is excluded from both windows."""
+    client = TestClient(app)  # ensure_schema ran via the app/db bootstrap
+    this_monday = _now().date() - timedelta(days=_now().date().weekday())
+    last_monday = this_monday - timedelta(days=7)
+    older = last_monday - timedelta(days=7)
+    with db() as conn:
+        for d, landing, intake in (
+            (this_monday, 3, 1),
+            (this_monday + timedelta(days=2), 2, 0),
+            (last_monday, 5, 2),
+            (older, 100, 100),  # outside both windows — must not leak in
+        ):
+            conn.execute(
+                """INSERT INTO books_compliance_funnel_aggregate
+                   (aggregate_date,source,referrer,landing_count,intake_start_count)
+                   VALUES (%s,'direct','none',%s,%s)""",
+                (d, landing, intake),
+            )
+        report = funnel_weekly_rollup(conn, today=this_monday + timedelta(days=3))
+    assert report["week_start"] == this_monday.isoformat()
+    assert report["previous_week_start"] == last_monday.isoformat()
+    assert report["current_week_partial"] is True
+    assert report["this_week"]["landing_count"] == 5
+    assert report["this_week"]["intake_start_count"] == 1
+    assert report["last_week"]["landing_count"] == 5
+    assert report["last_week"]["intake_start_count"] == 2
+    assert report["wow_delta"]["landing_count"] == 0
+    assert report["wow_delta"]["intake_start_count"] == -1
+
+
+def test_weekly_rollup_is_aggregate_only_and_empty_safe():
+    """Empty table → all-zero report (no exception); the rollup reads ONLY the
+    aggregate table — seeded token rows are never touched, so the report
+    cannot carry per-visitor data."""
+    client = TestClient(app)
+    issue(client)  # a live token row exists; rollup must not read it
+    with db() as conn:
+        report = funnel_weekly_rollup(conn, today=_now().date())
+    assert all(v == 0 for v in report["this_week"].values())
+    assert all(v == 0 for v in report["last_week"].values())
+    # Aggregate-only by construction: no token read in the query path.
+    import inspect
+    from app import books_compliance as bc
+    src = inspect.getsource(bc.funnel_weekly_rollup)
+    assert "funnel_token" not in src

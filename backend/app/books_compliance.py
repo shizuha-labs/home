@@ -15,7 +15,7 @@ import threading
 import unicodedata
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
 
@@ -350,6 +350,55 @@ def record_guide_call_start(request: Request) -> dict[str, str]:
                  guide_call_start_count=books_compliance_funnel_aggregate.guide_call_start_count+1""",
         )
     return {"status": "counted"}
+
+
+# VEN-264 weekly rollup: the counters that land in the report. Aggregate-only
+# by construction — this module never reads books_compliance_funnel_token or
+# any per-visitor row, so the report cannot carry PII even by accident.
+ROLLUP_COUNTERS = (
+    "landing_count",
+    "pricing_count",
+    "intake_start_count",
+    "submit_count",
+    "guide_call_start_count",
+)
+
+
+def funnel_weekly_rollup(conn: psycopg.Connection, *, today: date | None = None) -> dict[str, Any]:
+    """VEN-264 weekly rollup beat: ISO-week (Mon-start) totals for the funnel
+    counters plus week-over-week deltas, from books_compliance_funnel_aggregate.
+
+    Aggregate-only: reads the date-bucketed aggregate table exclusively — the
+    same privacy posture as the table itself (no per-visitor rows, no PII).
+    The current (partial) week and the full previous week are both reported so
+    the WoW trend is computed like-for-like on elapsed days is NOT attempted;
+    deltas are raw week sums and the partial-week caveat is the caller's to
+    state in the report."""
+    ref = today or _now().date()
+    # Monday of the current ISO week, and the Monday a week prior.
+    this_monday = ref - timedelta(days=ref.weekday())
+    last_monday = this_monday - timedelta(days=7)
+
+    def _week_totals(monday: date) -> dict[str, int]:
+        rows = conn.execute(
+            f"""SELECT {', '.join(f'COALESCE(SUM({c}),0) AS {c}' for c in ROLLUP_COUNTERS)}
+                FROM books_compliance_funnel_aggregate
+                WHERE aggregate_date >= %s AND aggregate_date < %s""",
+            (monday, monday + timedelta(days=7)),
+        ).fetchone()
+        return {c: int(rows[c]) for c in ROLLUP_COUNTERS}
+
+    this_week = _week_totals(this_monday)
+    last_week = _week_totals(last_monday)
+    wow = {c: this_week[c] - last_week[c] for c in ROLLUP_COUNTERS}
+    return {
+        "week_start": this_monday.isoformat(),
+        "previous_week_start": last_monday.isoformat(),
+        "current_week_partial": ref < this_monday + timedelta(days=7),
+        "this_week": this_week,
+        "last_week": last_week,
+        "wow_delta": wow,
+    }
 
 
 def _finalize_locked(conn: psycopg.Connection, digest: bytes, cause: Literal["submit", "expiry"], *, crash: str | None = None) -> dict[str, Any] | None:
