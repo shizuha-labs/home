@@ -60,6 +60,7 @@ from .books_compliance import (
     intake_enabled,
     issue_token,
     record_beacon,
+    record_guide_call_start,
     request_recovery,
     require_json,
     submit_intake,
@@ -95,6 +96,7 @@ app = FastAPI(title="Shizuha Home BFF", version=str(SUMMARY_VERSION))
 BOOKS_COMPLIANCE_BODY_LIMITS = {
     "/api/books/compliance/token": 1024,
     "/api/books/compliance/beacon": 4096,
+    "/api/books/compliance/guide-call-start": 256,
     "/api/books/compliance/intake": 8192,
     "/api/books/compliance/confirmation": 1024,
     "/api/books/compliance/recovery": 2048,
@@ -190,6 +192,13 @@ def books_compliance_token(payload: TokenRequest, request: Request):
 def books_compliance_beacon(payload: BeaconRequest, request: Request):
     require_json(request, 4096)
     return record_beacon(payload)
+
+
+@app.post("/api/books/compliance/guide-call-start", status_code=202)
+def books_compliance_guide_call_start(request: Request):
+    # VEN-264: tokenless first-party counter — voice-Guide call started from a
+    # compliance surface. Referrer surface tag only; no body, no identity.
+    return record_guide_call_start(request)
 
 
 @app.post("/api/books/compliance/intake", status_code=202)

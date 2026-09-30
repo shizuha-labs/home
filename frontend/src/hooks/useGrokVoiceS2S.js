@@ -226,6 +226,21 @@ export function useGrokVoiceS2S({
     teardown()
     setCallError(null)
     setCallState('connecting')
+    // VEN-264: privacy-safe funnel signal — a voice-Guide call starting in a
+    // session that touched a Books-compliance surface. One tokenless,
+    // identity-free counter POST per session (surface tag only); failures
+    // are swallowed: telemetry must never affect the call.
+    try {
+      if (typeof sessionStorage !== 'undefined'
+          && sessionStorage.getItem('shizuha_compliance_surface_seen') === '1'
+          && !sessionStorage.getItem('shizuha_compliance_guide_call_counted')) {
+        sessionStorage.setItem('shizuha_compliance_guide_call_counted', '1')
+        fetch('/api/books/compliance/guide-call-start', {
+          method: 'POST', cache: 'no-store',
+          headers: { 'Content-Type': 'application/json' }, body: '{}',
+        }).catch(() => {})
+      }
+    } catch { /* telemetry never blocks the call */ }
     const token = getAccessToken()
     const opts = optsRef.current
     let stream = null

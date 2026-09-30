@@ -38,7 +38,9 @@ GENERIC_RIGHTS = "If a lead exists for this contact, your request will be proces
 ALLOWED_ATTRIBUTION = {"direct", "google", "linkedin", "twitter", "facebook", "instagram", "other"}
 ALLOWED_USE_CASES = {"gst_tracking", "pan_verify", "report_auto", "invoice_matching", "other"}
 ALLOWED_ORG_SIZES = {"1-10", "11-50", "51-200", "201-1000", "1000+", "other"}
-ALLOWED_VIEW_EVENTS = {"landing_view": "landing_seen", "pricing_view": "pricing_seen"}
+# VEN-264: intake_start joins the token-scoped beacon family — once-only
+# per token (the intake_started boolean dedupes), entry action only.
+ALLOWED_VIEW_EVENTS = {"landing_view": "landing_seen", "pricing_view": "pricing_seen", "intake_start": "intake_started"}
 PHONE_RE = re.compile(r"^[+0-9-]{7,20}$")
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
@@ -323,6 +325,24 @@ def record_beacon(payload: BeaconRequest) -> dict[str, str]:
     return {"status": "accepted" if row else "terminal"}
 
 
+def record_guide_call_start(request: Request) -> dict[str, str]:
+    """VEN-264: tokenless counter for voice-Guide calls originating from a
+    compliance surface. The referrer surface tag only — no caller identity,
+    no funnel token, no PII (VEN-194 intake contract). Rate-limited per
+    source so the aggregate stays honest without client-side dedupe."""
+    require_enabled()
+    with db() as conn:
+        rate_limit(conn, request, "guide_call_start", 10)
+        conn.execute(
+            """INSERT INTO books_compliance_funnel_aggregate
+               (aggregate_date,source,referrer,guide_call_start_count)
+               VALUES (current_date,'guide','compliance_surface',1)
+               ON CONFLICT (aggregate_date,source,referrer) DO UPDATE SET
+                 guide_call_start_count=books_compliance_funnel_aggregate.guide_call_start_count+1""",
+        )
+    return {"status": "counted"}
+
+
 def _finalize_locked(conn: psycopg.Connection, digest: bytes, cause: Literal["submit", "expiry"], *, crash: str | None = None) -> dict[str, Any] | None:
     row = conn.execute(
         "SELECT * FROM books_compliance_funnel_token WHERE token_digest=%s FOR UPDATE",
@@ -334,16 +354,20 @@ def _finalize_locked(conn: psycopg.Connection, digest: bytes, cause: Literal["su
         return None
     submit = 1 if cause == "submit" else 0
     expiry = 1 if cause == "expiry" else 0
+    # VEN-264: intake_start aggregates at finalize like the other token-scoped
+    # signals — the boolean was set once at the first intake interaction.
+    intake_start = 1 if row["intake_started"] else 0
     conn.execute(
         """INSERT INTO books_compliance_funnel_aggregate
-           (aggregate_date,source,referrer,landing_count,pricing_count,submit_count,expiry_count)
-           VALUES (current_date,%s,%s,%s,%s,%s,%s)
+           (aggregate_date,source,referrer,landing_count,pricing_count,submit_count,expiry_count,intake_start_count)
+           VALUES (current_date,%s,%s,%s,%s,%s,%s,%s)
            ON CONFLICT (aggregate_date,source,referrer) DO UPDATE SET
              landing_count=books_compliance_funnel_aggregate.landing_count+EXCLUDED.landing_count,
              pricing_count=books_compliance_funnel_aggregate.pricing_count+EXCLUDED.pricing_count,
              submit_count=books_compliance_funnel_aggregate.submit_count+EXCLUDED.submit_count,
-             expiry_count=books_compliance_funnel_aggregate.expiry_count+EXCLUDED.expiry_count""",
-        (row["source"], row["referrer"], int(row["landing_seen"]), int(row["pricing_seen"]), submit, expiry),
+             expiry_count=books_compliance_funnel_aggregate.expiry_count+EXCLUDED.expiry_count,
+             intake_start_count=books_compliance_funnel_aggregate.intake_start_count+EXCLUDED.intake_start_count""",
+        (row["source"], row["referrer"], int(row["landing_seen"]), int(row["pricing_seen"]), submit, expiry, intake_start),
     )
     if crash == "before_delete":
         raise RuntimeError("VEN-194 crash-window fixture before delete")

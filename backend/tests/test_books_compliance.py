@@ -314,3 +314,98 @@ def test_intake_schema_has_no_role_token_entitlement_or_payment_authority():
             ).fetchall()
         }
     assert not columns.intersection({"role", "token", "entitlement", "payment", "plan", "price", "subscription"})
+
+
+# --- VEN-264: compliance-funnel telemetry (intake_start + guide_call_start) ---
+
+def funnel_aggregates():
+    with db() as conn:
+        return {
+            row["aggregate_date"].isoformat(): row
+            for row in conn.execute("SELECT * FROM books_compliance_funnel_aggregate").fetchall()
+        }
+
+
+def test_intake_start_beacon_counts_once_per_token_and_aggregates_at_finalize():
+    """VEN-264 signal 2: intake starts — a token-scoped once-only beacon at the
+    first intake interaction; the count lands in the aggregate at finalize."""
+    client = TestClient(app)
+    token = issue(client)
+    origin = {"Origin": "http://testserver"}
+    body = {"token": token, "event": "intake_start", "source": "direct", "referrer": "direct"}
+    first = client.post("/api/books/compliance/beacon", json=body, headers=origin)
+    assert first.status_code == 202
+    assert first.json() == {"status": "accepted"}
+    # Replay of the same token's intake_start is a terminal no-op (once-only).
+    replay = client.post("/api/books/compliance/beacon", json=body, headers=origin)
+    assert replay.status_code == 202
+    assert replay.json() == {"status": "terminal"}
+
+    # Unknown tokens are terminal, not errors (fire-and-forget contract).
+    stray = client.post(
+        "/api/books/compliance/beacon",
+        json={"token": "x" * 40, "event": "intake_start"}, headers=origin,
+    )
+    assert stray.status_code == 202
+    assert stray.json() == {"status": "terminal"}
+
+    # The signal is invisible until finalize; finalize (expiry sweep) lands
+    # intake_start_count=1 alongside the other token-scoped signals.
+    assert funnel_aggregates() == {}
+    with db() as conn:
+        row = conn.execute(
+            "SELECT token_digest FROM books_compliance_funnel_token"
+        ).fetchone()
+        assert _finalize_locked(conn, row["token_digest"], "expiry")
+    aggregates = list(funnel_aggregates().values())
+    assert len(aggregates) == 1
+    assert aggregates[0]["intake_start_count"] == 1
+    assert aggregates[0]["landing_count"] == 0
+    assert aggregates[0]["submit_count"] == 0
+
+
+def test_intake_start_never_counts_without_finalize_or_double_counts_two_tokens():
+    """Two tokens each starting intake → aggregate total 2 after both finalize;
+    a token that never started intake contributes 0."""
+    client = TestClient(app)
+    origin = {"Origin": "http://testserver"}
+    t1, t2 = issue(client), issue(client)
+    client.post("/api/books/compliance/beacon", json={"token": t1, "event": "intake_start"}, headers=origin)
+    with db() as conn:
+        assert _finalize_locked(conn, _digest(t1), "expiry")
+        assert _finalize_locked(conn, _digest(t2), "expiry")
+    total = sum(row["intake_start_count"] for row in funnel_aggregates().values())
+    assert total == 1  # only t1 started; t2 contributed 0
+
+
+def test_guide_call_start_is_tokenless_identity_free_and_rate_limited():
+    """VEN-264 signal 3: Guide call-starts from compliance surfaces — no token,
+    no caller identity in storage; per-source rate limit keeps it honest."""
+    client = TestClient(app)
+    first = client.post("/api/books/compliance/guide-call-start", json={}, headers={"Origin": "http://testserver"})
+    assert first.status_code == 202
+    assert first.json() == {"status": "counted"}
+
+    # Nothing per-visitor is persisted — only the aggregate row.
+    with db() as conn:
+        tokens = conn.execute("SELECT count(*) n FROM books_compliance_funnel_token").fetchone()["n"]
+        assert tokens == 0
+        rows = conn.execute("SELECT source, referrer, guide_call_start_count FROM books_compliance_funnel_aggregate").fetchall()
+        assert len(rows) == 1
+        assert rows[0]["source"] == "guide"
+        assert rows[0]["referrer"] == "compliance_surface"
+        assert rows[0]["guide_call_start_count"] == 1
+
+    # Rate limit (10/hour per source): the 11th same-source call is refused.
+    for _ in range(9):
+        assert client.post("/api/books/compliance/guide-call-start", json={}, headers={"Origin": "http://testserver"}).status_code == 202
+    assert client.post("/api/books/compliance/guide-call-start", json={}, headers={"Origin": "http://testserver"}).status_code == 429
+    with db() as conn:
+        total = conn.execute("SELECT coalesce(sum(guide_call_start_count),0) n FROM books_compliance_funnel_aggregate").fetchone()["n"]
+    assert total == 10  # the refused call did not count
+
+
+def test_guide_call_start_gate_disabled_is_503(monkeypatch):
+    monkeypatch.setenv("BOOKS_COMPLIANCE_PUBLIC_INTAKE_ENABLED", "false")
+    client = TestClient(app)
+    assert client.post("/api/books/compliance/guide-call-start", json={}, headers={"Origin": "http://testserver"}).status_code == 503
