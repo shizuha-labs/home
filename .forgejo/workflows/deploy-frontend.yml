@@ -151,6 +151,14 @@ jobs:
                         # 'extraneous')" bug outside the monorepo root.
                         rm -f package-lock.json
                         npm install --ignore-scripts --fund=false --audit=false
+                        # Shared-package runtime deps (check-local-packages.mjs
+                        # contract): rendering the full App makes vite resolve
+                        # @shizuha/ui sources from /workspace/src/packages, and
+                        # lucide-react is only resolvable from the package's own
+                        # node_modules. Mirror Dockerfile.prod's install including
+                        # the HIVE-694 nested-react removal (two-react hooks crash).
+                        (cd /workspace/src/packages/shizuha-ui && npm install --omit=dev --fund=false --audit=false && rm -rf node_modules/react node_modules/react-dom)
+                        (cd /workspace/src/packages/shizuha-chat && npm install --omit=dev --fund=false --audit=false && rm -rf node_modules/react node_modules/react-dom)
                         SHIZUHA_PACKAGES_DIR=/workspace/src/packages npm test
                     env:
                       - name: NPM_CONFIG_REGISTRY
