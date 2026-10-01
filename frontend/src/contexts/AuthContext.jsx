@@ -2,8 +2,7 @@ import { createContext, useContext, useState, useEffect } from 'react'
 import {
   ACCESS_TOKEN_KEY,
   USER_KEY,
-  clearAuthStorage,
-  expireSessionAndRedirect,
+  clearExpiredSession,
   isAccessTokenExpired,
   mergeSessionUser,
   refreshSession,
@@ -33,7 +32,9 @@ export function AuthProvider({ children }) {
         // token means the user never has to see the login page.
         const refreshed = await refreshSession()
         if (!refreshed) {
-          expireSessionAndRedirect()
+          // FRG-72: stay on the current public route (e.g. /forge/) instead of
+          // bouncing every stale-token visitor to /id/login.
+          clearExpiredSession()
           setUser(null)
           setIsAuthenticated(false)
           setIsLoading(false)
@@ -104,7 +105,7 @@ export function AuthProvider({ children }) {
         const storedUser = localStorage.getItem(USER_KEY)
 
         if (accessToken && isAccessTokenExpired(accessToken)) {
-          expireSessionAndRedirect()
+          clearExpiredSession()
           setUser(null)
           setIsAuthenticated(false)
         } else if (accessToken) {
