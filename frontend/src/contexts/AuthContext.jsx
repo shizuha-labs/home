@@ -71,6 +71,23 @@ export function AuthProvider({ children }) {
             })
             .catch(() => {})
         }
+      } else if (document.cookie.includes('shizuha-access-token=')) {
+        // Cookie session with empty localStorage (BUILD-37). The header must
+        // not stay on "Sign in" when /hive/api/v1/me already accepts the cookie.
+        try {
+          const res = await fetch('/hive/api/v1/me', { credentials: 'include' })
+          const me = res.ok ? await res.json() : null
+          if (me?.username) {
+            setUser(me)
+            setIsAuthenticated(true)
+          } else {
+            setUser(null)
+            setIsAuthenticated(false)
+          }
+        } catch {
+          setUser(null)
+          setIsAuthenticated(false)
+        }
       } else {
         setUser(null)
         setIsAuthenticated(false)
