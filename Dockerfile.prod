@@ -70,6 +70,7 @@ RUN npm run build
 
 # Stage 2: Serve with nginx
 FROM nginx:alpine
+RUN apk add --no-cache 'expat>=2.8.5-r0'
 
 # Build arg needed again in stage 2
 ARG FRONTEND_PATH=home
