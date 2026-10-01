@@ -890,9 +890,10 @@ function ChatHomeInner() {
           <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200/60 dark:border-gray-800/60 bg-white/80 dark:bg-gray-950/80 backdrop-blur-sm">
             <button
               onClick={goHome}
+              aria-label="Back to home"
               className="md:hidden p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
             >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
               </svg>
             </button>
@@ -918,6 +919,7 @@ function ChatHomeInner() {
                 type="button"
                 onClick={() => setShowCommandPalette(true)}
                 title="Open command palette"
+                aria-label="Open command palette"
                 className="hidden sm:inline-flex items-center rounded-lg px-1.5 py-1 text-[10px] font-medium text-gray-400 ring-1 ring-gray-200 transition-colors hover:text-brand-600 hover:ring-brand-300 dark:text-gray-500 dark:ring-gray-700 dark:hover:text-brand-400"
               >
                 ⌘K
@@ -928,6 +930,7 @@ function ChatHomeInner() {
                   data-testid="thread-mic-button"
                   onClick={toggleMic}
                   title={micState === 'connecting' || micState === 'listening' ? 'Stop listening' : micState === 'transcribing' ? 'Transcribing…' : 'Speak to Shizuha'}
+                  aria-label={micState === 'connecting' || micState === 'listening' ? 'Stop listening' : micState === 'transcribing' ? 'Transcribing' : 'Speak to Shizuha'}
                   className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors shadow-sm ${
                     micState === 'connecting' || micState === 'listening'
                       ? 'bg-red-500 text-white animate-pulse'
@@ -936,7 +939,7 @@ function ChatHomeInner() {
                         : 'bg-gray-100 text-gray-500 hover:bg-brand-50 hover:text-brand-600 dark:bg-gray-800 dark:text-gray-400 dark:hover:text-brand-400'
                   }`}
                 >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
                   </svg>
                 </button>

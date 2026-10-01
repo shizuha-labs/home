@@ -80,14 +80,15 @@ export default function ConversationSidebar({
           <button
             type="button"
             onClick={onNewChat}
+            aria-label={pendingRequestCount > 0 ? `New chat, ${pendingRequestCount} pending requests` : 'New chat'}
             className="relative p-1.5 rounded-lg text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950/30 transition-colors"
             title="New chat"
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
             {pendingRequestCount > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 min-w-[0.875rem] h-3.5 px-1 flex items-center justify-center rounded-full bg-red-500 text-white text-[9px] font-bold">
+              <span className="absolute -top-0.5 -right-0.5 min-w-[0.875rem] h-3.5 px-1 flex items-center justify-center rounded-full bg-red-500 text-white text-[9px] font-bold" aria-hidden="true">
                 {pendingRequestCount}
               </span>
             )}
@@ -96,10 +97,11 @@ export default function ConversationSidebar({
             <button
               type="button"
               onClick={onHome}
+              aria-label="Home"
               className="p-1.5 rounded-lg text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950/30 transition-colors"
               title="Home"
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
               </svg>
             </button>
@@ -110,6 +112,7 @@ export default function ConversationSidebar({
         <label className="sr-only" htmlFor="home-conversation-search">Search conversations</label>
         <input
           id="home-conversation-search"
+          aria-label="Search or start a chat"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search or start a chat"
@@ -128,12 +131,20 @@ export default function ConversationSidebar({
               key={conv.id}
               type="button"
               onClick={() => onSelectConversation(conv.id)}
+              /* CON-496: the row's accessible name must be the conversation
+                 name plus the unread state spoken separately ("Hina, 16
+                 unread") — the visual content (initials, name, count digits,
+                 chip, preview) is aria-hidden so none of it glues into the
+                 computed name. The actual count is announced (not the 99+
+                 display truncation). */
+              aria-label={`${name}${hasUnread && !isActive ? `, ${conv.unread_count} unread` : ''}`}
               className={`w-full flex items-center gap-3 px-3 py-2.5 mb-0.5 rounded-lg text-left transition-all ${
                 isActive
                   ? 'bg-brand-50 dark:bg-brand-950/30'
                   : 'hover:bg-white dark:hover:bg-gray-800'
               }`}
             >
+              <div className="flex items-center gap-3 min-w-0 flex-1" aria-hidden="true">
               <Avatar
                 name={name}
                 size="sm"
@@ -163,6 +174,7 @@ export default function ConversationSidebar({
                   )}
                   {preview.text || ''}
                 </p>
+              </div>
               </div>
             </button>
           )
