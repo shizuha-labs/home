@@ -157,8 +157,12 @@ jobs:
                         # lucide-react is only resolvable from the package's own
                         # node_modules. Mirror Dockerfile.prod's install including
                         # the HIVE-694 nested-react removal (two-react hooks crash).
-                        (cd /workspace/src/packages/shizuha-ui && npm install --omit=dev --fund=false --audit=false && rm -rf node_modules/react node_modules/react-dom)
-                        (cd /workspace/src/packages/shizuha-chat && npm install --omit=dev --fund=false --audit=false && rm -rf node_modules/react node_modules/react-dom)
+                        # react/react-dom: symlink to frontend's copies rather than
+                        # keeping npm's nested ones (HIVE-694 two-react) or removing
+                        # them outright (lucide-react's ESM dist imports react and
+                        # node resolution from /packages cannot see frontend/node_modules).
+                        (cd /workspace/src/packages/shizuha-ui && npm install --omit=dev --fund=false --audit=false && rm -rf node_modules/react node_modules/react-dom && ln -s /workspace/src/shizuha-home/frontend/node_modules/react node_modules/react && ln -s /workspace/src/shizuha-home/frontend/node_modules/react-dom node_modules/react-dom)
+                        (cd /workspace/src/packages/shizuha-chat && npm install --omit=dev --fund=false --audit=false && rm -rf node_modules/react node_modules/react-dom && ln -s /workspace/src/shizuha-home/frontend/node_modules/react node_modules/react && ln -s /workspace/src/shizuha-home/frontend/node_modules/react-dom node_modules/react-dom)
                         SHIZUHA_PACKAGES_DIR=/workspace/src/packages npm test
                     env:
                       - name: NPM_CONFIG_REGISTRY
