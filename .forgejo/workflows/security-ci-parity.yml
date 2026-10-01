@@ -23,7 +23,7 @@ jobs:
           import pathlib
           import re
 
-          expected_bundle = "aa81dd99f4a205fc152bc18265f1494b49223a6f856bdccc96f1a63e5f3831f9"
+          expected_bundle = "0e3f4cd9b8203a016f3df7d35669671399edcb8227b435de43c051bb4c1f987f"
           paths = sorted([
               ".forgejo/workflows/security-ci.yml",
               ".forgejo/workflows/security-ci-parity.yml",
@@ -55,4 +55,4 @@ jobs:
           PY
           python3 scripts/check-security-ci-contract.py \
             --workflow .forgejo/workflows/security-ci.yml \
-            --expected-sha256 1391440f6666be5eb75ac324142fb59378089d61353844706555cd4df87050e5
+            --expected-sha256 2f282b1b89fd5544d0abde7925256ddc254ac013adf1f64dd8a7e7c377838cd3
