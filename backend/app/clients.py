@@ -422,8 +422,6 @@ async def fetch_agents_live(client: httpx.AsyncClient, bearer: str,
     return Widget.ok_(data=agents)
 
 
-CEO_HOME_EMAILS = frozenset({"hothritik1@gmail.com", "hritik@shizuha.com"})
-CEO_HOME_USER_IDS = frozenset({3})
 ORG_TALK_AGENT_USERNAMES = frozenset({"yuna", "hina", "ena", "aya"})
 
 
@@ -447,14 +445,11 @@ def caller_may_talk_to_agent(caller, username: str, owner_id=None) -> bool:
     raw = str(username or "").strip().lower()
     if not raw:
         return False
-    email = str(getattr(caller, "email", "") or "").strip().lower() if caller is not None else ""
-    if email in CEO_HOME_EMAILS:
-        return True
     try:
         caller_id = int(getattr(caller, "user_id", 0) or 0)
     except (TypeError, ValueError):
         caller_id = 0
-    if caller_id in CEO_HOME_USER_IDS:
+    if caller_id in settings.OPERATOR_USER_IDS:
         return True
     if raw in ORG_TALK_AGENT_USERNAMES:
         return False
@@ -832,7 +827,7 @@ async def fetch_usage_summary(client: httpx.AsyncClient, bearer: str) -> Widget:
     """
     try:
         resp = await client.get(
-            f"{settings.HIVE_API_URL}/api/v1/usage/summary",
+            f"{settings.HIVE_METERING_URL}/api/v1/usage/summary",
             headers=_auth_headers(bearer),
             timeout=settings.SOURCE_TIMEOUT_SECONDS,
         )

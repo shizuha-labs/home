@@ -48,7 +48,7 @@ export function mergeSessionUser(stored, tokenUser) {
   if (!stored && !tokenUser) return null
   const merged = { ...(tokenUser || {}), ...(stored || {}) }
   // The access token is the live identity. A stale shizuha_user.id (often 1)
-  // must not win — that made the operator's Shizuha DM label as "Hritik Soni".
+  // must not win — that made the operator's Shizuha DM label as the other participant.
   const id = resolveCurrentUserId(tokenUser) || resolveCurrentUserId(merged)
   if (id != null) {
     merged.id = id
@@ -83,8 +83,25 @@ export function redirectToLogin() {
   window.location.assign(`/id/login?continue=${encodeURIComponent(returnUrl)}`)
 }
 
-export function expireSessionAndRedirect() {
+/**
+ * Drop a dead session without navigating away.
+ * FRG-72: public surfaces (/forge/, /, /docs, …) must keep rendering for
+ * anonymous visitors even when localStorage still holds an expired ID JWT.
+ * AuthProvider uses this; protected routes (/c/*, /live-trace, …) still
+ * redirect themselves when they need a live session.
+ */
+export function clearExpiredSession() {
   clearAuthStorage()
+}
+
+/**
+ * Clear storage AND send the browser to /id/login.
+ * Only for authenticated-action failures (handleUnauthorized / API 401).
+ * Do not call from AuthProvider init on public pages — that hid the Forge
+ * landing behind ID login whenever a stale token was present (FRG-72).
+ */
+export function expireSessionAndRedirect() {
+  clearExpiredSession()
   redirectToLogin()
 }
 

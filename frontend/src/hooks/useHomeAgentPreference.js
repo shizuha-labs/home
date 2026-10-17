@@ -34,16 +34,14 @@ export const RETIRED_HOME_AGENTS = new Set(['aya'])
 /** CEO Office talk seats. Customers must never land on these. */
 export const ORG_HOME_AGENTS = new Set(['yuna', 'hina', 'ena', 'aya'])
 
-const CEO_HOME_EMAILS = new Set(['hothritik1@gmail.com', 'hritik@shizuha.com'])
-
+// An optional installation-owned convenience mapping, never an email/username
+// allowlist. Backend authorization independently checks the verified subject.
 export function isCeoHomeUser(user) {
-  if (!user) return false
-  const email = String(user.email || '').toLowerCase()
-  if (CEO_HOME_EMAILS.has(email)) return true
-  const username = String(user.username || '').toLowerCase()
-  if (username === 'hritik' || username === 'hothritik1') return true
-  const id = Number(user.id ?? user.user_id)
-  return Number.isInteger(id) && id === 3
+  const id = Number(user?.id ?? user?.user_id)
+  if (!Number.isInteger(id) || id <= 0) return false
+  const configured = String(import.meta.env.VITE_HOME_OPERATOR_USER_IDS || '')
+    .split(',').map((value) => value.trim()).filter((value) => /^[1-9]\d*$/.test(value))
+  return configured.includes(String(id))
 }
 
 export function isPersonalHomeAgentUsername(username) {
@@ -63,7 +61,8 @@ export function homeAgentDisplayName(username, fallback) {
 
 /** CEO default is the Grok/SCLI talk seat (Ena). Everyone else gets their Shizuha. */
 export function suggestedHomeAgentUsername(user) {
-  if (isCeoHomeUser(user)) return 'ena'
+  const configured = String(import.meta.env.VITE_HOME_OPERATOR_AGENT || '').trim().toLowerCase()
+  if (isCeoHomeUser(user) && /^[a-z0-9][a-z0-9_-]*$/.test(configured)) return configured
   return personalHomeAgentUsername(user)
 }
 

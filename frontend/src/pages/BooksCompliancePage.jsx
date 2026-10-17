@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertCircle, ArrowRight, BadgeCheck, BarChart3, CalendarClock, Check, FileCheck2, LockKeyhole, ShieldCheck, Sparkles } from 'lucide-react'
 import GlobalNavBar from '../components/shared/GlobalNavBar'
 import Footer from '../components/Footer'
@@ -57,6 +57,9 @@ function useComplianceFunnel(stage) {
           setToken(current)
         }
         await api('beacon', { token: current, event: stage, source: attribution(), referrer: attribution() })
+        // VEN-264: mark this session as having touched a compliance surface —
+        // the Guide call-start counter keys on this flag (surface tag only).
+        try { sessionStorage.setItem('shizuha_compliance_surface_seen', '1') } catch { /* noop */ }
       })
       .catch(() => active && setGate({ loading: false, enabled: false }))
     return () => { active = false }
@@ -106,6 +109,15 @@ function IntakePanel({ funnel }) {
   const [state, setState] = useState('idle')
   const [error, setError] = useState('')
   const enabled = funnel.gate.enabled
+  // VEN-264: intake-start signal — one fire-and-forget beacon at the FIRST
+  // intake interaction (entry action only, never field content), deduped
+  // server-side per funnel token (intake_started boolean).
+  const intakeStartSent = useRef(false)
+  const signalIntakeStart = () => {
+    if (intakeStartSent.current || !funnel.token) return
+    intakeStartSent.current = true
+    api('beacon', { token: funnel.token, event: 'intake_start', source: attribution(), referrer: attribution() }).catch(() => {})
+  }
 
   const toggleUseCase = (value) => setForm((current) => ({
     ...current,
@@ -172,22 +184,22 @@ function IntakePanel({ funnel }) {
         {[['name','Full name','text',100],['email','Email address','email',254],['company','Company','text',200],['phone','Phone · optional','tel',20]].map(([name,label,type,maxLength]) => (
           <label key={name} className={name === 'company' ? 'sm:col-span-2' : ''}>
             <span className="text-sm font-medium text-slate-200">{label}</span>
-            <input name={name} type={type} required={name !== 'phone'} maxLength={maxLength} value={form[name]} onChange={(e) => setForm({...form,[name]:e.target.value})} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/70 px-4 py-3 text-white placeholder:text-slate-600 focus:border-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-400/25" />
+            <input name={name} type={type} required={name !== 'phone'} maxLength={maxLength} value={form[name]} onChange={(e) => { signalIntakeStart(); setForm({...form,[name]:e.target.value}) }} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/70 px-4 py-3 text-white placeholder:text-slate-600 focus:border-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-400/25" />
           </label>
         ))}
       </div>
       <fieldset className="mt-6">
         <legend className="text-sm font-medium text-slate-200">What should the cockpit help with? <span className="text-slate-500">Choose up to 3</span></legend>
-        <div className="mt-3 flex flex-wrap gap-2">{USE_CASES.map(([value,label]) => <button type="button" key={value} aria-pressed={form.use_cases.includes(value)} onClick={() => toggleUseCase(value)} className={`rounded-full border px-3 py-2 text-sm transition ${form.use_cases.includes(value) ? 'border-cyan-300 bg-cyan-300/15 text-cyan-100' : 'border-white/10 text-slate-400 hover:border-white/25'}`}>{label}</button>)}</div>
+        <div className="mt-3 flex flex-wrap gap-2">{USE_CASES.map(([value,label]) => <button type="button" key={value} aria-pressed={form.use_cases.includes(value)} onClick={() => { signalIntakeStart(); toggleUseCase(value) }} className={`rounded-full border px-3 py-2 text-sm transition ${form.use_cases.includes(value) ? 'border-cyan-300 bg-cyan-300/15 text-cyan-100' : 'border-white/10 text-slate-400 hover:border-white/25'}`}>{label}</button>)}</div>
       </fieldset>
       <label className="mt-6 block">
         <span className="text-sm font-medium text-slate-200">Organization size</span>
-        <select value={form.org_size} onChange={(e) => setForm({...form,org_size:e.target.value})} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/70 px-4 py-3 text-white focus:border-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-400/25">
+        <select value={form.org_size} onChange={(e) => { signalIntakeStart(); setForm({...form,org_size:e.target.value}) }} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/70 px-4 py-3 text-white focus:border-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-400/25">
           {['1-10','11-50','51-200','201-1000','1000+'].map((value) => <option key={value}>{value}</option>)}
         </select>
       </label>
       <label className="mt-6 flex items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm leading-6 text-slate-300">
-        <input type="checkbox" required checked={form.consent} onChange={(e) => setForm({...form,consent:e.target.checked})} className="mt-1 h-4 w-4 accent-cyan-400" />
+        <input type="checkbox" required checked={form.consent} onChange={(e) => { signalIntakeStart(); setForm({...form,consent:e.target.checked}) }} className="mt-1 h-4 w-4 accent-cyan-400" />
         <span>By ticking this box, you ask Shizuha to send a confirmation message about Books Compliance Cockpit access. Contact is permitted only after you confirm the channel. You may withdraw or request access/erasure via privacy@shizuha.com. Notice {NOTICE_VERSION}. <a className="text-cyan-300 underline" href="/privacy">Privacy policy</a>.</span>
       </label>
       {error && <p role="alert" className="mt-4 rounded-xl border border-rose-400/20 bg-rose-400/10 p-3 text-sm text-rose-200">{error}</p>}

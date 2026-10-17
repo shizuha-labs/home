@@ -25,14 +25,16 @@ _PRIVATE_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 _PUBLIC_KEY = _PRIVATE_KEY.public_key()
 
 
-def _token(user_id=101, email="a@org1.example", memberships=None, expired=False, key=None, kid="test-kid", alg="RS256"):
+def _token(user_id=101, email="a@org1.example", memberships=None, expired=False, key=None, kid="test-kid", alg="RS256", claims=None):
     now = datetime.datetime.now(datetime.timezone.utc)
     payload = {
+        "iss": auth.settings.EXPECTED_ISSUER, "aud": "*", "token_type": "access", "iat": int(now.timestamp()),
         "user_id": user_id,
         "email": email,
         "organization_memberships": memberships if memberships is not None else {"1": "admin"},
         "exp": now - datetime.timedelta(hours=1) if expired else now + datetime.timedelta(hours=1),
     }
+    payload.update(claims or {})
     return jwt.encode(payload, key or _PRIVATE_KEY, algorithm=alg, headers={"kid": kid} if kid else None)
 
 
@@ -47,6 +49,7 @@ def _stub_jwks(monkeypatch):
     def _fake_fetch(force_refresh=False):
         return {"test-kid": _PUBLIC_KEY}
     monkeypatch.setattr("app.auth._jwks_fetch_keys", _fake_fetch)
+    monkeypatch.setattr(auth.httpx, "post", lambda *args, **kwargs: auth.httpx.Response(200, json={"active": True}))
     auth._JWKS_CACHE["keys"] = {}
     auth._JWKS_CACHE["fetched_at"] = 0.0
     yield
@@ -678,3 +681,54 @@ def test_tasks_widget_malformed_projection_does_not_report_empty():
         async with _mock_client(lambda _: httpx.Response(200, json={'results': []})) as c:
             return await clients.fetch_tasks_by_status(c, 'caller', None, 1)
     assert _run(go()).status == 'degraded'
+
+
+@pytest.mark.parametrize("claims", [
+    {"iss": "https://other.example/id"},
+    {"aud": "unrelated-oauth-client"},
+    {"token_type": "refresh"},
+])
+def test_home_rejects_unrelated_signed_token_context(claims, monkeypatch):
+    monkeypatch.setattr(settings, "EXPECTED_ISSUER", "https://id.test", raising=False)
+    token = _token(claims={"iss": "https://id.test", "aud": "*",
+                           "token_type": "access", "iat": 1, **claims})
+    assert client.get("/api/home/summary", headers=_auth(token)).status_code == 401
+
+
+def test_home_rechecks_exact_bearer_after_session_logout_even_with_warm_widget_cache(monkeypatch):
+    monkeypatch.setattr(settings, "EXPECTED_ISSUER", "https://id.test", raising=False)
+    monkeypatch.setattr(settings, "REVOCATION_STATUS_URL", "https://id.test/api/oauth/revocation-status", raising=False)
+    token = _token(claims={"iss": "https://id.test", "aud": "*", "token_type": "access", "iat": 1, "sid": "session-one"})
+    active = True
+    checked = []
+    def status_response(url, **kwargs):
+        assert url == settings.REVOCATION_STATUS_URL
+        assert kwargs["follow_redirects"] is False
+        checked.append(kwargs["json"]["token"])
+        return httpx.Response(200, json={"active": active, "token_version": 0})
+    monkeypatch.setattr(auth.httpx, "post", status_response)
+    assert client.get("/api/home/summary", headers=_auth(token)).status_code == 200
+    active = False  # ID's authoritative response after the exact sid logs out.
+    assert client.get("/api/home/summary", headers=_auth(token)).status_code == 401
+    assert checked == [token, token]
+
+
+def test_home_revocation_unknown_is_not_authoritative_allow(monkeypatch):
+    monkeypatch.setattr(settings, "EXPECTED_ISSUER", "https://id.test", raising=False)
+    token = _token(claims={"iss": "https://id.test", "aud": "*", "token_type": "access", "iat": 1})
+    def unavailable(*args, **kwargs):
+        raise httpx.ConnectError("test ID unavailable")
+    monkeypatch.setattr(auth.httpx, "post", unavailable)
+    assert client.get("/api/home/summary", headers=_auth(token)).status_code == 503
+
+
+@pytest.mark.parametrize("body,code", [({"active": "true"}, 200), ({}, 200),
+                                     ({"active": True}, 302), ({"active": True}, 503)])
+def test_home_session_authority_requires_literal_active_and_success(body, code, monkeypatch):
+    monkeypatch.setattr(auth.httpx, "post", lambda *args, **kwargs: httpx.Response(code, json=body))
+    assert client.get("/api/home/summary", headers=_auth(_token())).status_code == 503
+
+
+@pytest.mark.parametrize("audience", ["*", "home", ["home", "pulse"]])
+def test_home_platform_and_resource_access_audiences_remain_supported(audience):
+    assert client.get("/api/home/summary", headers=_auth(_token(claims={"aud": audience}))).status_code == 200

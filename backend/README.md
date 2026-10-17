@@ -23,6 +23,7 @@ only as a stateless async BFF.
 ## Tenant isolation (the load-bearing control)
 
 - Identity + org scope come **only from the verified id-JWT** (shizuha-id **RS256**, verified against id's **JWKS**, signing key resolved by `kid`) — never a request field. Non-RS256 tokens (HS256/`none`) are rejected.
+- Every request also verifies the configured issuer, access token type and platform (`*`) or Home resource audience, and consults ID’s authoritative session revocation endpoint. A logged-out token is refused even if widget data remains cached; an unavailable authority returns 503 rather than granting access.
 - A requested `org_id` must be one the caller is a member of, else **403** (never leak another org's summary).
 - Downstreams receive the **caller's own Bearer** — each applies its own authz; the BFF holds **no privileged service token** and can never widen scope / leak cross-org.
 
@@ -31,6 +32,10 @@ only as a stateless async BFF.
 | var | default | note |
 |-----|---------|------|
 | `SHIZUHA_OAUTH_JWKS_URL` / `SHIZUHA_JWKS_URL` | `http://shizuha-id:8001/.well-known/jwks.json` | shizuha-id JWKS (RS256 public keys); RS256 verification fails closed if unreachable |
+| `SHIZUHA_EXPECTED_ISSUER` | `https://shizuha.com/id` | public issuer stamped by this installation’s ID |
+| `SHIZUHA_ID_URL` | `http://shizuha-id:8001` | private ID service transport |
+| `SHIZUHA_REVOCATION_STATUS_URL` | `$SHIZUHA_ID_URL/api/oauth/revocation-status` | per-request authoritative session check |
+| `HOME_OPERATOR_USER_IDS` | empty | optional comma-separated verified user IDs allowed to select organization concierge seats; no built-in account |
 | `HOME_BFF_JWKS_TTL` | `600` | JWKS cache TTL (seconds) |
 | `PULSE_API_URL` | `http://shizuha-pulse:8002` | pulse base for tasks/alerts |
 | `ADMIN_API_URL` | `http://shizuha-admin:8003/api` | admin base for scoped organization labels |
@@ -44,8 +49,8 @@ only as a stateless async BFF.
 ## Test
 
 ```
-pip install -r requirements.txt
-python -m pytest tests/ -q
+uv sync --locked --extra dev
+uv run python -m pytest tests/ -q
 ```
 
 Tests cover the auth/tenant-scope invariants (PLAT-1236 cross-org→403,

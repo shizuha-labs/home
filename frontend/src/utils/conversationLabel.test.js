@@ -28,7 +28,7 @@ describe('conversationLabel', () => {
     const conv = {
       conversation_type: 'direct',
       participants: [
-        { user_id: 1, user_name: 'Hritik Soni' },
+        { user_id: 1, user_name: 'Example Operator' },
         { user_id: 735, user_name: 'User 735', user_email: 'ena@shizuha.com' },
       ],
       participant_names: ['User 735'],
@@ -49,7 +49,7 @@ describe('conversationLabel', () => {
     const conv = {
       conversation_type: 'direct',
       participants: [
-        { user_id: 3, user_name: 'Hritik Soni' },
+        { user_id: 3, user_name: 'Example Operator' },
         { user_id: 17, user_name: 'Aoi' },
       ],
       participant_names: ['Aoi'],
@@ -62,7 +62,7 @@ describe('conversationLabel', () => {
     const conv = {
       conversation_type: 'direct',
       participants: [
-        { user_id: 3, user_name: 'Hritik Soni' },
+        { user_id: 3, user_name: 'Example Operator' },
         { user_id: 17, user_name: 'Aoi' },
       ],
       participant_names: ['Aoi'],
@@ -75,10 +75,10 @@ describe('conversationLabel', () => {
     const conv = {
       conversation_type: 'direct',
       participants: [
-        { user_id: 3, user_name: 'Hritik Soni' },
+        { user_id: 3, user_name: 'Example Operator' },
         { user_id: 88, user_name: 'User 88', user_email: 'nagi@agents.shizuha.io' },
       ],
-      participant_names: ['Hritik Soni', 'Nagi'],
+      participant_names: ['Example Operator', 'Nagi'],
     }
     expect(conversationPeerName(conv, 3)).toBe('Nagi')
   })
@@ -87,12 +87,12 @@ describe('conversationLabel', () => {
     const conv = {
       conversation_type: 'direct',
       participants: [
-        { user_id: 3, user_name: 'Hritik Soni', user_email: 'hothritik1@gmail.com', participant_type: 'human' },
+        { user_id: 3, user_name: 'Example Operator', user_email: 'operator@example.invalid', participant_type: 'human' },
         { user_id: 24, user_name: 'Shizuha', user_email: 'shizuha@shizuha.com', participant_type: 'agent' },
       ],
-      participant_names: ['Hritik Soni', 'Shizuha'],
+      participant_names: ['Example Operator', 'Shizuha'],
     }
-    const me = { id: 1, email: 'hothritik1@gmail.com' }
+    const me = { id: 1, email: 'operator@example.invalid' }
     expect(conversationPeerName(conv, 1, me)).toBe('Shizuha')
     expect(conversationPeerName(conv, 3, me)).toBe('Shizuha')
   })
@@ -100,8 +100,8 @@ describe('conversationLabel', () => {
   it('detects a self-only direct conversation', () => {
     const conv = {
       conversation_type: 'direct',
-      participants: [{ user_id: 3, user_name: 'Hritik Soni' }],
-      participant_names: ['Hritik Soni'],
+      participants: [{ user_id: 3, user_name: 'Example Operator' }],
+      participant_names: ['Example Operator'],
     }
     expect(isSelfDirectConversation(conv, 3)).toBe(true)
     expect(isSelfDirectConversation(conv, '3')).toBe(true)
@@ -115,7 +115,7 @@ describe('conversationLabel', () => {
       message_count: 0,
       last_message_at: null,
       participants: [
-        { user_id: 3, user_name: 'Hritik Soni' },
+        { user_id: 3, user_name: 'Example Operator' },
         { user_id: 1616370251, user_name: 'Claw (openclaw)' },
       ],
     }
@@ -125,7 +125,7 @@ describe('conversationLabel', () => {
       message_count: 2,
       last_message_at: '2026-09-06T07:29:27Z',
       participants: [
-        { user_id: 3, user_name: 'Hritik Soni' },
+        { user_id: 3, user_name: 'Example Operator' },
         { user_id: 44, user_name: 'Mio' },
       ],
     }

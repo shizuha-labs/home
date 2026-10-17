@@ -19,10 +19,15 @@ on:
     paths:
       - .forgejo/workflows/deploy-frontend.yml
       - .forgejo/scripts/test-deploy-frontend-kaniko-retry.py
+      - .forgejo/scripts/test-frontend-locked-context.py
+      - Dockerfile.prod
       - frontend/**
 concurrency:
   group: deploy-shizuha-home-frontend-${{ github.ref }}
   cancel-in-progress: true
+env:
+  # Qualified shared-package source; update only with a reviewed lock cohort.
+  HOME_FRONTEND_PACKAGES_COMMIT: dfab6a329b9fc37edec745c516109bfac2a3f722
 jobs:
   quality:
     runs-on: ubuntu-latest
@@ -41,6 +46,8 @@ jobs:
           set -euo pipefail
           # package-lock.json records the developer-facing cache host. Replace
           # it with the runner-local registry so CI never depends on Tailscale.
+          python3 "$GITHUB_WORKSPACE/.forgejo/scripts/test-deploy-frontend-kaniko-retry.py"
+          python3 "$GITHUB_WORKSPACE/.forgejo/scripts/test-frontend-locked-context.py"
           cd "$GITHUB_WORKSPACE/frontend"
           # The production build consumes private monorepo package sources;
           # pull-request tokens are intentionally scoped to this repository.
@@ -124,6 +131,10 @@ jobs:
                         set -e
                         # Monorepo root for packages/ (shallow; submodule pointers only)
                         git clone --depth=1 http://x-token-auth:\${GIT_PASSWORD}@forgejo-http.origin.svc.cluster.local/shizuha-labs/shizuha-stack.git /workspace/src
+                        git -C /workspace/src fetch --depth=1 origin ${{ env.HOME_FRONTEND_PACKAGES_COMMIT }}
+                        git -C /workspace/src checkout --detach ${{ env.HOME_FRONTEND_PACKAGES_COMMIT }}
+                        test "\$(git -C /workspace/src rev-parse HEAD)" = "${{ env.HOME_FRONTEND_PACKAGES_COMMIT }}"
+                        echo "shared-package-source=${{ env.HOME_FRONTEND_PACKAGES_COMMIT }}"
                         # Replace the shizuha-home submodule pointer with THIS repo at the pushed SHA
                         rm -rf /workspace/src/shizuha-home
                         git clone --depth=50 http://x-token-auth:\${GIT_PASSWORD}@forgejo-http.origin.svc.cluster.local/shizuha-labs/home.git /workspace/src/shizuha-home
@@ -133,6 +144,19 @@ jobs:
                           git checkout --detach ${{ github.sha }}
                         fi
                         test "\$(git rev-parse HEAD)" = "${{ github.sha }}"
+                        # BEGIN exact frontend test context
+                        test "\$(git -C /workspace/src rev-parse HEAD)" = "${{ env.HOME_FRONTEND_PACKAGES_COMMIT }}"
+                        test "\$(git -C /workspace/src/shizuha-home rev-parse HEAD)" = "${{ github.sha }}"
+                        mkdir /workspace/frontend-test-context
+                        git -C /workspace/src archive --format=tar --output=/workspace/frontend-test-context/packages.tar ${{ env.HOME_FRONTEND_PACKAGES_COMMIT }} packages/shizuha-ui packages/shizuha-chat
+                        tar -xf /workspace/frontend-test-context/packages.tar -C /workspace/frontend-test-context
+                        rm /workspace/frontend-test-context/packages.tar
+                        mkdir /workspace/frontend-test-context/home
+                        git -C /workspace/src/shizuha-home archive --format=tar --output=/workspace/frontend-test-context/home.tar ${{ github.sha }} frontend
+                        tar -xf /workspace/frontend-test-context/home.tar -C /workspace/frontend-test-context/home
+                        rm /workspace/frontend-test-context/home.tar
+                        printf 'packages=%s\nhome=%s\n' '${{ env.HOME_FRONTEND_PACKAGES_COMMIT }}' '${{ github.sha }}' > /workspace/frontend-test-context/source-commits.txt
+                        # END exact frontend test context
                     env:
                       - name: GIT_PASSWORD
                         valueFrom: { secretKeyRef: { name: forgejo-token, key: password } }
@@ -140,22 +164,31 @@ jobs:
                 containers:
                   - name: test
                     image: node:20-slim
-                    workingDir: /workspace/src/shizuha-home/frontend
+                    workingDir: /workspace/home/frontend
                     command: ["/bin/bash","-c"]
                     args:
                       - |
                         set -euo pipefail
-                        # Dockerfile.prod installs from package.json only: the
-                        # tracked lockfile's file:../../packages deps trip npm's
-                        # "Cannot read properties of undefined (reading
-                        # 'extraneous')" bug outside the monorepo root.
-                        rm -f package-lock.json
-                        npm install --ignore-scripts --fund=false --audit=false
-                        SHIZUHA_PACKAGES_DIR=/workspace/src/packages npm test
+                        # Keep the reviewed graph. Deleting this lock re-resolved
+                        # optional peers and crashed npm10 before test discovery.
+                        npm ci --ignore-scripts --replace-registry-host=always --fund=false --audit=false
+                        # Shared-package runtime deps (check-local-packages.mjs
+                        # contract): rendering the full App makes vite resolve
+                        # @shizuha/ui sources from /workspace/packages, and
+                        # lucide-react is only resolvable from the package's own
+                        # node_modules. Mirror Dockerfile.prod's install including
+                        # the HIVE-694 nested-react removal (two-react hooks crash).
+                        # react/react-dom: symlink to frontend's copies rather than
+                        # keeping npm's nested ones (HIVE-694 two-react) or removing
+                        # them outright (lucide-react's ESM dist imports react and
+                        # node resolution from /packages cannot see frontend/node_modules).
+                        (cd /workspace/packages/shizuha-ui && npm ci --omit=dev --replace-registry-host=always --fund=false --audit=false && rm -rf node_modules/react node_modules/react-dom && ln -s /workspace/home/frontend/node_modules/react node_modules/react && ln -s /workspace/home/frontend/node_modules/react-dom node_modules/react-dom)
+                        (cd /workspace/packages/shizuha-chat && npm ci --omit=dev --replace-registry-host=always --fund=false --audit=false && rm -rf node_modules/react node_modules/react-dom && ln -s /workspace/home/frontend/node_modules/react node_modules/react && ln -s /workspace/home/frontend/node_modules/react-dom node_modules/react-dom)
+                        SHIZUHA_PACKAGES_DIR=/workspace/packages npm test
                     env:
                       - name: NPM_CONFIG_REGISTRY
                         value: http://npm-cache.registry.svc.cluster.local:4873/
-                    volumeMounts: [{ mountPath: /workspace, name: workspace }]
+                    volumeMounts: [{ mountPath: /workspace, name: workspace, subPath: frontend-test-context }]
                 volumes: [{ emptyDir: {}, name: workspace }]
           YAML
           for POLL in $(seq 1 240); do
@@ -196,8 +229,20 @@ jobs:
           printf '%s' "${{ secrets.KUBE_CONFIG_B64 }}" | base64 -d > "$HOME/.kube/config"
           chmod 600 "$HOME/.kube/config"
       - name: Multi-arch build + deploy + verify (frontend)
+        env:
+          HOME_OPERATOR_USER_IDS: ${{ vars.HOME_OPERATOR_USER_IDS }}
+          HOME_OPERATOR_AGENT: ${{ vars.HOME_OPERATOR_AGENT }}
         run: |
           set -euo pipefail
+          # Installation-owned routing preferences; values never live in source.
+          if [[ -n "${HOME_OPERATOR_USER_IDS}" && ! "${HOME_OPERATOR_USER_IDS}" =~ ^[1-9][0-9]*(,[1-9][0-9]*)*$ ]]; then
+            echo "::error::HOME_OPERATOR_USER_IDS must contain numeric subjects"
+            exit 1
+          fi
+          if [[ -n "${HOME_OPERATOR_AGENT}" && ! "${HOME_OPERATOR_AGENT}" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+            echo "::error::HOME_OPERATOR_AGENT has an invalid account identifier"
+            exit 1
+          fi
           SHORT="$(echo "${{ github.sha }}" | cut -c1-7)"
           FTAG="home-frontend-${SHORT}"
           REG="registry.registry.svc.cluster.local:5000"
@@ -488,6 +533,10 @@ jobs:
                         set -e
                         # Monorepo root for packages/ (shallow; submodule pointers only)
                         git clone --depth=1 http://x-token-auth:\${GIT_PASSWORD}@forgejo-http.origin.svc.cluster.local/shizuha-labs/shizuha-stack.git /workspace/src
+                        git -C /workspace/src fetch --depth=1 origin ${{ env.HOME_FRONTEND_PACKAGES_COMMIT }}
+                        git -C /workspace/src checkout --detach ${{ env.HOME_FRONTEND_PACKAGES_COMMIT }}
+                        test "\$(git -C /workspace/src rev-parse HEAD)" = "${{ env.HOME_FRONTEND_PACKAGES_COMMIT }}"
+                        echo "shared-package-source=${{ env.HOME_FRONTEND_PACKAGES_COMMIT }}"
                         # Replace the shizuha-home submodule pointer with THIS repo at the pushed SHA
                         rm -rf /workspace/src/shizuha-home
                         git clone --depth=50 http://x-token-auth:\${GIT_PASSWORD}@forgejo-http.origin.svc.cluster.local/shizuha-labs/home.git /workspace/src/shizuha-home
@@ -515,6 +564,8 @@ jobs:
                       - --registry-mirror=mirror-dockerhub.registry.svc.cluster.local:5000
                       - --build-arg=NPM_CONFIG_REGISTRY=http://npm-cache.registry.svc.cluster.local:4873/
                       - --build-arg=FRONTEND_PATH=shizuha-home
+                      - --build-arg=VITE_HOME_OPERATOR_USER_IDS=${HOME_OPERATOR_USER_IDS}
+                      - --build-arg=VITE_HOME_OPERATOR_AGENT=${HOME_OPERATOR_AGENT}
                       - --build-arg=PREV_FRONTEND_IMAGE=${PREV_FRONTEND_IMAGE}
                       - --cache=${CACHE_ENABLED}
                       - --cache-repo=${REG}/kaniko-cache/home-deploy-frontend-${ARCH}

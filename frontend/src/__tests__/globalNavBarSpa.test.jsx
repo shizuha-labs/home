@@ -10,7 +10,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 vi.mock('../contexts/AuthContext', () => ({
   useAuth: () => ({
     isAuthenticated: true,
-    user: { id: 1, first_name: 'Hritik', username: 'hritik', email: 'hritik@shizuha.com' },
+    user: { id: 1, first_name: 'Example', username: 'operator-example', email: 'operator-work@example.invalid' },
   }),
 }))
 

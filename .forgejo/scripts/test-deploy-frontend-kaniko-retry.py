@@ -15,8 +15,10 @@ def require(fragment: str) -> None:
 
 def main() -> None:
     require("pull_request:")
-    require("if: github.event_name != 'pull_request'")
-    require("needs: contract")
+    require("if: ${{ github.event_name != 'pull_request' }}")
+    require("needs: [quality, test]")
+    require('python3 "$GITHUB_WORKSPACE/.forgejo/scripts/test-deploy-frontend-kaniko-retry.py"')
+    require('python3 "$GITHUB_WORKSPACE/.forgejo/scripts/test-frontend-locked-context.py"')
     require("test \"\\$(git rev-parse HEAD)\" = \"${{ github.sha }}\"")
 
     require('render_build_job "${ARCH}" 1 true')
@@ -31,7 +33,7 @@ def main() -> None:
     require("--cache-copy-layers=${CACHE_ENABLED}")
     require("--build-arg=PREV_FRONTEND_IMAGE=${PREV_FRONTEND_IMAGE}")
     require("Carry forward hashed assets from")
-    require("${PREV_FRONTEND_IMAGE//localhost:30500/${REG}}")
+    require("${PREV_ROLL_IMAGE//localhost:30500/${REG}}")
 
     if SOURCE.count('render_build_job "${ARCH}" 2 false') != 1:
         raise AssertionError("cache bypass must be exactly one bounded retry")

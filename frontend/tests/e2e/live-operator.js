@@ -1,68 +1,20 @@
 /**
  * Shared helpers for live QA against shizuha.com.
  *
- * Default caller is the non-privileged Live QA human (`liveqa`) talking to
- * Yuna — never the operator mailbox or Ena. Opt in to the operator path
+ * Default caller is the dedicated non-privileged Live QA identity talking to
+ * an explicitly configured QA agent. Opt in to the operator path
  * only with SHIZUHA_LIVE_OPERATOR_E2E=1.
  *
  * Credentials: ~/.shizuha/live-qa-creds (two lines: username, password).
  * Never log the password. Never fall back to operator-ui-creds.
  */
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { expect } from '@playwright/test'
 
-export const KNOWN_THREAD = 'bb516974-4152-427a-a2ac-04535b5f393f'
-export const LIVE_QA_AGENT = 'yuna'
+export { KNOWN_THREAD, LIVE_QA_AGENT, loadLiveQaCreds, loadOperatorCreds, loadLiveCallerCreds, liveAgentUsername } from './live-identity.js'
+import { loadLiveCallerCreds, liveAgentUsername, expectedLiveQaUsername } from './live-identity.js'
 export const GHOST_RE = /^(Replied\.?|Keyterms?\s*:)/im
-
-function isOperatorUsername(user) {
-  const u = String(user || '').toLowerCase()
-  return u === 'hritik' || u === 'hothritik1' || u.includes('hothritik')
-}
-
-function readCredFile(credPath) {
-  try {
-    const lines = fs.readFileSync(credPath, 'utf8').split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
-    if (lines[0] && lines[1]) return { user: lines[0], pass: lines[1] }
-  } catch {
-    /* missing file is a skip, not a leak */
-  }
-  return { user: '', pass: '' }
-}
-
-export function loadLiveQaCreds() {
-  const user = process.env.LIVE_QA_USER
-  const pass = process.env.LIVE_QA_PASS
-  if (user && pass && !isOperatorUsername(user)) return { user, pass }
-  const credPath = process.env.SHIZUHA_LIVE_QA_CREDS
-    || path.join(os.homedir(), '.shizuha', 'live-qa-creds')
-  const fromFile = readCredFile(credPath)
-  if (fromFile.user && fromFile.pass && !isOperatorUsername(fromFile.user)) return fromFile
-  return { user: '', pass: '' }
-}
-
-export function loadOperatorCreds() {
-  const user = process.env.HRITIK_USER
-  const pass = process.env.HRITIK_PASS
-  if (user && pass) return { user, pass }
-  const credPath = process.env.SHIZUHA_OPERATOR_CREDS
-    || path.join(os.homedir(), '.shizuha', 'operator-ui-creds')
-  return readCredFile(credPath)
-}
-
-export function loadLiveCallerCreds() {
-  if (process.env.SHIZUHA_LIVE_OPERATOR_E2E === '1') return loadOperatorCreds()
-  return loadLiveQaCreds()
-}
-
-export function liveAgentUsername() {
-  if (process.env.SHIZUHA_LIVE_OPERATOR_E2E === '1') {
-    return process.env.SHIZUHA_LIVE_AGENT || 'ena'
-  }
-  return process.env.SHIZUHA_LIVE_QA_AGENT || LIVE_QA_AGENT
-}
 
 export async function selectHomeAgent(page, username = liveAgentUsername()) {
   await page.evaluate((name) => {
@@ -100,7 +52,7 @@ export async function selectHomeAgent(page, username = liveAgentUsername()) {
 export async function loginHome(page) {
   const { user, pass } = loadLiveCallerCreds()
   if (process.env.SHIZUHA_LIVE_OPERATOR_E2E !== '1') {
-    expect(user, 'live QA username must not be the operator').not.toMatch(/hritik/i)
+    expect(user.toLowerCase(), 'live QA uses only the explicitly configured QA identity').toBe(expectedLiveQaUsername().toLowerCase())
   }
   await page.goto('/id/login?continue=/')
   await page.waitForLoadState('domcontentloaded')

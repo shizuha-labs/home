@@ -11,6 +11,7 @@ caller's own Bearer downstream (never a privileged aggregator token):
 from dataclasses import dataclass
 from typing import Optional
 
+import httpx
 import jwt
 from fastapi import Header, HTTPException, status
 
@@ -106,11 +107,42 @@ def _decode_verified(token: str) -> dict:
     if key is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token")
     try:
-        return jwt.decode(token, key=key, algorithms=["RS256"], options={"verify_aud": False})
+        payload = jwt.decode(
+            token, key=key, algorithms=["RS256"],
+            issuer=settings.EXPECTED_ISSUER, audience=["*", "home"],
+            options={"require": ["exp", "iat", "iss", "aud", "token_type"]},
+        )
+        if payload.get("token_type") != "access":
+            raise jwt.InvalidTokenError("Not an access token")
+        return payload
     except jwt.ExpiredSignatureError:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token")
+
+
+def _check_token_active(token: str) -> None:
+    """Consult ID's session/user/client authority on every authenticated read.
+
+    A signature remains valid after logout. Never cache an authoritative allow
+    across requests, or turn an unavailable authority into an active session.
+    Redirects are refused so the bearer body stays at the configured ID URL.
+    """
+    try:
+        response = httpx.post(
+            settings.REVOCATION_STATUS_URL, json={"token": token},
+            timeout=settings.REVOCATION_TIMEOUT_SECONDS,
+            follow_redirects=False, trust_env=False,
+        )
+        if response.status_code != 200:
+            raise ValueError("ID status unavailable")
+        result = response.json()
+        if not isinstance(result, dict) or type(result.get("active")) is not bool:
+            raise ValueError("Invalid ID status response")
+    except (httpx.HTTPError, ValueError):
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Session authority unavailable")
+    if result["active"] is not True:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Session revoked")
 
 
 def verify_caller(authorization: Optional[str] = Header(default=None)) -> Caller:
@@ -124,6 +156,9 @@ def verify_caller(authorization: Optional[str] = Header(default=None)) -> Caller
         uid = int(uid)
     except (TypeError, ValueError):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token missing user id")
+    if uid <= 0:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token missing user id")
+    _check_token_active(token)
     return Caller(
         user_id=uid,
         email=payload.get("email"),

@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from 'vitest'
+import { describe, expect, it, beforeEach, vi } from 'vitest'
 import {
   agentConversations,
   conversationMatchesQuery,
@@ -18,30 +18,32 @@ import {
 describe('home agent preference', () => {
   beforeEach(() => {
     localStorage.clear()
+    vi.stubEnv("VITE_HOME_OPERATOR_USER_IDS", "3")
+    vi.stubEnv("VITE_HOME_OPERATOR_AGENT", "ena")
   })
 
   it('does not default regular users to the Admin Ops CoS', () => {
     expect(suggestedHomeAgentUsername({ email: 'someone@example.com' })).toBe('')
   })
 
-  it('suggests ena for the CEO mailbox', () => {
-    expect(suggestedHomeAgentUsername({ email: 'hothritik1@gmail.com' })).toBe('ena')
-    expect(suggestedHomeAgentUsername({ email: 'hritik@shizuha.com' })).toBe('ena')
+  it('does not infer operator authority from a mailbox', () => {
+    expect(suggestedHomeAgentUsername({ email: 'operator@example.invalid' })).toBe('')
+    expect(suggestedHomeAgentUsername({ email: 'operator-work@example.invalid' })).toBe('')
   })
 
   it('recognizes the CEO by username or id when email is missing', () => {
-    expect(isCeoHomeUser({ username: 'hritik' })).toBe(true)
+    expect(isCeoHomeUser({ username: 'operator-example' })).toBe(false)
     expect(isCeoHomeUser({ id: 3 })).toBe(true)
     expect(isCeoHomeUser({ user_id: 3 })).toBe(true)
-    expect(isCeoHomeUser({ user_id: '3', display_name: 'Hritik Soni' })).toBe(true)
-    expect(suggestedHomeAgentUsername({ id: 3, username: 'hritik' })).toBe('ena')
+    expect(isCeoHomeUser({ user_id: '3', display_name: 'Example Operator' })).toBe(true)
+    expect(suggestedHomeAgentUsername({ id: 3, username: 'operator-example' })).toBe('ena')
     expect(suggestedHomeAgentUsername({ user_id: 3 })).toBe('ena')
     expect(resolveHomeAgentUsername('', { id: 3 })).toBe('ena')
     expect(personalHomeAgentUsername({ user_id: 279 })).toBe('shizuha-279')
   })
 
   it('binds customers to their own personal Shizuha, never fleet Yuna', () => {
-    const mihir = { id: 279, email: 'mihirgates@hotmail.com' }
+    const mihir = { id: 279, email: 'customer@example.invalid' }
     expect(personalHomeAgentUsername(mihir)).toBe('shizuha-279')
     expect(suggestedHomeAgentUsername(mihir)).toBe('shizuha-279')
     expect(resolveHomeAgentUsername('', mihir)).toBe('shizuha-279')
@@ -61,9 +63,9 @@ describe('home agent preference', () => {
   })
 
   it('does not keep a retired Aya pick as the live default', () => {
-    expect(resolveHomeAgentUsername('hina', { email: 'hothritik1@gmail.com' })).toBe('hina')
-    expect(resolveHomeAgentUsername('aya', { email: 'hritik@shizuha.com' })).toBe('ena')
-    expect(resolveHomeAgentUsername('yuna', { email: 'hothritik1@gmail.com' })).toBe('yuna')
+    expect(resolveHomeAgentUsername('hina', { id: 3, email: 'operator@example.invalid' })).toBe('hina')
+    expect(resolveHomeAgentUsername('aya', { id: 3, email: 'operator-work@example.invalid' })).toBe('ena')
+    expect(resolveHomeAgentUsername('yuna', { id: 3, email: 'operator@example.invalid' })).toBe('yuna')
   })
 
   it('does not send a regular or QA user to the operator Ena or Yuna seat', () => {
@@ -83,12 +85,12 @@ describe('home agent preference', () => {
         id: 'shizuha-dm',
         conversation_type: 'direct',
         participants: [
-          { user_id: 3, user_name: 'Hritik Soni', user_email: 'hothritik1@gmail.com' },
+          { user_id: 3, user_name: 'Example Operator', user_email: 'operator@example.invalid' },
           { user_id: 24, user_name: 'Shizuha', user_email: 'shizuha@shizuha.com', participant_type: 'agent' },
         ],
       },
     ]
-    const rows = agentConversations(conversations, 3, { email: 'hothritik1@gmail.com' })
+    const rows = agentConversations(conversations, 3, { email: 'operator@example.invalid' })
     expect(rows[0]?.username).toBe('Shizuha')
     expect(rows[0]?.displayName).toBe('Shizuha')
   })
@@ -117,7 +119,7 @@ describe('home agent preference', () => {
         id: 'c1',
         conversation_type: 'direct',
         participants: [
-          { user_id: 1, user_name: 'Hritik' },
+          { user_id: 1, user_name: 'Example' },
           { user_id: 9, user_name: 'Cora', username: 'cora', agent_role: true, email: 'cora@shizuha.com' },
         ],
       },
@@ -144,4 +146,12 @@ describe('home agent preference', () => {
     expect(merged.map((row) => row.username)).toEqual(['hina', 'cora'])
     expect(merged[0].userId).toBe(42)
   })
+})
+
+
+it('portable default has no privileged numeric account or concierge seat', () => {
+  vi.stubEnv('VITE_HOME_OPERATOR_USER_IDS', '')
+  vi.stubEnv('VITE_HOME_OPERATOR_AGENT', '')
+  expect(isCeoHomeUser({ id: 3 })).toBe(false)
+  expect(suggestedHomeAgentUsername({ id: 3 })).toBe('shizuha-3')
 })

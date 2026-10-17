@@ -227,7 +227,7 @@ def test_talk_agents_finds_hina_by_username_for_ceo(monkeypatch):
     monkeypatch.setattr("app.clients.fetch_agents_live", _fake_agents)
     resp = client.get(
         "/api/home/talk-agents?q=hina",
-        headers=_auth(_token(email="hritik@shizuha.com")),
+        headers=_auth(_token(user_id=3, email="operator-work@example.invalid")),
     )
     assert resp.status_code == 200
     rows = resp.json()["results"]
@@ -262,7 +262,7 @@ def test_talk_agents_hides_org_yuna_from_customers(monkeypatch):
         return _talk_roster()
 
     monkeypatch.setattr("app.clients.fetch_agents_live", _fake_agents)
-    mihir = _auth(_token(user_id=279, email="mihirgates@hotmail.com"))
+    mihir = _auth(_token(user_id=279, email="customer@example.invalid"))
     yuna = client.get("/api/home/talk-agents?q=yuna", headers=mihir)
     assert yuna.status_code == 200
     assert yuna.json()["results"] == []
@@ -286,7 +286,7 @@ def test_talk_agents_customer_sees_owned_seats_not_org_or_other_owners(monkeypat
         return _talk_roster()
 
     monkeypatch.setattr("app.clients.fetch_agents_live", _fake_agents)
-    mihir = _auth(_token(user_id=279, email="mihirgates@hotmail.com"))
+    mihir = _auth(_token(user_id=279, email="customer@example.invalid"))
     roster = client.get("/api/home/talk-agents", headers=mihir)
     assert roster.status_code == 200
     assert {row["username"] for row in roster.json()["results"]} == {"shizuha-279", "raunak-glm"}
@@ -301,17 +301,18 @@ def test_talk_agents_customer_sees_owned_seats_not_org_or_other_owners(monkeypat
     assert yuna.json()["results"] == []
 
 
-def test_caller_may_talk_owner_does_not_override_org_seats():
+def test_caller_may_talk_owner_does_not_override_org_seats(monkeypatch):
+    monkeypatch.setattr(auth.settings, "OPERATOR_USER_IDS", frozenset({3}))
     from types import SimpleNamespace
     from app.clients import caller_may_talk_to_agent
 
-    caller = SimpleNamespace(email="mihirgates@hotmail.com", user_id=279)
+    caller = SimpleNamespace(email="customer@example.invalid", user_id=279)
     assert caller_may_talk_to_agent(caller, "yuna", owner_id=279) is False
     assert caller_may_talk_to_agent(caller, "raunak-glm", owner_id=279) is True
     assert caller_may_talk_to_agent(caller, "raunak-glm", owner_id=101) is False
     assert caller_may_talk_to_agent(caller, "nami") is False
     assert caller_may_talk_to_agent(caller, "shizuha-279") is True
-    ceo = SimpleNamespace(email="hritik@shizuha.com", user_id=3)
+    ceo = SimpleNamespace(email="operator-work@example.invalid", user_id=3)
     assert caller_may_talk_to_agent(ceo, "nami") is True
 
 
@@ -408,6 +409,7 @@ _PUBLIC_KEY = _PRIVATE_KEY.public_key()
 def _token(user_id=101, email="a@org1.example", memberships=None, expired=False, key=None, kid="test-kid", alg="RS256"):
     now = datetime.datetime.now(datetime.timezone.utc)
     payload = {
+        "iss": auth.settings.EXPECTED_ISSUER, "aud": "*", "token_type": "access", "iat": int(now.timestamp()),
         "user_id": user_id,
         "email": email,
         "organization_memberships": memberships if memberships is not None else {"1": "admin"},
@@ -543,7 +545,9 @@ class _MockRedis:
 def _stub_jwks(monkeypatch):
     def _fake_fetch(force_refresh=False):
         return {"test-kid": _PUBLIC_KEY}
+    monkeypatch.setattr(auth.settings, "OPERATOR_USER_IDS", frozenset({3}))
     monkeypatch.setattr("app.auth._jwks_fetch_keys", _fake_fetch)
+    monkeypatch.setattr(auth.httpx, "post", lambda *args, **kwargs: auth.httpx.Response(200, json={"active": True}))
     auth._JWKS_CACHE["keys"] = {}
     auth._JWKS_CACHE["fetched_at"] = 0.0
     yield
@@ -1449,3 +1453,11 @@ def test_activity_budget_timeout_falls_back_to_stale(monkeypatch):
     assert body["widgets"]["feed"]["data"][0]["item_key"] == "STALE-PLAT-1"
     assert body["widgets"]["agents"]["status"] == "stale"
     assert body["widgets"]["agents"]["data"][0]["name"] == "Steady"
+
+
+def test_unconfigured_installation_has_no_privileged_builtin_subject_or_email(monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(auth.settings, "OPERATOR_USER_IDS", frozenset())
+    caller = SimpleNamespace(user_id=3, email="operator@example.invalid")
+    assert clients.caller_may_talk_to_agent(caller, "hina") is False
+    assert clients.caller_may_talk_to_agent(caller, "shizuha-3") is True
