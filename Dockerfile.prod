@@ -22,18 +22,22 @@ FROM ${PREV_FRONTEND_IMAGE} AS prev-assets
 # Stage 1: Build
 FROM node:20-alpine AS builder
 
-WORKDIR /app
+WORKDIR /workspace/home/frontend
+
+ARG NPM_CONFIG_REGISTRY=https://registry.npmjs.org
+ENV NPM_CONFIG_REGISTRY=${NPM_CONFIG_REGISTRY}
+ENV SHIZUHA_PACKAGES_DIR=/workspace/packages
 
 # Build arg for frontend path (relative to monorepo root)
 ARG FRONTEND_PATH=home
 
 # Copy shared packages first (for vite.shared.js)
-COPY packages/shizuha-ui /packages/shizuha-ui
-COPY packages/shizuha-chat /packages/shizuha-chat
+COPY packages/shizuha-ui /workspace/packages/shizuha-ui
+COPY packages/shizuha-chat /workspace/packages/shizuha-chat
 
 # Install shared package dependencies (needed for build)
-RUN cd /packages/shizuha-ui && npm install --omit=dev
-RUN cd /packages/shizuha-chat && npm install --omit=dev
+RUN cd /workspace/packages/shizuha-ui && npm ci --omit=dev --replace-registry-host=always
+RUN cd /workspace/packages/shizuha-chat && npm ci --omit=dev --replace-registry-host=always
 
 # HIVE-694 (2026-07-12): npm>=7 auto-installs peerDependencies, so the installs
 # above plant a NESTED react/react-dom under each package. The vite aliases
@@ -41,28 +45,30 @@ RUN cd /packages/shizuha-chat && npm install --omit=dev
 # resolved to those nested copies — TWO reacts in the bundle → hooks dispatcher
 # null → "useState of null" crash on shizuha.com. Remove them so the app's own
 # react is the only candidate (vite resolve.dedupe is the belt; this is braces).
-RUN rm -rf /packages/shizuha-ui/node_modules/react /packages/shizuha-ui/node_modules/react-dom \
-           /packages/shizuha-chat/node_modules/react /packages/shizuha-chat/node_modules/react-dom
+RUN rm -rf /workspace/packages/shizuha-ui/node_modules/react /workspace/packages/shizuha-ui/node_modules/react-dom \
+           /workspace/packages/shizuha-chat/node_modules/react /workspace/packages/shizuha-chat/node_modules/react-dom
 
 # Install dependencies first (better caching)
 # Note: shizuha-home has frontend/ subdirectory
-# Use only package.json (not package-lock.json) to avoid lock file path resolution issues
-COPY ${FRONTEND_PATH}/frontend/package.json ./
-RUN npm install
+# Keep the same reviewed dependency graph used by the frontend test Job.
+COPY ${FRONTEND_PATH}/frontend/package.json ${FRONTEND_PATH}/frontend/package-lock.json ./
+RUN npm ci --replace-registry-host=always
 
 # Copy source from frontend subdirectory
 COPY ${FRONTEND_PATH}/frontend/ .
 
-# prebuild guardrail (scripts/nginxResearchProxy.guardrail.test.mjs) resolves
-# ../../nginx.prod.conf from /app/scripts → /nginx.prod.conf. Stage 2 already
-# copies this file into nginx; builder must have it too or `npm run build` 404s.
-COPY ${FRONTEND_PATH}/nginx.prod.conf /nginx.prod.conf
+# Preserve frontend-relative guardrail paths in the same nested source layout.
+COPY ${FRONTEND_PATH}/nginx.prod.conf /workspace/home/nginx.prod.conf
 
 # Build args for Vite
 ARG VITE_BASE_PATH=/
 ARG VITE_API_BASE=/api
+ARG VITE_HOME_OPERATOR_USER_IDS=
+ARG VITE_HOME_OPERATOR_AGENT=
 ENV VITE_BASE_PATH=$VITE_BASE_PATH
 ENV VITE_API_BASE=$VITE_API_BASE
+ENV VITE_HOME_OPERATOR_USER_IDS=$VITE_HOME_OPERATOR_USER_IDS
+ENV VITE_HOME_OPERATOR_AGENT=$VITE_HOME_OPERATOR_AGENT
 ENV NODE_ENV=production
 
 # Build static files
@@ -84,7 +90,7 @@ COPY --from=prev-assets /usr/share/nginx/html /tmp/prev-html
 RUN mkdir -p /usr/share/nginx/html/assets \
  && if [ -d /tmp/prev-html/assets ]; then cp -a /tmp/prev-html/assets/. /usr/share/nginx/html/assets/; fi \
  && rm -rf /tmp/prev-html
-COPY --from=builder /app/dist /usr/share/nginx/html
+COPY --from=builder /workspace/home/frontend/dist /usr/share/nginx/html
 
 # Expose port 80
 EXPOSE 80

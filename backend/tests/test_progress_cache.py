@@ -285,8 +285,11 @@ async def test_expired_data_and_failed_cold_fetch_are_not_fabricated_zero(rr):
 async def test_real_route_auth_scope_pending_followup_and_client_lifetime(rr, monkeypatch):
     private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     monkeypatch.setattr(auth, '_jwks_fetch_keys', lambda **_: {'progress': private.public_key()})
+    monkeypatch.setattr(auth.httpx, 'post', lambda *args, **kwargs: httpx.Response(200, json={'active': True}))
     def token(user=1, org='1', expired=False):
         return jwt.encode({'user_id': user, 'email': 'test@example.invalid',
+                           'iss': auth.settings.EXPECTED_ISSUER, 'aud': '*',
+                           'token_type': 'access', 'iat': int(time.time()),
                            'organization_memberships': {org: 'admin'},
                            'exp': int(time.time()) + (-1 if expired else 3600),
                            'jti': str(uuid.uuid4())}, private, algorithm='RS256',

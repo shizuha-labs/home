@@ -27,7 +27,22 @@ class Settings:
             + "/.well-known/jwks.json"
         )
     ).rstrip("/")
+    # Public issuer and private verification transport are separate deployment
+    # inputs: a container URL is not the issuer stamped in browser tokens.
+    EXPECTED_ISSUER: str = os.environ.get("SHIZUHA_EXPECTED_ISSUER", "https://shizuha.com/id").rstrip("/")
+    REVOCATION_STATUS_URL: str = os.environ.get(
+        "SHIZUHA_REVOCATION_STATUS_URL", f"{SHIZUHA_ID_URL}/api/oauth/revocation-status",
+    )
+    REVOCATION_TIMEOUT_SECONDS: float = float(os.environ.get("HOME_BFF_REVOCATION_TIMEOUT", "2.5"))
+
     JWKS_TTL_SECONDS: float = float(os.environ.get("HOME_BFF_JWKS_TTL", "600"))
+
+    # Optional installation-owned concierge mapping. No account/email in source
+    # receives special access; the verified numeric subject is the only key.
+    OPERATOR_USER_IDS: frozenset[int] = frozenset(
+        int(value.strip()) for value in os.environ.get("HOME_OPERATOR_USER_IDS", "").split(",")
+        if value.strip().isdecimal() and int(value.strip()) > 0
+    )
 
     # Downstream service base URLs (in-cluster). The BFF forwards the CALLER's
     # Bearer to each — it holds NO privileged service token (the load-bearing
@@ -42,6 +57,17 @@ class Settings:
     HIVE_API_URL: str = os.environ.get(
         "HIVE_API_URL",
         "http://hive.shizuha-hive.svc.cluster.local:8030/hive/api",
+    ).rstrip("/")
+    # PLAT-9402: the Metering Core read plane is mounted at the hive HOST ROOT
+    # (hive_project/urls.py line 50: 'api/v1/usage/summary'), NOT under the
+    # /hive/api prefix HIVE_API_URL carries. The fleet/analytics clients append
+    # /v1/... to HIVE_API_URL (-> /hive/api/v1/...), which is why their routes
+    # resolve; the usage-summary client must use the host root or it 404s
+    # (live-verified 2026-09-23: /api/v1/usage/summary 200,
+    # /hive/api/api/v1/usage/summary 404 -> BFF degraded 502).
+    HIVE_METERING_URL: str = os.environ.get(
+        "HIVE_METERING_URL",
+        "http://hive.shizuha-hive.svc.cluster.local:8030",
     ).rstrip("/")
     BOOKS_API_URL: str = os.environ.get("BOOKS_API_URL", "http://shizuha-books:8000/api").rstrip("/")
     CONNECT_API_URL: str = os.environ.get("CONNECT_API_URL", "http://shizuha-connect:8000/api").rstrip("/")

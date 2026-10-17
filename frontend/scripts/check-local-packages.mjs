@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -15,6 +15,26 @@ const requiredPackages = ['shizuha-ui', 'shizuha-chat'];
 const packageRoot = candidateRoots.find((root) =>
   requiredPackages.every((pkg) => existsSync(resolve(root, pkg, 'src')))
 );
+
+function installedPackageReady(name) {
+  const root = resolve(frontendRoot, 'node_modules', '@shizuha', name);
+  try {
+    const metadata = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'));
+    const entries = [metadata.module, metadata.main, metadata.types];
+    return metadata.name === `@shizuha/${name}` && entries.every((entry) =>
+      typeof entry === 'string' && existsSync(resolve(root, entry))
+    );
+  } catch {
+    return false;
+  }
+}
+
+// Reviewed npm tarballs carry built entry points, not monorepo source or nested
+// dependency installs. Vite resolves their normal package exports without aliases.
+if (!packageRoot && ['ui', 'chat'].every(installedPackageReady)) {
+  console.log('Using installed Shizuha package builds');
+  process.exit(0);
+}
 
 if (!packageRoot) {
   console.error(`Missing Shizuha shared package sources required for the Home frontend build.

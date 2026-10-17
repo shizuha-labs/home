@@ -6,6 +6,25 @@ export const STT_INCOMPLETE_HANGOVER_MS = 4000
 export const STT_COMMIT_QUIET_MS = 1400
 /** After mute, commit a finished sentence soon — mute is not “throw this away”. */
 export const STT_MUTE_COMMIT_MS = 400
+/**
+ * PLAT-9385: client-side endpointing fallback. The upstream STT's own
+ * `speech_final` VAD can starve (observed live: 1 fire in 10 minutes across
+ * ~52 speech bursts with 3s silence gaps), which starves the whole agent
+ * turn — the call degrades to listen-only. When a text partial has arrived
+ * and the mic has been quiet this long WITHOUT a server speech_final, the
+ * client commits the turn itself from the stitched partial.
+ *
+ * Review repair (rei, home#47): the fallback threshold sits BELOW the live
+ * 3s inter-burst gaps, because a repeated 3s-gap pattern is exactly the
+ * signature that starved speech_final — the fallback must terminate those
+ * turns. The threshold is measured from AUDIO quiet (lastLoudAt), never from
+ * partial arrival (a partial reset re-armed the old watchdog and a 3s gap
+ * never reached 4600ms). The origin repair — a server-side endpointer that
+ * commits real silence gaps at the voice/STT contract — is filed in-flight
+ * (PLAT-9385 origin lap); this client fallback is the mitigation with the
+ * origin identified, per fix-root-cause.
+ */
+export const STT_SILENCE_COMMIT_MS = 2600
 
 const INCOMPLETE_TAIL = /\b(a|an|and|at|but|check|for|if|in|of|on|or|so|the|to|with|my|your|this|that|these|those|first|second|third|want|see|look|tell|give|pull|open|about|task|personally|perhaps|maybe|just|please|then|also|there|here|like|into|login|log)$/i
 const NUMBER_WORDS = /\b(zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b/i
@@ -109,6 +128,7 @@ export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, 
   let firstPartialMs = null
   let lastLoudAt = 0
   let commitTimer = null
+  let silenceTimer = null
   const seedText = String(seed || '').trim()
   let pendingFinal = seedText ? { text: seedText, event: { type: 'seed', text: seedText } } : null
   let lastPartial = seedText
@@ -128,6 +148,45 @@ export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, 
     pendingFinal = null
   }
 
+  /** PLAT-9385 (review repair): the silence watchdog is armed from AUDIO
+   * quiet (lastLoudAt), not from partial arrival — a partial reset re-armed
+   * the old watchdog on every text event, so speech bursts separated by 3s
+   * gaps never let it fire. `armSilenceWatchdog()` is called on the
+   * loud→quiet transition (onaudioprocess) with a delay that lands exactly
+   * STT_SILENCE_COMMIT_MS after the last loud sample, and — only when no
+   * audio clock exists (headless/degraded graph) — from a text partial with
+   * the full delay. When it fires the stitched partial is committed
+   * DIRECTLY: the silence already elapsed, so the armCommit hangover would
+   * double-count (the old path added another 3200/4000ms on top). If the
+   * mic is loud again at fire time, re-arm — the turn commits once the
+   * speaker actually pauses. */
+  const armSilenceWatchdog = () => {
+    if (silenceTimer != null) window.clearTimeout(silenceTimer)
+    const quietMs = firstAudioAt ? performance.now() - lastLoudAt : 0
+    const delay = Math.max(STT_SILENCE_COMMIT_MS - quietMs, 50)
+    silenceTimer = window.setTimeout(() => {
+      silenceTimer = null
+      if (finalDelivered || cancelled || captureEnded) return
+      if (pendingFinal || commitTimer != null) return
+      const text = (lastPartial || '').trim()
+      if (!text) return
+      if (stillLoud()) {
+        armSilenceWatchdog()
+        return
+      }
+      // Direct commit: the audio quiet window already measured
+      // STT_SILENCE_COMMIT_MS — do not add the utterance hangover.
+      const event = { type: 'transcript.partial', text, speech_final: true }
+      finishCapture(true)
+      deliverFinal(text, event)
+    }, delay)
+  }
+
+  const clearSilenceWatchdog = () => {
+    if (silenceTimer != null) window.clearTimeout(silenceTimer)
+    silenceTimer = null
+  }
+
   const stopResources = () => {
     try { source?.disconnect() } catch { /* already disconnected */ }
     try { processor?.disconnect() } catch { /* already disconnected */ }
@@ -145,6 +204,7 @@ export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, 
     cancelled = true
     captureEnded = true
     clearCommit()
+    clearSilenceWatchdog()
     if (closeTimer) window.clearTimeout(closeTimer)
     closeTimer = null
     stopResources()
@@ -183,6 +243,7 @@ export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, 
     if (!clean || finalDelivered) return
     finalDelivered = true
     clearCommit()
+    clearSilenceWatchdog()
     onFinal?.(clean, event)
   }
 
@@ -289,7 +350,21 @@ export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, 
       if (!firstAudioAt) firstAudioAt = now
       let sum = 0
       for (let i = 0; i < samples.length; i += 1) sum += samples[i] * samples[i]
-      if (Math.sqrt(sum / samples.length) > 0.018) lastLoudAt = now
+      const wasLoud = Math.sqrt(sum / samples.length) > 0.018
+      if (wasLoud) lastLoudAt = now
+      // PLAT-9385 (review repair): arm the silence watchdog from the AUDIO
+      // clock — while the mic is quiet, the fallback turn-commit lands at
+      // lastLoudAt + STT_SILENCE_COMMIT_MS regardless of partial resets.
+      if (
+        !wasLoud
+        && lastLoudAt
+        && !silenceTimer
+        && !pendingFinal
+        && commitTimer == null
+        && (lastPartial || '').trim()
+      ) {
+        armSilenceWatchdog()
+      }
       socket.send(toPcm16(samples))
     }
     socket.onopen = () => {
@@ -342,6 +417,11 @@ export function startStreamingStt({ token, onPartial, onFinal, onDone, onState, 
         const stitched = pendingFinal ? stitchHeard(pendingFinal.text, text) : text
         lastPartial = stitched
         onPartial?.(stitched, timedEvent)
+        // PLAT-9385 (review repair): partials NO LONGER arm or re-arm the
+        // silence watchdog — the AUDIO clock owns endpointing arming
+        // (onaudioprocess loud→quiet). A partial reset re-armed the old
+        // watchdog on every text event, so speech bursts separated by 3s
+        // gaps never let it fire.
         if (event.speech_final) {
           // Do not tear the mic down on the first VAD silence. Grok's
           // speech_final can fire mid-clause; hangover + Smart Turn wait

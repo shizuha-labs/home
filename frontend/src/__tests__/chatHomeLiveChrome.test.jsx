@@ -31,7 +31,7 @@ const voice = {
 
 vi.mock('../contexts/AuthContext', () => ({
   useAuth: () => ({
-    user: { id: 1, first_name: 'Hritik', username: 'hritik', email: 'hritik@shizuha.com' },
+    user: { id: 1, first_name: 'Example', username: 'operator-example', email: 'operator-work@example.invalid' },
     isAuthenticated: true,
   }),
 }))
@@ -135,13 +135,13 @@ vi.mock('@shizuha/chat', () => {
       conversations: [{
         id: CONV,
         participants: [
-          { user_id: 1, username: 'hritik', first_name: 'Hritik' },
+          { user_id: 1, username: 'operator-example', first_name: 'Example' },
           { user_id: 2, username: 'ena', first_name: 'Ena', email: 'ena@shizuha.com' },
         ],
       }, {
         id: HINA_CONV,
         participants: [
-          { user_id: 1, username: 'hritik', first_name: 'Hritik' },
+          { user_id: 1, username: 'operator-example', first_name: 'Example' },
           { user_id: 698, username: 'hina', first_name: 'Hina', email: 'hina@shizuha.com' },
         ],
       }],
@@ -218,6 +218,8 @@ function PersistHarness() {
 
 describe('ChatHome Live chrome', () => {
   beforeEach(() => {
+    vi.stubEnv('VITE_HOME_OPERATOR_USER_IDS', '1')
+    vi.stubEnv('VITE_HOME_OPERATOR_AGENT', 'ena')
     voice.callState = 'idle'
     voice.callError = null
     voice.endSpeak.mockClear()
@@ -291,7 +293,7 @@ describe('ChatHome Live chrome', () => {
       { id: 'u1', sender_id: 1, content: "Yo, what's up?" },
       { id: 'a1', sender_id: 2, sender_name: 'Ena', content: "Hey. I'm here. What do you need?" },
       { id: 'a2', sender_id: 2, sender_name: 'Ena', content: 'Replied.' },
-      { id: 'a3', sender_id: 2, sender_name: 'Ena', content: 'Keyterms: Shizuha, Hritik, Hive, Cortex, Pulse' },
+      { id: 'a3', sender_id: 2, sender_name: 'Ena', content: 'Keyterms: Shizuha, Example, Hive, Cortex, Pulse' },
     ]
     voice.callState = 'listening'
     renderAt('/')

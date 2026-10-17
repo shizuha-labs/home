@@ -22,6 +22,7 @@ _PUBLIC_KEY = _PRIVATE_KEY.public_key()
 def _token(user_id=101, email="a@org1.example", memberships=None):
     now = datetime.datetime.now(datetime.timezone.utc)
     payload = {
+        "iss": auth.settings.EXPECTED_ISSUER, "aud": "*", "token_type": "access", "iat": int(now.timestamp()),
         "user_id": user_id,
         "email": email,
         "organization_memberships": memberships if memberships is not None else {"1": "admin"},
@@ -62,6 +63,7 @@ def _stub(monkeypatch):
         return {"test-kid": _PUBLIC_KEY}
 
     monkeypatch.setattr("app.auth._jwks_fetch_keys", _fake_fetch)
+    monkeypatch.setattr(auth.httpx, "post", lambda *args, **kwargs: auth.httpx.Response(200, json={"active": True}))
     auth._JWKS_CACHE["keys"] = {}
     fake = FakeRedis()
 

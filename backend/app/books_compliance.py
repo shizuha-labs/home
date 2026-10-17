@@ -15,7 +15,7 @@ import threading
 import unicodedata
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
 
@@ -38,7 +38,9 @@ GENERIC_RIGHTS = "If a lead exists for this contact, your request will be proces
 ALLOWED_ATTRIBUTION = {"direct", "google", "linkedin", "twitter", "facebook", "instagram", "other"}
 ALLOWED_USE_CASES = {"gst_tracking", "pan_verify", "report_auto", "invoice_matching", "other"}
 ALLOWED_ORG_SIZES = {"1-10", "11-50", "51-200", "201-1000", "1000+", "other"}
-ALLOWED_VIEW_EVENTS = {"landing_view": "landing_seen", "pricing_view": "pricing_seen"}
+# VEN-264: intake_start joins the token-scoped beacon family — once-only
+# per token (the intake_started boolean dedupes), entry action only.
+ALLOWED_VIEW_EVENTS = {"landing_view": "landing_seen", "pricing_view": "pricing_seen", "intake_start": "intake_started"}
 PHONE_RE = re.compile(r"^[+0-9-]{7,20}$")
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
@@ -121,7 +123,9 @@ class TokenRequest(StrictModel):
 
 class BeaconRequest(StrictModel):
     token: str = Field(min_length=20, max_length=128)
-    event: Literal["landing_view", "pricing_view"]
+    # VEN-264: intake_start joins the beacon family — must stay in lockstep
+    # with ALLOWED_VIEW_EVENTS (the event->column map), else 422 at the route.
+    event: Literal["landing_view", "pricing_view", "intake_start"]
     source: str = "other"
     referrer: str = "other"
 
@@ -224,9 +228,13 @@ def ensure_schema() -> None:
     with _migration_lock:
         if dsn in _migrated_dsn:
             return
-        migration = Path(__file__).parents[1] / "migrations" / "0001_books_compliance.sql"
+        migrations_dir = Path(__file__).parents[1] / "migrations"
         with psycopg.connect(dsn) as conn:
-            conn.execute(migration.read_text())
+            # Applied in filename order; every migration file must be additive
+            # and idempotent (IF NOT EXISTS everywhere) so re-running on an
+            # already-migrated database is a no-op.
+            for path in sorted(migrations_dir.glob("*.sql")):
+                conn.execute(path.read_text())
         _migrated_dsn.add(dsn)
 
 
@@ -311,16 +319,109 @@ def record_beacon(payload: BeaconRequest) -> dict[str, str]:
     require_enabled()
     field = ALLOWED_VIEW_EVENTS[payload.event]
     with db() as conn:
+        # Once-only family contract (matches the lead-event endpoint): the
+        # UPDATE fires only while the flag is still false — a replayed beacon
+        # matches no row and reports terminal, never re-banked.
         row = conn.execute(
             f"""UPDATE books_compliance_funnel_token
                 SET {field}=true,
                     source=CASE WHEN source='other' THEN %s ELSE source END,
                     referrer=CASE WHEN referrer='other' THEN %s ELSE referrer END
-                WHERE token_digest=%s AND expires_at>now()
+                WHERE token_digest=%s AND expires_at>now() AND {field}=false
                 RETURNING token_digest""",
             (payload.source, payload.referrer, _digest(payload.token)),
         ).fetchone()
     return {"status": "accepted" if row else "terminal"}
+
+
+def record_guide_call_start(request: Request) -> dict[str, str]:
+    """VEN-264: tokenless counter for voice-Guide calls originating from a
+    compliance surface. The referrer surface tag only — no caller identity,
+    no funnel token, no PII (VEN-194 intake contract). Rate-limited per
+    source so the aggregate stays honest without client-side dedupe."""
+    require_enabled()
+    with db() as conn:
+        rate_limit(conn, request, "guide_call_start", 10)
+        conn.execute(
+            """INSERT INTO books_compliance_funnel_aggregate
+               (aggregate_date,source,referrer,guide_call_start_count)
+               VALUES (current_date,'guide','compliance_surface',1)
+               ON CONFLICT (aggregate_date,source,referrer) DO UPDATE SET
+                 guide_call_start_count=books_compliance_funnel_aggregate.guide_call_start_count+1""",
+        )
+    return {"status": "counted"}
+
+
+# VEN-264 weekly rollup: the counters that land in the report. Aggregate-only
+# by construction — this module never reads books_compliance_funnel_token or
+# any per-visitor row, so the report cannot carry PII even by accident.
+ROLLUP_COUNTERS = (
+    "landing_count",
+    "pricing_count",
+    "intake_start_count",
+    "submit_count",
+    "guide_call_start_count",
+)
+
+
+def funnel_weekly_rollup(conn: psycopg.Connection, *, today: date | None = None) -> dict[str, Any]:
+    """VEN-264 weekly rollup beat: ISO-week (Mon-start) totals for the funnel
+    counters plus week-over-week deltas, from books_compliance_funnel_aggregate.
+
+    Aggregate-only: reads the date-bucketed aggregate table exclusively — the
+    same privacy posture as the table itself (no per-visitor rows, no PII).
+    The current (partial) week and the full previous week are both reported so
+    the WoW trend is computed like-for-like on elapsed days is NOT attempted;
+    deltas are raw week sums and the partial-week caveat is the caller's to
+    state in the report."""
+    ref = today or _now().date()
+    # Monday of the current ISO week, and the Monday a week prior.
+    this_monday = ref - timedelta(days=ref.weekday())
+    last_monday = this_monday - timedelta(days=7)
+
+    def _week_totals(monday: date) -> dict[str, int]:
+        rows = conn.execute(
+            f"""SELECT {', '.join(f'COALESCE(SUM({c}),0) AS {c}' for c in ROLLUP_COUNTERS)}
+                FROM books_compliance_funnel_aggregate
+                WHERE aggregate_date >= %s AND aggregate_date < %s""",
+            (monday, monday + timedelta(days=7)),
+        ).fetchone()
+        return {c: int(rows[c]) for c in ROLLUP_COUNTERS}
+
+    this_week = _week_totals(this_monday)
+    last_week = _week_totals(last_monday)
+    wow = {c: this_week[c] - last_week[c] for c in ROLLUP_COUNTERS}
+    return {
+        "week_start": this_monday.isoformat(),
+        "previous_week_start": last_monday.isoformat(),
+        "current_week_partial": ref < this_monday + timedelta(days=7),
+        "this_week": this_week,
+        "last_week": last_week,
+        "wow_delta": wow,
+    }
+
+
+def format_funnel_weekly_report(report: dict[str, Any]) -> str:
+    """Staff-facing text. States the partial-week caveat when the current week is open."""
+    lines = [
+        f"Books compliance funnel week of {report['week_start']}",
+        f"previous week {report['previous_week_start']}",
+    ]
+    if report.get("current_week_partial"):
+        lines.append("current week is partial; week-over-week deltas are raw sums, not like-for-like elapsed days")
+    for counter in ROLLUP_COUNTERS:
+        lines.append(
+            f"{counter}: this={report['this_week'][counter]} last={report['last_week'][counter]} delta={report['wow_delta'][counter]}"
+        )
+    return "\n".join(lines)
+
+
+def read_funnel_weekly_report(*, today: date | None = None) -> dict[str, Any]:
+    """Production read of the aggregate rollup. Does not touch per-visitor rows."""
+    with db() as conn:
+        report = funnel_weekly_rollup(conn, today=today)
+    report["report_text"] = format_funnel_weekly_report(report)
+    return report
 
 
 def _finalize_locked(conn: psycopg.Connection, digest: bytes, cause: Literal["submit", "expiry"], *, crash: str | None = None) -> dict[str, Any] | None:
@@ -334,16 +435,20 @@ def _finalize_locked(conn: psycopg.Connection, digest: bytes, cause: Literal["su
         return None
     submit = 1 if cause == "submit" else 0
     expiry = 1 if cause == "expiry" else 0
+    # VEN-264: intake_start aggregates at finalize like the other token-scoped
+    # signals — the boolean was set once at the first intake interaction.
+    intake_start = 1 if row["intake_started"] else 0
     conn.execute(
         """INSERT INTO books_compliance_funnel_aggregate
-           (aggregate_date,source,referrer,landing_count,pricing_count,submit_count,expiry_count)
-           VALUES (current_date,%s,%s,%s,%s,%s,%s)
+           (aggregate_date,source,referrer,landing_count,pricing_count,submit_count,expiry_count,intake_start_count)
+           VALUES (current_date,%s,%s,%s,%s,%s,%s,%s)
            ON CONFLICT (aggregate_date,source,referrer) DO UPDATE SET
              landing_count=books_compliance_funnel_aggregate.landing_count+EXCLUDED.landing_count,
              pricing_count=books_compliance_funnel_aggregate.pricing_count+EXCLUDED.pricing_count,
              submit_count=books_compliance_funnel_aggregate.submit_count+EXCLUDED.submit_count,
-             expiry_count=books_compliance_funnel_aggregate.expiry_count+EXCLUDED.expiry_count""",
-        (row["source"], row["referrer"], int(row["landing_seen"]), int(row["pricing_seen"]), submit, expiry),
+             expiry_count=books_compliance_funnel_aggregate.expiry_count+EXCLUDED.expiry_count,
+             intake_start_count=books_compliance_funnel_aggregate.intake_start_count+EXCLUDED.intake_start_count""",
+        (row["source"], row["referrer"], int(row["landing_seen"]), int(row["pricing_seen"]), submit, expiry, intake_start),
     )
     if crash == "before_delete":
         raise RuntimeError("VEN-194 crash-window fixture before delete")
