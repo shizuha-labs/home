@@ -872,8 +872,24 @@ export function nextSpokenSentences(buffer, alreadySpoken, { flushRemainder = fa
 
 /** Max automatic reconnects after a server/stream failure (not counting the first try). */
 export const VOICE_STREAM_MAX_RETRIES = 3
-/** Base backoff for stream retries; doubles each attempt (500 → 1000 → 2000 ms). */
-export const VOICE_STREAM_BASE_BACKOFF_MS = 500
+/** Base backoff for stream retries; doubles each attempt (2s → 4s → 8s).
+ * CTX-878: the pre-CON-296 storm retried at ~500 ms; the floor is now 2 s. */
+export const VOICE_STREAM_BASE_BACKOFF_MS = 2000
+/** CTX-878: cap the exponential growth so the last wait stays bounded. */
+export const VOICE_STREAM_BACKOFF_CAP_MS = 8000
+
+/**
+ * CTX-878: exponential backoff with ±20% jitter, capped. Pure + injectable RNG
+ * so regression tests can drive the schedule deterministically.
+ * @param {number} failed 1-based failed-attempt count
+ * @param {() => number} [rand] uniform [0,1) source
+ */
+export function streamBackoffDelayMs(failed, rand = Math.random) {
+  const raw = VOICE_STREAM_BASE_BACKOFF_MS * (2 ** (Math.max(1, failed) - 1))
+  const capped = Math.min(raw, VOICE_STREAM_BACKOFF_CAP_MS)
+  const r = Math.min(1, Math.max(0, Number(rand()) || 0))
+  return Math.round(capped * (0.8 + 0.4 * r))
+}
 
 const MIC_ERROR_MESSAGES = {
   no_mic: 'No microphone found. Connect a mic or type instead.',
@@ -987,7 +1003,8 @@ export function useVoiceConversation({ onUtterance } = {}) {
     // Still in the call — show connecting while we back off.
     setCallState('connecting')
     setCallError(null)
-    const delay = VOICE_STREAM_BASE_BACKOFF_MS * (2 ** (failed - 1))
+    // CTX-878: exponential backoff with ±20% jitter, capped at 8 s.
+    const delay = streamBackoffDelayMs(failed)
     if (retryTimerRef.current != null) window.clearTimeout(retryTimerRef.current)
     retryTimerRef.current = window.setTimeout(() => {
       retryTimerRef.current = null
