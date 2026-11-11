@@ -24,8 +24,31 @@ export function AuthProvider({ children }) {
   // Initialize auth state from localStorage
   useEffect(() => {
     const initAuth = async () => {
-      const accessToken = localStorage.getItem(ACCESS_TOKEN_KEY)
-      const storedUser = localStorage.getItem(USER_KEY)
+      let accessToken = localStorage.getItem(ACCESS_TOKEN_KEY)
+      let storedUser = localStorage.getItem(USER_KEY)
+
+      if (!(accessToken && storedUser)) {
+        // ID-93: bootstrap from the HttpOnly Shizuha-ID session cookies.
+        // localStorage alone leaves a fresh load (cleared site data, browser
+        // restart, non-page login) signed out despite valid cookies; this
+        // same-origin call lets the cookies seed the session, then the
+        // existing expiry/refresh path takes over.
+        try {
+          const response = await fetch('/id/api/auth/session-bootstrap/', {
+            credentials: 'include',
+          })
+          if (response.ok) {
+            const data = await response.json()
+            localStorage.setItem(ACCESS_TOKEN_KEY, data.tokens.access)
+            localStorage.setItem(REFRESH_TOKEN_KEY, data.tokens.refresh)
+            localStorage.setItem(USER_KEY, JSON.stringify(data.user))
+            accessToken = data.tokens.access
+            storedUser = JSON.stringify(data.user)
+          }
+        } catch {
+          // No/invalid cookies — genuinely signed out.
+        }
+      }
 
       if (accessToken && isAccessTokenExpired(accessToken)) {
         // Try a silent refresh before nuking the session — a valid refresh
