@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { getAccessToken, handleUnauthorized } from '../utils/auth'
+import { getAccessToken, handleUnauthorized, readAuthDenialClass } from '../utils/auth'
 import { usePageVisible } from './usePageVisible'
 
 // Match the Home summary's visible refresh cadence. Only the first read keeps
@@ -46,8 +46,18 @@ export function useHaneBalance({ refreshMs = 30000 } = {}) {
         const response = await fetch(endpoint, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal })
         if (!current()) return
         if (response.status === 401 || response.status === 403) {
+          // CON-486: "no Hane subject" rejects a VALID bearer per-request — a
+          // per-call denial, not session expiry. Show the purse stale and do
+          // not drop storage / redirect (CON-521). Any other 401 is the dead
+          // session path. 403 stays a denial and does not log out.
+          const denial = await readAuthDenialClass(response)
+          if (!current()) return
+          if (denial === 'hane-no-subject') {
+            setState({ token, stale: true, error: new Error('Hane purse unavailable') })
+            return
+          }
           setState({ token, denied: true })
-          handleUnauthorized(response)
+          if (response.status === 401) handleUnauthorized(response)
           return
         }
         if (response.status === 404) {
