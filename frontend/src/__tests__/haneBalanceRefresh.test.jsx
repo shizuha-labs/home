@@ -3,9 +3,15 @@ import { act, cleanup, render, renderHook, screen } from '@testing-library/react
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useHaneBalance } from '../hooks/useHaneBalance'
 import HaneChip from '../components/shared/HaneChip'
+import { handleUnauthorized } from '../utils/auth'
 
 vi.mock('../utils/auth', async (original) => ({ ...await original(), handleUnauthorized: vi.fn() }))
-const reply = (available, status = 200) => ({ status, ok: status < 400, json: async () => ({ available, fiat: { label: '$12.50' }, observed_at: '2026-09-23T12:00:00Z' }) })
+const reply = (available, status = 200, body) => {
+  const payload = body ?? { available, fiat: { label: '$12.50' }, observed_at: '2026-09-23T12:00:00Z' }
+  const response = { status, ok: status < 400, json: async () => payload }
+  response.clone = () => response
+  return response
+}
 const flush = () => act(async () => { await Promise.resolve(); await Promise.resolve() })
 const advance = (ms = 30000) => act(() => vi.advanceTimersByTimeAsync(ms))
 const deferred = () => { let resolve; const promise = new Promise((yes) => { resolve = yes }); return { promise, resolve } }
@@ -43,6 +49,21 @@ describe('Hane real component refresh sequence', () => {
     await advance()
     expect(screen.getByRole('link')).toHaveAttribute('data-balance-state', 'ok')
     expect(screen.getByRole('link').title).toContain('20 Hane')
+  })
+
+  it('keeps a signed-in user on the page when 401 is no Hane subject', async () => {
+    fetch.mockResolvedValueOnce(reply(12.5)).mockResolvedValueOnce(reply(null, 401, { error: 'no Hane subject' }))
+    render(<HaneChip />); await flush(); await advance()
+    expect(handleUnauthorized).not.toHaveBeenCalled()
+    expect(screen.getByRole('link')).toHaveAttribute('data-balance-state', 'stale')
+    expect(localStorage.getItem('shizuha_access_token')).toBe('hane-session-a')
+  })
+
+  it('still logs out on a 401 that is not a missing Hane subject', async () => {
+    fetch.mockResolvedValueOnce(reply(12.5)).mockResolvedValueOnce(reply(null, 401, { detail: 'Authentication credentials were not provided.' }))
+    render(<HaneChip />); await flush(); await advance()
+    expect(handleUnauthorized).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('link')).toHaveAttribute('data-balance-state', 'denied')
   })
 
   it.each([401, 403])('clears the prior balance on %s and never restores it after a later outage', async (status) => {

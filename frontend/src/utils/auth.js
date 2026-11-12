@@ -156,3 +156,25 @@ export function handleUnauthorized(response) {
   }
   return false
 }
+
+/**
+ * Classify a 401/403 response by its body before any session-expiry side
+ * effect. CON-486: the /v1/hane projection rejects VALID bearers per-request
+ * with detail "no Hane subject" (e.g. the projection has no subject for the
+ * caller yet). That is a per-request auth denial, NOT a dead session — it
+ * must not drop storage or bounce the browser to /id/login (CON-521).
+ * Returns 'hane-no-subject' for the per-request class, 'session' when the
+ * body proves session invalidation, 'other' otherwise (session-lane default).
+ */
+export async function readAuthDenialClass(response) {
+  try {
+    const body = await response.clone().json()
+    const parts = [body?.detail, body?.error].filter((part) => typeof part === 'string')
+    const detail = parts.join(' ').toLowerCase()
+    if (detail.includes('no hane subject')) return 'hane-no-subject'
+    if (detail.includes('invalid token') || detail.includes('token invalidated')) return 'session'
+    return 'other'
+  } catch {
+    return 'other'
+  }
+}
