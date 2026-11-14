@@ -641,7 +641,14 @@ jobs:
 
             kubectl logs -n build "job/ci-build-home-frontend-${SHORT}-${ARCH}-try1" \
               --all-containers --tail=200 >"${FIRST_LOG}" 2>&1 || true
-            if ! grep -Eq 'failed to get filesystem from image: unexpected EOF|npm error code ETIMEDOUT|npm error network|ETIMEDOUT' "${FIRST_LOG}"; then
+            # PLAT-13432 (2nd lap): the phantom-cache-hit face must also
+            # engage the purge+retry path. Signature: kaniko claims
+            # "Found cached layer" but the next stage lstats a path that
+            # was never materialized ("failed to get fileinfo for
+            # /kaniko/...: no such file or directory") — the cache tag
+            # resolves while its blob content is absent (pruned/never-
+            # completed), so extraction yields an empty filesystem.
+            if ! grep -Eq 'failed to get filesystem from image: unexpected EOF|npm error code ETIMEDOUT|npm error network|ETIMEDOUT|failed to get fileinfo for /kaniko/[^:]*: lstat /kaniko/[^:]*: no such file or directory' "${FIRST_LOG}"; then
               echo "::error::kaniko frontend ${ARCH} build failed with a non-retryable error"
               cat "${FIRST_LOG}"
               return 1
@@ -658,12 +665,18 @@ jobs:
             # tags literally named in the try1 log are deleted; a registry
             # with deletes disabled (405) warns and keeps the manual-purge
             # pointer. Purge failure NEVER fails the build.
-            if grep -q 'failed to get filesystem from image: unexpected EOF' "${FIRST_LOG}"; then
+            if grep -Eq 'failed to get filesystem from image: unexpected EOF|failed to get fileinfo for /kaniko/' "${FIRST_LOG}"; then
               echo "::warning::PLAT-13432 cache-corruption face on ${ARCH} — purging referenced kaniko-cache tags"
+              # PLAT-13432 (2nd lap): the live cache namespace is GEOM2 since
+              # the PLAT-13414 cache-bust — the purge pod previously aimed at
+              # the pre-bust repo (home-deploy-frontend-${ARCH}) and never
+              # touched the namespace kaniko actually reads, which is why the
+              # cure read as "not durable". Keep this repo string in lockstep
+              # with the --cache-repo flag in render_build_job above.
               kubectl -n build run "ci-cache-purge-${SHORT}-${ARCH}" \
                 --image=curlimages/curl:8.9.1 --restart=Never --rm -i --quiet \
                 --command -- /bin/sh -exc "
-                  CACHE_REPO=\"kaniko-cache/home-deploy-frontend-${ARCH}\"
+                  CACHE_REPO=\"kaniko-cache/home-deploy-frontend-geom2-${ARCH}\"
                   ENDPOINT=\"http://registry.registry.svc.cluster.local:5000/v2/\${CACHE_REPO}\"
                   TAGS=\$(curl -s \"\${ENDPOINT}/tags/list\" | tr ',' '\\n' | sed 's/.*\"\\([0-9a-f][0-9a-f-]*\\)\".*/\\1/')
                   for TAG in \${TAGS}; do
