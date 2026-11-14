@@ -151,6 +151,14 @@ export async function refreshSession() {
 
 export function handleUnauthorized(response) {
   if (response?.status === 401) {
+    // CON-530: the authenticated shell mounts on `/` and its widgets
+    // (connection requests, activity, balance) 401 for a session ID just
+    // wrote. Expiring here deletes that token and assigns
+    // /id/login?continue=%2F, which logs in again and loops. A widget 401
+    // on the public landing must not clear the session. Protected routes
+    // still redirect.
+    const path = window.location?.pathname || ''
+    if (path === '/' || path === '') return false
     expireSessionAndRedirect()
     return true
   }

@@ -1,11 +1,36 @@
-import { describe, expect, it } from 'vitest'
-import { mergeSessionUser, resolveCurrentUserId, userFromAccessToken } from './auth'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { handleUnauthorized, mergeSessionUser, resolveCurrentUserId, userFromAccessToken } from './auth'
 
 function fakeJwt(payload) {
   const json = JSON.stringify(payload)
   const b64 = btoa(json).replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_')
   return `hdr.${b64}.sig`
 }
+
+describe('handleUnauthorized on the public landing', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    localStorage.clear()
+  })
+
+  it('does not clear the session or navigate when a widget 401s on /', () => {
+    localStorage.setItem('shizuha_access_token', 'live-token')
+    vi.stubGlobal('location', { pathname: '/', search: '', hash: '', assign: vi.fn() })
+    const navigated = handleUnauthorized({ status: 401 })
+    expect(navigated).toBe(false)
+    expect(localStorage.getItem('shizuha_access_token')).toBe('live-token')
+    expect(window.location.assign).not.toHaveBeenCalled()
+  })
+
+  it('still expires and redirects when a protected route 401s', () => {
+    localStorage.setItem('shizuha_access_token', 'live-token')
+    const assign = vi.fn()
+    vi.stubGlobal('location', { pathname: '/c/1', search: '', hash: '', assign })
+    expect(handleUnauthorized({ status: 401 })).toBe(true)
+    expect(localStorage.getItem('shizuha_access_token')).toBeNull()
+    expect(assign).toHaveBeenCalledWith('/id/login?continue=%2Fc%2F1')
+  })
+})
 
 describe('session user from ID JWT', () => {
   it('returns null when there is no access token (logged-out public pages)', () => {
