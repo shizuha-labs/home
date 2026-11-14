@@ -647,6 +647,39 @@ jobs:
               return 1
             fi
 
+            # PLAT-13432 durable cure: on the kaniko cache-corruption face
+            # ("failed to get filesystem from image: unexpected EOF"), the
+            # cached layer entry in kaniko-cache/home-deploy-frontend-${ARCH}
+            # is corrupt (manifest references a truncated/missing blob). The
+            # cache-disabled retry below succeeds but LEAVES the bad entry, so
+            # every later cached build re-hits it — the "purge cure not
+            # durable" recurrence. Purge the referenced cache tags here so the
+            # next cached build re-warms clean. Best-effort + bounded: only
+            # tags literally named in the try1 log are deleted; a registry
+            # with deletes disabled (405) warns and keeps the manual-purge
+            # pointer. Purge failure NEVER fails the build.
+            if grep -q 'failed to get filesystem from image: unexpected EOF' "${FIRST_LOG}"; then
+              echo "::warning::PLAT-13432 cache-corruption face on ${ARCH} — purging referenced kaniko-cache tags"
+              kubectl -n build run "ci-cache-purge-${SHORT}-${ARCH}" \
+                --image=curlimages/curl:8.9.1 --restart=Never --rm -i --quiet \
+                --command -- /bin/sh -exc "
+                  CACHE_REPO=\"kaniko-cache/home-deploy-frontend-${ARCH}\"
+                  ENDPOINT=\"http://registry.registry.svc.cluster.local:5000/v2/\${CACHE_REPO}\"
+                  TAGS=\$(curl -s \"\${ENDPOINT}/tags/list\" | tr ',' '\\n' | sed 's/.*\"\\([0-9a-f][0-9a-f-]*\\)\".*/\\1/')
+                  for TAG in \${TAGS}; do
+                    grep -q \"\${TAG}\" \"${FIRST_LOG}\" || continue
+                    DIGEST=\$(curl -sI -H 'Accept: application/vnd.docker.distribution.manifest.v2+json' \"\${ENDPOINT}/manifests/\${TAG}\" | tr -d '\\r' | sed -n 's/^[Dd]ocker-[Cc]ontent-[Dd]igest: //p')
+                    [ -n \"\${DIGEST}\" ] || continue
+                    RC=\$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \"\${ENDPOINT}/manifests/\${DIGEST}\")
+                    case \"\${RC}\" in
+                      202|200) echo \"purged cache tag \${TAG}\" ;;
+                      405) echo \"::warning::registry deletes disabled (405) — PLAT-13432 purge remains manual for \${TAG}\"; break ;;
+                      *) echo \"::warning::cache purge \${TAG} -> HTTP \${RC} (non-fatal)\" ;;
+                    esac
+                  done
+                " >/dev/null 2>&1 || echo "::warning::PLAT-13432 cache-purge pod failed (non-fatal; manual purge may be needed)"
+            fi
+
             echo "::warning::kaniko frontend ${ARCH} hit a transient cache/network error; retrying once with cache disabled"
             cat "${FIRST_LOG}"
             render_build_job "${ARCH}" 2 false | kubectl apply -f -
