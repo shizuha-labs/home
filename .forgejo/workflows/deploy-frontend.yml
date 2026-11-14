@@ -568,7 +568,18 @@ jobs:
                       - --build-arg=VITE_HOME_OPERATOR_AGENT=${HOME_OPERATOR_AGENT}
                       - --build-arg=PREV_FRONTEND_IMAGE=${PREV_FRONTEND_IMAGE}
                       - --cache=${CACHE_ENABLED}
-                      - --cache-repo=${REG}/kaniko-cache/home-deploy-frontend-${ARCH}
+                      # PLAT-13414 cache-bust: the entries in
+                      # home-deploy-frontend-{amd64,arm64} pushed ~16:54Z on
+                      # 2026-11-11 extract to an EMPTY workdir when the kaniko
+                      # unpack boundary consumes them (runs 926/927/929 all
+                      # ENOENT on package.json after "Found cached layer",
+                      # while run 925 built the same SHA green when the unpack
+                      # boundary forced real COPY re-execution). Registry-side
+                      # purge is devops-gated; a fresh cache namespace forces
+                      # the same cold rebuild self-serve and repopulates clean.
+                      # Revert the suffix once devops confirms the old repos
+                      # are purged or the entries expire (ttl 336h).
+                      - --cache-repo=${REG}/kaniko-cache/home-deploy-frontend-geom2-${ARCH}
                       - --cache-copy-layers=${CACHE_ENABLED}
                       - --cache-ttl=336h
                       - --compressed-caching=false
