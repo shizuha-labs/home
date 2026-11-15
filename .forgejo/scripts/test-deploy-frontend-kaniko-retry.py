@@ -30,6 +30,16 @@ def main() -> None:
     # PLAT-13720: cached COPY layer restoring an empty workdir surfaces as a
     # builder-stage npm ENOENT on package.json — retryable cache-corruption face.
     require("npm error code ENOENT")
+    # PLAT-13720 follow-up (run 983): npm emits the errno-NAME form
+    # ('npm error enoent Could not read package.json: Error: ENOENT: ...'),
+    # not 'npm error code ENOENT' — the route must match the shape the
+    # builder actually prints, or the purge+retry never fires.
+    require("npm error enoent")
+
+    # PLAT-13720 (run 986): the BackoffLimitExceeded fast-fail must not skip
+    # classification — require the retryable-signature grep to be consulted
+    # before any scheduling-failure bailout.
+    require("no retryable signature in the pod log")
     require("retrying once with cache disabled")
     require("cache-disabled retry failed")
     require("--cache=${CACHE_ENABLED}")
