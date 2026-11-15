@@ -637,10 +637,21 @@ jobs:
             local WAIT_RC=0
             wait_job "${ARCH}" 1 || WAIT_RC=$?
             if [ "$WAIT_RC" -eq 0 ]; then return 0; fi
-            if [ "$WAIT_RC" -eq 70 ]; then return "$WAIT_RC"; fi
-
+            # PLAT-13720 (run 986): a cache-corruption face that exhausts the
+            # Job's own backoff (corrupt cached npm ci layer failing both
+            # pods -> BackoffLimitExceeded) previously short-circuited BEFORE
+            # log classification — the purge+retry route never ran even when
+            # the pod log carried a retryable signature. On the scheduling
+            # fast-fail, still fetch the pod log and classify: retryable
+            # signatures below engage purge+try2; only a signature-less log
+            # bails out as scheduling-failed.
             kubectl logs -n build "job/ci-build-home-frontend-${SHORT}-${ARCH}-try1" \
               --all-containers --tail=200 >"${FIRST_LOG}" 2>&1 || true
+            if [ "$WAIT_RC" -eq 70 ] && ! grep -Eq 'failed to get filesystem from image: unexpected EOF|npm error code ETIMEDOUT|npm error network|ETIMEDOUT|failed to get fileinfo for /kaniko/[^:]*: lstat /kaniko/[^:]*: no such file or directory|npm error code ENOENT|npm error enoent|Error: ENOENT: no such file or directory' "${FIRST_LOG}"; then
+              echo "::error::build job hit BackoffLimitExceeded with no retryable signature in the pod log"
+              cat "${FIRST_LOG}"
+              return "$WAIT_RC"
+            fi
             # PLAT-13432 (2nd lap): the phantom-cache-hit face must also
             # engage the purge+retry path. Signature: kaniko claims
             # "Found cached layer" but the next stage lstats a path that
@@ -648,7 +659,7 @@ jobs:
             # /kaniko/...: no such file or directory") — the cache tag
             # resolves while its blob content is absent (pruned/never-
             # completed), so extraction yields an empty filesystem.
-            if ! grep -Eq 'failed to get filesystem from image: unexpected EOF|npm error code ETIMEDOUT|npm error network|ETIMEDOUT|failed to get fileinfo for /kaniko/[^:]*: lstat /kaniko/[^:]*: no such file or directory|npm error code ENOENT' "${FIRST_LOG}"; then
+            if ! grep -Eq 'failed to get filesystem from image: unexpected EOF|npm error code ETIMEDOUT|npm error network|ETIMEDOUT|failed to get fileinfo for /kaniko/[^:]*: lstat /kaniko/[^:]*: no such file or directory|npm error code ENOENT|npm error enoent|Error: ENOENT: no such file or directory' "${FIRST_LOG}"; then
               # PLAT-13720: the ENOENT face is a cached COPY layer whose
               # extraction left the workdir empty ("Found cached layer,
               # extracting to filesystem" followed by npm ENOENT on
@@ -672,7 +683,7 @@ jobs:
             # tags literally named in the try1 log are deleted; a registry
             # with deletes disabled (405) warns and keeps the manual-purge
             # pointer. Purge failure NEVER fails the build.
-            if grep -Eq 'failed to get filesystem from image: unexpected EOF|failed to get fileinfo for /kaniko/|npm error code ENOENT' "${FIRST_LOG}"; then
+            if grep -Eq 'failed to get filesystem from image: unexpected EOF|failed to get fileinfo for /kaniko/|npm error code ENOENT|npm error enoent|Error: ENOENT: no such file or directory' "${FIRST_LOG}"; then
               echo "::warning::PLAT-13432 cache-corruption face on ${ARCH} — purging referenced kaniko-cache tags"
               # PLAT-13432 (2nd lap): the live cache namespace is GEOM2 since
               # the PLAT-13414 cache-bust — the purge pod previously aimed at
