@@ -648,7 +648,14 @@ jobs:
             # /kaniko/...: no such file or directory") — the cache tag
             # resolves while its blob content is absent (pruned/never-
             # completed), so extraction yields an empty filesystem.
-            if ! grep -Eq 'failed to get filesystem from image: unexpected EOF|npm error code ETIMEDOUT|npm error network|ETIMEDOUT|failed to get fileinfo for /kaniko/[^:]*: lstat /kaniko/[^:]*: no such file or directory' "${FIRST_LOG}"; then
+            if ! grep -Eq 'failed to get filesystem from image: unexpected EOF|npm error code ETIMEDOUT|npm error network|ETIMEDOUT|failed to get fileinfo for /kaniko/[^:]*: lstat /kaniko/[^:]*: no such file or directory|npm error code ENOENT' "${FIRST_LOG}"; then
+              # PLAT-13720: the ENOENT face is a cached COPY layer whose
+              # extraction left the workdir empty ("Found cached layer,
+              # extracting to filesystem" followed by npm ENOENT on
+              # package.json at the builder WORKDIR). The repo cannot lose
+              # package.json silently past the quality job's npm ci, so a
+              # builder-stage ENOENT is cache corruption, not content —
+              # purge + cache-disabled retry is the correct response.
               echo "::error::kaniko frontend ${ARCH} build failed with a non-retryable error"
               cat "${FIRST_LOG}"
               return 1
@@ -665,7 +672,7 @@ jobs:
             # tags literally named in the try1 log are deleted; a registry
             # with deletes disabled (405) warns and keeps the manual-purge
             # pointer. Purge failure NEVER fails the build.
-            if grep -Eq 'failed to get filesystem from image: unexpected EOF|failed to get fileinfo for /kaniko/' "${FIRST_LOG}"; then
+            if grep -Eq 'failed to get filesystem from image: unexpected EOF|failed to get fileinfo for /kaniko/|npm error code ENOENT' "${FIRST_LOG}"; then
               echo "::warning::PLAT-13432 cache-corruption face on ${ARCH} — purging referenced kaniko-cache tags"
               # PLAT-13432 (2nd lap): the live cache namespace is GEOM2 since
               # the PLAT-13414 cache-bust — the purge pod previously aimed at
