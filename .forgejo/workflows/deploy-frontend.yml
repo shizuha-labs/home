@@ -568,11 +568,24 @@ jobs:
                       # dir:///workspace/src, so the arg must be the path that
                       # exists. "shizuha-home" resolved to a missing directory
                       # and npm died on package.json (exit 254).
+                      # CON-533 correction (kei, 2026-11-17): kaniko resolves
+                      # COPY paths relative to the context root
+                      # dir:///workspace/src, so the arg must be
+                      # "shizuha-home" (context-relative). The CON-533 value
+                      # "src/shizuha-home" made kaniko probe
+                      # /workspace/src/src/shizuha-home/frontend/package.json
+                      # and lstat-fail (no such file) in both arch jobs
+                      # (BackoffLimitExceeded, signature-less). The clone has
+                      # landed at /workspace/src/shizuha-home since 2f30ca6
+                      # (2026-07-02) and frontend/package.json existed at the
+                      # repo root even at f36fdc6 — the CON-533 "missing
+                      # directory" model was wrong; the exit-254 npm failure
+                      # it chased had another cause.
                       # Do not name the build arg as a shell variable in this
                       # comment. The block is an unquoted heredoc, so a bare
                       # reference aborts the step with "unbound variable"
                       # before kubectl runs (PLAT-13840, run 1004).
-                      - --build-arg=FRONTEND_PATH=src/shizuha-home
+                      - --build-arg=FRONTEND_PATH=shizuha-home
                       - --build-arg=VITE_HOME_OPERATOR_USER_IDS=${HOME_OPERATOR_USER_IDS}
                       - --build-arg=VITE_HOME_OPERATOR_AGENT=${HOME_OPERATOR_AGENT}
                       - --build-arg=PREV_FRONTEND_IMAGE=${PREV_FRONTEND_IMAGE}
