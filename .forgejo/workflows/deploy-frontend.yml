@@ -27,7 +27,7 @@ concurrency:
   cancel-in-progress: true
 env:
   # Qualified shared-package source; update only with a reviewed lock cohort.
-  HOME_FRONTEND_PACKAGES_COMMIT: dfab6a329b9fc37edec745c516109bfac2a3f722
+  HOME_FRONTEND_PACKAGES_COMMIT: 437b1a988f5f5b3db1f02776da909d85c296a7ec
 jobs:
   quality:
     runs-on: ubuntu-latest
